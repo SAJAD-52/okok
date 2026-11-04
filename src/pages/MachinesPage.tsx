@@ -1,348 +1,461 @@
-import React, { useState } from 'react';
+// ============================================================================
+// JADIJCB: Machines & Spare Parts CRUD Management Page
+// ============================================================================
+
+import React, { useState, useEffect } from 'react';
 import {
   Plus,
+  Search,
+  Filter,
+  Edit2,
   Trash2,
-  Edit3,
-  ExternalLink,
-  MapPin,
-  CheckCircle,
+  Eye,
+  EyeOff,
   Truck,
   Wrench,
-  Search,
+  Tag,
+  MapPin,
+  CheckCircle2,
+  AlertCircle,
+  Clock,
+  Layers,
 } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
-import { Modal } from '../components/ui/Modal';
 import { Input } from '../components/ui/Input';
-import { Select } from '../components/ui/Select';
 import { toast } from '../components/ui/Toast';
 import { useLanguage } from '../hooks/useLanguage';
+import { useAuth } from '../hooks/useAuth';
+import { Machine, ListingMode } from '../types/database';
 import { MOCK_MACHINES } from '../data/mockData';
-import { EQUIPMENT_CATEGORIES } from '../data/categories';
-import { MOROCCAN_CITIES, getCityById } from '../data/cities';
 import { formatPriceMAD } from '../data/rentalTerms';
-import { Machine, MachineStatus } from '../types/database';
+import { MachineStepperModal } from '../components/machines/MachineStepperModal';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 export const MachinesPage: React.FC = () => {
   const { t, lang } = useLanguage();
-  const [machines, setMachines] = useState<Machine[]>(MOCK_MACHINES.slice(0, 4));
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const { user } = useAuth();
 
-  // Form State
-  const [titleAr, setTitleAr] = useState('');
-  const [titleFr, setTitleFr] = useState('');
-  const [categoryId, setCategoryId] = useState('loader');
-  const [brand, setBrand] = useState('JCB');
-  const [model, setModel] = useState('3CX Eco');
-  const [year, setYear] = useState(2023);
-  const [cityId, setCityId] = useState('casablanca');
-  const [rateDaily, setRateDaily] = useState(2500);
-  const [rateHourly, setRateHourly] = useState(400);
-  const [rateWeekly, setRateWeekly] = useState(15000);
-  const [withOperator, setWithOperator] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
+  const [machines, setMachines] = useState<Machine[]>(MOCK_MACHINES);
+  const [activeFilter, setActiveFilter] = useState<'all' | 'rent' | 'sale' | 'spare'>('all');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedMachineToEdit, setSelectedMachineToEdit] = useState<Machine | null>(null);
+  const [isStepperOpen, setIsStepperOpen] = useState(false);
 
-  const handleAddMachine = (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSaving(true);
+  // Fetch live machines from Supabase if connected
+  useEffect(() => {
+    async function loadMachines() {
+      if (!isSupabaseConfigured || !user?.id) return;
 
-    setTimeout(() => {
-      const newMachine: Machine = {
-        id: `mach_${Date.now()}`,
-        owner_id: 'user_1',
-        title_ar: titleAr || `جرافة ${brand} ${model} بحالة ممتازة`,
-        title_fr: titleFr || `${brand} ${model} en excellent état`,
-        description_ar: 'آلية بحالة جيدة جداً جاهزة للعمل في الأوراش',
-        description_fr: 'Machine en parfait état de fonctionnement prête pour vos chantiers',
-        category_id: categoryId,
-        brand,
-        model,
-        year: Number(year),
-        condition: 'excellent',
-        city_id: cityId,
-        location_lat: 33.5731,
-        location_lng: -7.5898,
-        rate_hourly: Number(rateHourly),
-        rate_daily: Number(rateDaily),
-        rate_weekly: Number(rateWeekly),
-        currency: 'MAD',
-        with_operator: withOperator,
-        fuel_included: false,
-        delivery_available: true,
-        status: 'available',
-        images: [
-          'https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=800&auto=format&fit=crop',
-        ],
-        specs: {
-          operating_weight_ton: 8.5,
-          bucket_capacity_m3: 1.0,
-          engine_power_hp: 95,
-          fuel_type: 'diesel',
-        },
-        views_count: 1,
-        rating_avg: 5.0,
-        reviews_count: 0,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
+      try {
+        const { data, error } = await supabase
+          .from('machines')
+          .select('*')
+          .eq('owner_id', user.id)
+          .order('created_at', { ascending: false });
 
-      setMachines([newMachine, ...machines]);
-      setIsSaving(false);
-      setIsAddModalOpen(false);
-      toast.success(
-        lang === 'fr'
-          ? 'Engin ajouté à votre parc avec succès !'
-          : 'تمت إضافة الآلية إلى أسطولك بنجاح!'
-      );
-    }, 500);
-  };
+        if (!error && data && data.length > 0) {
+          const mapped: Machine[] = data.map((m: any) => ({
+            id: m.id,
+            owner_id: m.owner_id,
+            title_ar: m.title_ar,
+            title_fr: m.title_fr,
+            description_ar: m.description_ar,
+            description_fr: m.description_fr,
+            category: m.category,
+            category_id: m.category,
+            brand: m.brand,
+            model: m.model,
+            year: m.year,
+            listing_mode: m.listing_mode,
+            condition: m.condition === 'new' ? 'new' : 'good',
+            city: m.city,
+            city_id: m.city,
+            lat: m.lat,
+            lng: m.lng,
+            location_lat: m.lat,
+            location_lng: m.lng,
+            rate_hourly: Number(m.hourly_rate) || 0,
+            rate_daily: Number(m.daily_rate) || 0,
+            rate_weekly: Number(m.weekly_rate) || 0,
+            hourly_rate: Number(m.hourly_rate) || 0,
+            daily_rate: Number(m.daily_rate) || 0,
+            weekly_rate: Number(m.weekly_rate) || 0,
+            sale_price: Number(m.sale_price) || 0,
+            currency: 'MAD',
+            with_operator: Boolean(m.with_operator),
+            fuel_included: Boolean(m.fuel_included),
+            delivery_available: Boolean(m.delivery_available),
+            status: m.is_published ? 'available' : 'inactive',
+            is_published: m.is_published,
+            images: m.images || [],
+            specs: {
+              operating_weight_ton: 8.5,
+              engine_power_hp: 92,
+              bucket_capacity_m3: 1.0,
+            },
+            views_count: m.views_count || 0,
+            rating_avg: 5.0,
+            reviews_count: 0,
+            created_at: m.created_at,
+            updated_at: m.created_at,
+          }));
 
-  const handleToggleStatus = (id: string, newStatus: MachineStatus) => {
-    setMachines((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, status: newStatus } : m))
-    );
-    toast.info(lang === 'fr' ? 'Statut mis à jour' : 'تم تحديث حالة الآلية');
-  };
-
-  const handleDeleteMachine = (id: string) => {
-    if (confirm(lang === 'fr' ? 'Supprimer cet engin ?' : 'هل أنت متأكد من حذف الآلية؟')) {
-      setMachines((prev) => prev.filter((m) => m.id !== id));
-      toast.success(lang === 'fr' ? 'Engin supprimé' : 'تم حذف الآلية');
+          setMachines(mapped);
+        }
+      } catch (err) {
+        console.warn('Machine load notice:', err);
+      }
     }
+
+    loadMachines();
+  }, [user]);
+
+  const handleOpenAdd = () => {
+    setSelectedMachineToEdit(null);
+    setIsStepperOpen(true);
   };
+
+  const handleOpenEdit = (machine: Machine) => {
+    setSelectedMachineToEdit(machine);
+    setIsStepperOpen(true);
+  };
+
+  const handleSaveMachine = (saved: Machine) => {
+    setMachines((prev) => {
+      const exists = prev.some((m) => m.id === saved.id);
+      if (exists) {
+        return prev.map((m) => (m.id === saved.id ? saved : m));
+      }
+      return [saved, ...prev];
+    });
+  };
+
+  const handleTogglePublish = async (id: string, currentStatus: boolean) => {
+    const newStatus = !currentStatus;
+
+    if (isSupabaseConfigured) {
+      try {
+        await supabase
+          .from('machines')
+          .update({ is_published: newStatus })
+          .eq('id', id);
+      } catch (err) {
+        console.warn('Publish toggle notice:', err);
+      }
+    }
+
+    setMachines((prev) =>
+      prev.map((m) =>
+        m.id === id
+          ? {
+              ...m,
+              is_published: newStatus,
+              status: newStatus ? 'available' : 'inactive',
+            }
+          : m
+      )
+    );
+
+    toast.success(
+      lang === 'fr'
+        ? newStatus
+          ? 'Annonce publiée sur la marketplace'
+          : 'Annonce masquée de la marketplace'
+        : newStatus
+        ? 'تم نشر الآلية في السوق بنجاح'
+        : 'تم إلغاء نشر الآلية من السوق'
+    );
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!window.confirm(t('machines.delete_confirm'))) return;
+
+    if (isSupabaseConfigured) {
+      try {
+        await supabase.from('machines').delete().eq('id', id);
+      } catch (err) {
+        console.warn('Delete machine notice:', err);
+      }
+    }
+
+    setMachines((prev) => prev.filter((m) => m.id !== id));
+    toast.success(
+      lang === 'fr' ? 'Engin supprimé du parc' : 'تم حذف الآلية من الأسطول'
+    );
+  };
+
+  // Filtered Machines
+  const filteredMachines = machines.filter((item) => {
+    const isSpare = item.category_id === 'spare-parts' || item.category === 'spare-parts';
+
+    if (activeFilter === 'rent' && (item.listing_mode === 'sale' || isSpare)) return false;
+    if (activeFilter === 'sale' && (item.listing_mode === 'rent' || isSpare)) return false;
+    if (activeFilter === 'spare' && !isSpare) return false;
+
+    if (!searchTerm.trim()) return true;
+
+    const term = searchTerm.toLowerCase();
+    const title = (item.title_ar + ' ' + item.title_fr + ' ' + item.brand + ' ' + item.model).toLowerCase();
+    return title.includes(term);
+  });
 
   return (
     <div className="space-y-6 text-start">
-      {/* Header Bar */}
+      {/* Header with Title and Add CTA */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl sm:text-2xl font-extrabold text-ink">
-            {t('dashboard.my_fleet')}
+          <h1 className="text-xl sm:text-2xl font-black text-ink">
+            {t('machines.manage_title')}
           </h1>
           <p className="text-xs text-steel-500 mt-1">
-            {lang === 'fr'
-              ? 'Gérez vos engins, leurs disponibilités et grilles tarifaires'
-              : 'إدارة وتحديث آليات أسطولك، حالتها التشغيلية وأسعار الكراء'}
+            {t('machines.manage_subtitle')}
           </p>
         </div>
 
         <Button
+          type="button"
           variant="primary"
           size="md"
-          onClick={() => setIsAddModalOpen(true)}
+          onClick={handleOpenAdd}
           leftIcon={<Plus className="w-4 h-4" />}
-          className="font-bold self-start sm:self-auto"
+          className="font-black shadow-md min-h-[44px]"
         >
-          {t('dashboard.quick_add_machine')}
+          {t('machines.add_machine')}
         </Button>
       </div>
 
-      {/* Fleet Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        {machines.map((machine) => {
-          const city = getCityById(machine.city_id);
+      {/* Filters Toolbar */}
+      <Card className="p-4 bg-white border border-steel-200">
+        <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
+          {/* Search bar */}
+          <div className="relative flex-1 w-full">
+            <input
+              type="text"
+              placeholder={
+                lang === 'fr'
+                  ? 'Rechercher par marque, modèle (JCB, CAT...)...'
+                  : 'بحث بالماركة، الموديل أو العنوان...'
+              }
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full ps-10 pe-4 py-2.5 rounded-xl border border-steel-300 text-xs focus:outline-none focus:ring-2 focus:ring-primary bg-surface"
+            />
+            <Search className="w-4 h-4 text-steel-400 absolute start-3 top-3" />
+          </div>
 
-          return (
-            <Card key={machine.id} className="p-5 flex flex-col justify-between">
-              <div className="flex items-start gap-4">
-                <div className="w-24 h-20 rounded-xl overflow-hidden bg-steel-100 shrink-0">
-                  <img
-                    src={machine.images[0]}
-                    alt={lang === 'fr' ? machine.title_fr : machine.title_ar}
-                    className="w-full h-full object-cover"
-                  />
-                </div>
+          {/* Mode/Category Filter Chips */}
+          <div className="flex items-center gap-1.5 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
+            <button
+              type="button"
+              onClick={() => setActiveFilter('all')}
+              className={`px-3 py-2 rounded-xl text-xs font-bold transition-all min-h-[40px] whitespace-nowrap cursor-pointer ${
+                activeFilter === 'all'
+                  ? 'bg-ink text-white'
+                  : 'bg-steel-100 text-steel-600 hover:bg-steel-200'
+              }`}
+            >
+              {t('machines.filter_all')}
+            </button>
 
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Badge variant="primary" size="sm">
-                      {machine.brand}
-                    </Badge>
-                    <Badge
-                      variant={
-                        machine.status === 'available'
-                          ? 'success'
-                          : machine.status === 'rented'
-                          ? 'warning'
-                          : 'neutral'
-                      }
-                      size="sm"
+            <button
+              type="button"
+              onClick={() => setActiveFilter('rent')}
+              className={`px-3 py-2 rounded-xl text-xs font-bold transition-all min-h-[40px] whitespace-nowrap cursor-pointer ${
+                activeFilter === 'rent'
+                  ? 'bg-primary text-ink shadow-sm'
+                  : 'bg-steel-100 text-steel-600 hover:bg-steel-200'
+              }`}
+            >
+              {t('machines.filter_rent')}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveFilter('sale')}
+              className={`px-3 py-2 rounded-xl text-xs font-bold transition-all min-h-[40px] whitespace-nowrap cursor-pointer ${
+                activeFilter === 'sale'
+                  ? 'bg-primary text-ink shadow-sm'
+                  : 'bg-steel-100 text-steel-600 hover:bg-steel-200'
+              }`}
+            >
+              {t('machines.filter_sale')}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveFilter('spare')}
+              className={`px-3 py-2 rounded-xl text-xs font-bold transition-all min-h-[40px] whitespace-nowrap cursor-pointer ${
+                activeFilter === 'spare'
+                  ? 'bg-primary text-ink shadow-sm'
+                  : 'bg-steel-100 text-steel-600 hover:bg-steel-200'
+              }`}
+            >
+              {t('machines.filter_spare')}
+            </button>
+          </div>
+        </div>
+      </Card>
+
+      {/* Machines List */}
+      <div className="space-y-3">
+        {filteredMachines.length === 0 ? (
+          <Card className="p-10 text-center bg-white border border-steel-200">
+            <Truck className="w-12 h-12 text-steel-300 mx-auto mb-2" />
+            <h3 className="text-sm font-bold text-ink mb-1">
+              {lang === 'fr' ? 'Aucun engin trouvé' : 'لم يتم العثور على آليات'}
+            </h3>
+            <p className="text-xs text-steel-500 mb-4">
+              {lang === 'fr'
+                ? 'Ajoutez votre première machine pour commencer à recevoir des demandes'
+                : 'أضف أول آلية في أسطولك لبدء استقبال طلبات الكراء والشراء'}
+            </p>
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              onClick={handleOpenAdd}
+              leftIcon={<Plus className="w-4 h-4" />}
+              className="font-bold"
+            >
+              {t('machines.add_machine')}
+            </Button>
+          </Card>
+        ) : (
+          filteredMachines.map((machine) => {
+            const isSpare =
+              machine.category_id === 'spare-parts' || machine.category === 'spare-parts';
+            const isPublished = machine.is_published !== false;
+
+            return (
+              <Card
+                key={machine.id}
+                className="p-4 sm:p-5 bg-white border border-steel-200 hover:shadow-md transition-all rounded-2xl"
+              >
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  {/* Left: Thumbnail & Info */}
+                  <div className="flex items-start sm:items-center gap-3.5 w-full sm:w-auto">
+                    <img
+                      src={machine.images[0] || 'https://images.unsplash.com/photo-1579829366248-204fe8413f31?w=400&q=80'}
+                      alt={machine.title_ar}
+                      className="w-20 h-20 sm:w-24 sm:h-20 rounded-xl object-cover border border-steel-200 shrink-0 bg-steel-100"
+                    />
+
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-black text-sm text-ink hover:text-primary-dark transition-colors">
+                          {lang === 'fr' ? machine.title_fr : machine.title_ar}
+                        </span>
+
+                        <Badge
+                          variant={machine.listing_mode === 'sale' ? 'neutral' : 'warning'}
+                          size="sm"
+                        >
+                          {isSpare
+                            ? t('machines.filter_spare')
+                            : machine.listing_mode === 'sale'
+                            ? t('machines.mode_sale_option')
+                            : t('machines.mode_rent_option')}
+                        </Badge>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-steel-500 mb-1.5">
+                        <span className="font-bold text-ink">
+                          {machine.brand} {machine.model} ({machine.year})
+                        </span>
+                        <span>·</span>
+                        <span className="flex items-center gap-1">
+                          <MapPin className="w-3.5 h-3.5 text-steel-400" />
+                          {machine.city || 'Casablanca'}
+                        </span>
+                        {machine.with_operator && (
+                          <>
+                            <span>·</span>
+                            <span className="text-emerald-700 font-bold">
+                              {lang === 'fr' ? 'Chauffeur inclus' : 'مع سائق'}
+                            </span>
+                          </>
+                        )}
+                      </div>
+
+                      {/* Pricing Tag */}
+                      <div className="font-mono font-black text-sm text-ink">
+                        {machine.listing_mode === 'sale' ? (
+                          <span>
+                            {machine.sale_price?.toLocaleString('fr-FR')} {t('common.mad')}
+                          </span>
+                        ) : (
+                          <span>
+                            {machine.rate_daily?.toLocaleString('fr-FR')} {t('common.mad')} / {lang === 'fr' ? 'jour' : 'يوم'}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right: Actions */}
+                  <div className="flex items-center gap-2 w-full sm:w-auto justify-end pt-2 sm:pt-0 border-t sm:border-t-0 border-steel-100">
+                    {/* Publish/Hide Toggle */}
+                    <button
+                      type="button"
+                      onClick={() => handleTogglePublish(machine.id, isPublished)}
+                      className={`p-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer min-h-[40px] ${
+                        isPublished
+                          ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+                          : 'border-steel-200 bg-steel-100 text-steel-600 hover:bg-steel-200'
+                      }`}
+                      title={isPublished ? 'Masquer du public' : 'Publier'}
                     >
-                      {machine.status === 'available'
-                        ? t('dashboard.status_available')
-                        : machine.status === 'rented'
-                        ? t('dashboard.status_rented')
-                        : t('dashboard.status_maintenance')}
-                    </Badge>
+                      {isPublished ? (
+                        <>
+                          <Eye className="w-4 h-4 text-emerald-600" />
+                          <span className="hidden md:inline">{lang === 'fr' ? 'En ligne' : 'منشور'}</span>
+                        </>
+                      ) : (
+                        <>
+                          <EyeOff className="w-4 h-4 text-steel-400" />
+                          <span className="hidden md:inline">{lang === 'fr' ? 'Masqué' : 'معطل'}</span>
+                        </>
+                      )}
+                    </button>
+
+                    {/* Edit button */}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleOpenEdit(machine)}
+                      leftIcon={<Edit2 className="w-3.5 h-3.5" />}
+                      className="text-xs font-bold"
+                    >
+                      {t('common.edit')}
+                    </Button>
+
+                    {/* Delete button */}
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(machine.id)}
+                      className="p-2 rounded-xl text-steel-400 hover:text-danger hover:bg-red-50 transition-colors cursor-pointer min-h-[40px] min-w-[40px] flex items-center justify-center"
+                      aria-label={t('common.delete')}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
-
-                  <h3 className="font-bold text-sm text-ink truncate">
-                    {lang === 'fr' ? machine.title_fr : machine.title_ar}
-                  </h3>
-
-                  <div className="flex items-center gap-2 text-xs text-steel-500 mt-1">
-                    <MapPin className="w-3.5 h-3.5 text-primary shrink-0" />
-                    <span>{city ? (lang === 'fr' ? city.name_fr : city.name_ar) : machine.city_id}</span>
-                    <span aria-hidden="true">·</span>
-                    <span className="font-mono latin-nums font-bold text-ink">
-                      {formatPriceMAD(machine.rate_daily, lang)} / {lang === 'fr' ? 'j' : 'ي'}
-                    </span>
-                  </div>
                 </div>
-              </div>
-
-              {/* Status Switcher & Actions */}
-              <div className="pt-4 mt-4 border-t border-steel-100 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5">
-                  <select
-                    value={machine.status}
-                    onChange={(e) =>
-                      handleToggleStatus(machine.id, e.target.value as MachineStatus)
-                    }
-                    className="text-xs font-semibold py-1.5 px-2 bg-surface border border-steel-200 rounded-lg text-steel-700 focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
-                  >
-                    <option value="available">{t('dashboard.status_available')}</option>
-                    <option value="rented">{t('dashboard.status_rented')}</option>
-                    <option value="maintenance">{t('dashboard.status_maintenance')}</option>
-                    <option value="inactive">{t('dashboard.status_inactive')}</option>
-                  </select>
-                </div>
-
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteMachine(machine.id)}
-                    className="p-2 text-steel-400 hover:text-danger rounded-lg transition-colors cursor-pointer min-h-[36px] min-w-[36px] flex items-center justify-center"
-                    aria-label="Delete"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            </Card>
-          );
-        })}
+              </Card>
+            );
+          })
+        )}
       </div>
 
-      {/* Add Machine Modal */}
-      <Modal
-        isOpen={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
-        title={t('dashboard.quick_add_machine')}
-        description={lang === 'fr' ? 'Renseignez les détails de votre équipement BTP' : 'أدخل مواصفات الآلية وشروط الكراء'}
-        maxWidth="lg"
-      >
-        <form onSubmit={handleAddMachine} className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Input
-              label={lang === 'fr' ? 'Titre en Arabe' : 'عنوان الإعلان بالعربية'}
-              placeholder="مثال: جرافة JCB 3CX موديل 2023"
-              value={titleAr}
-              onChange={(e) => setTitleAr(e.target.value)}
-              required
-            />
-            <Input
-              label={lang === 'fr' ? 'Titre en Français' : 'عنوان الإعلان بالفرنسية'}
-              placeholder="ex. Tractopelle JCB 3CX 2023"
-              value={titleFr}
-              onChange={(e) => setTitleFr(e.target.value)}
-              required
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <Select
-              label={t('marketplace.filter_category')}
-              options={EQUIPMENT_CATEGORIES.map((c) => ({
-                value: c.slug,
-                label: lang === 'fr' ? c.name_fr : c.name_ar,
-              }))}
-              value={categoryId}
-              onChange={(e) => setCategoryId(e.target.value)}
-            />
-            <Input
-              label={lang === 'fr' ? 'Marque' : 'الماركة'}
-              value={brand}
-              onChange={(e) => setBrand(e.target.value)}
-              placeholder="JCB, Caterpillar, Komatsu..."
-              required
-            />
-            <Input
-              label={lang === 'fr' ? 'Modèle' : 'الموديل'}
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              placeholder="3CX, 320D, D85..."
-              required
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Input
-              type="number"
-              label={lang === 'fr' ? 'Année' : 'سنة الصنع'}
-              value={year}
-              onChange={(e) => setYear(Number(e.target.value))}
-              required
-            />
-            <Select
-              label={t('marketplace.filter_city')}
-              options={MOROCCAN_CITIES.map((c) => ({
-                value: c.id,
-                label: lang === 'fr' ? c.name_fr : c.name_ar,
-              }))}
-              value={cityId}
-              onChange={(e) => setCityId(e.target.value)}
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <Input
-              type="number"
-              label={lang === 'fr' ? 'Tarif journalier (MAD)' : 'السعر اليومي (د.م)'}
-              value={rateDaily}
-              onChange={(e) => setRateDaily(Number(e.target.value))}
-              required
-            />
-            <Input
-              type="number"
-              label={lang === 'fr' ? 'Tarif horaire (MAD)' : 'السعر بالساعة (د.م)'}
-              value={rateHourly}
-              onChange={(e) => setRateHourly(Number(e.target.value))}
-              required
-            />
-            <Input
-              type="number"
-              label={lang === 'fr' ? 'Tarif hebdomadaire (MAD)' : 'السعر بالأسبوع (د.م)'}
-              value={rateWeekly}
-              onChange={(e) => setRateWeekly(Number(e.target.value))}
-              required
-            />
-          </div>
-
-          <div className="pt-2 border-t border-steel-100 flex items-center gap-3">
-            <label className="flex items-center gap-2 text-xs font-semibold text-steel-700 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={withOperator}
-                onChange={(e) => setWithOperator(e.target.checked)}
-                className="w-4 h-4 rounded text-primary focus:ring-primary"
-              />
-              <span>{t('marketplace.with_operator')}</span>
-            </label>
-          </div>
-
-          <Button
-            type="submit"
-            variant="primary"
-            size="lg"
-            className="w-full justify-center font-bold"
-            isLoading={isSaving}
-          >
-            {t('common.save')}
-          </Button>
-        </form>
-      </Modal>
+      {/* Stepper Modal */}
+      <MachineStepperModal
+        isOpen={isStepperOpen}
+        onClose={() => setIsStepperOpen(false)}
+        machineToEdit={selectedMachineToEdit}
+        onSave={handleSaveMachine}
+      />
     </div>
   );
 };

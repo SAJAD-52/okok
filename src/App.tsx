@@ -2,6 +2,8 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ToastContainer } from './components/ui/Toast';
+import { AuthProvider } from './hooks/useAuth';
+import { ProtectedRoute } from './components/auth/ProtectedRoute';
 
 // Layout
 import { DashboardLayout } from './components/layout/DashboardLayout';
@@ -9,8 +11,10 @@ import { DashboardLayout } from './components/layout/DashboardLayout';
 // Pages
 import { LandingPage } from './pages/LandingPage';
 import { AuthPage } from './pages/AuthPage';
+import { OnboardingPage } from './pages/OnboardingPage';
 import { MarketplacePage } from './pages/MarketplacePage';
 import { MachineDetailPage } from './pages/MachineDetailPage';
+import { PublicStorefrontPage } from './pages/PublicStorefrontPage';
 import { DashboardOverviewPage } from './pages/DashboardOverviewPage';
 import { MachinesPage } from './pages/MachinesPage';
 import { BookingsPage } from './pages/BookingsPage';
@@ -30,31 +34,60 @@ const queryClient = new QueryClient({
 export const App: React.FC = () => {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <Routes>
-          {/* Public Routes */}
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/auth" element={<AuthPage />} />
-          <Route path="/marketplace" element={<MarketplacePage />} />
-          <Route path="/marketplace/:id" element={<MachineDetailPage />} />
-          <Route path="/admin" element={<AdminPage />} />
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
+            {/* Public Routes */}
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/auth" element={<AuthPage />} />
+            <Route path="/marketplace" element={<MarketplacePage />} />
+            <Route path="/marketplace/:id" element={<MachineDetailPage />} />
+            <Route path="/s/:slug" element={<PublicStorefrontPage />} />
 
-          {/* Protected / App Dashboard Routes */}
-          <Route path="/app" element={<DashboardLayout />}>
-            <Route index element={<DashboardOverviewPage />} />
-            <Route path="machines" element={<MachinesPage />} />
-            <Route path="bookings" element={<BookingsPage />} />
-            <Route path="storefront" element={<StorefrontPage />} />
-            <Route path="messages" element={<MessagesPage />} />
-          </Route>
+            {/* Protected Onboarding Route */}
+            <Route
+              path="/app/onboarding"
+              element={
+                <ProtectedRoute>
+                  <OnboardingPage />
+                </ProtectedRoute>
+              }
+            />
 
-          {/* Fallback */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+            {/* Protected Admin Console */}
+            <Route
+              path="/admin"
+              element={
+                <ProtectedRoute requiredRole="admin">
+                  <AdminPage />
+                </ProtectedRoute>
+              }
+            />
 
-        {/* Global Toast Notification Portal */}
-        <ToastContainer />
-      </BrowserRouter>
+            {/* Protected / App Dashboard Routes */}
+            <Route
+              path="/app"
+              element={
+                <ProtectedRoute>
+                  <DashboardLayout />
+                </ProtectedRoute>
+              }
+            >
+              <Route index element={<DashboardOverviewPage />} />
+              <Route path="machines" element={<MachinesPage />} />
+              <Route path="bookings" element={<BookingsPage />} />
+              <Route path="storefront" element={<StorefrontPage />} />
+              <Route path="messages" element={<MessagesPage />} />
+            </Route>
+
+            {/* Fallback */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+
+          {/* Global Toast Notification Portal */}
+          <ToastContainer />
+        </BrowserRouter>
+      </AuthProvider>
     </QueryClientProvider>
   );
 };

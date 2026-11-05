@@ -30,6 +30,9 @@ const LOCAL_STORAGE_PROFILE_KEY = 'jadijcb_current_profile';
 function mapSupabaseAuthError(message: string): string {
   if (!message) return 'auth.auth_failed';
   const lower = message.toLowerCase();
+  if (lower.includes('rate limit') || lower.includes('over_email_send_rate_limit')) {
+    return 'auth.rate_limit_exceeded';
+  }
   if (lower.includes('invalid login credentials')) {
     return 'auth.invalid_credentials';
   }
@@ -221,15 +224,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return { success: false, error: mapSupabaseAuthError(error.message) };
       }
 
-      // If data.session is null, return error key 'auth.email_confirmation_required'
-      if (!data?.session) {
-        setIsLoading(false);
-        return { success: false, error: 'auth.email_confirmation_required' };
+      let activeSession = data?.session;
+      let activeUser = data?.user;
+
+      // If data.session is null (e.g. if Supabase GoTrue hasn't returned a session on signUp),
+      // attempt an immediate signInWithPassword in case the database trigger or setting auto-confirmed the account
+      if (!activeSession) {
+        const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
+          email: syntheticEmail,
+          password: pass,
+        });
+
+        if (!signInErr && signInData?.session) {
+          activeSession = signInData.session;
+          activeUser = signInData.user;
+        } else if (signInErr) {
+          setIsLoading(false);
+          return { success: false, error: mapSupabaseAuthError(signInErr.message) };
+        }
       }
 
-      if (!data.user) {
+      if (!activeSession || !activeUser) {
         setIsLoading(false);
-        return { success: false, error: 'auth.signup_failed' };
+        return { success: false, error: 'auth.email_confirmation_required' };
       }
 
       // Retry fetchProfile up to 5 times (400 ms apart, DB trigger creates row)
@@ -238,7 +255,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const { data: prof, error: profErr } = await supabase
           .from('profiles')
           .select('*')
-          .eq('id', data.user.id)
+          .eq('id', activeUser.id)
           .maybeSingle();
 
         if (prof && !profErr) {
@@ -257,7 +274,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       saveProfileLocally(loadedProfile);
-      setUser(data.user);
+      setUser(activeUser);
       setIsLoading(false);
       return { success: true, isNewUser: true };
     } catch (err: any) {

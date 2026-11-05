@@ -265,7 +265,8 @@
     "phone_already_registered": "Ce numéro de téléphone est déjà enregistré. Veuillez vous connecter.",
     "email_confirmation_required": "La confirmation d'e-mail est activée dans Supabase. Veuillez désactiver 'Confirm email' dans Supabase (Authentication -> Providers -> Email).",
     "rate_limit_exceeded": "Limite de tentatives atteinte temporairement. Veuillez désactiver 'Confirm email' dans Supabase et patienter quelques minutes.",
-    "profile_not_created": "Impossible de charger le profil utilisateur créé par la base de données. Veuillez réessayer."
+    "profile_not_created": "Impossible de charger le profil utilisateur créé par la base de données. Veuillez réessayer.",
+    "schema_not_applied": "Les tables de base de données ne sont pas encore créées dans Supabase. Veuillez exécuter le fichier (20261104000000_init_schema.sql) dans l'éditeur SQL de Supabase."
   },
   "welcome": {
     "title": "Bienvenue sur JADIJCB !",

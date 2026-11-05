@@ -265,7 +265,8 @@
     "phone_already_registered": "رقم الهاتف هذا مسجل بالفعل. يرجى تسجيل الدخول بدلاً من ذلك.",
     "email_confirmation_required": "تأكيد البريد الإلكتروني مفعل في مشروع Supabase. يرجى إيقاف خيار 'Confirm email' في لوحة تحكم Supabase (Authentication -> Providers -> Email).",
     "rate_limit_exceeded": "تم تجاوز حد المحاولات مؤقتاً بسبب تأكيد البريد في Supabase. يرجى إيقاف 'Confirm email' في Supabase والانتظار بضع دقائق أو تسجيل الدخول.",
-    "profile_not_created": "تعذر إنشاء الملف الشخصي تلقائياً في قاعدة البيانات. يرجى المحاولة مرة أخرى."
+    "profile_not_created": "تعذر إنشاء الملف الشخصي تلقائياً في قاعدة البيانات. يرجى المحاولة مرة أخرى.",
+    "schema_not_applied": "جداول قاعدة البيانات غير منشأة في مشروع Supabase بعد. يرجى تشغيل كود ملف (20261104000000_init_schema.sql) في SQL Editor في لوحة تحكم Supabase."
   },
   "welcome": {
     "title": "مرحباً بك في منصة JADIJCB!",

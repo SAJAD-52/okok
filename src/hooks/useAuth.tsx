@@ -251,6 +251,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // Retry fetchProfile up to 5 times (400 ms apart, DB trigger creates row)
       let loadedProfile: UserProfile | null = null;
+      let lastProfileError: any = null;
+
       for (let attempt = 1; attempt <= 5; attempt++) {
         const { data: prof, error: profErr } = await supabase
           .from('profiles')
@@ -263,13 +265,62 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           break;
         }
 
+        if (profErr) {
+          lastProfileError = profErr;
+        }
+
         if (attempt < 5) {
           await new Promise((resolve) => setTimeout(resolve, 400));
         }
       }
 
+      // If DB trigger didn't create the profile or is delayed, attempt client-side creation
+      if (!loadedProfile) {
+        const newProfPayload: any = {
+          id: activeUser.id,
+          phone: norm.e164,
+          full_name: meta?.fullName || '',
+          company_name: meta?.companyName || '',
+          role: role === 'owner' ? 'owner' : 'client',
+          city: meta?.city || 'Casablanca',
+          whatsapp_verified: false,
+          subscription_status: 'trial',
+          trial_started_at: new Date().toISOString(),
+          trial_ends_at: new Date(Date.now() + 72 * 3600 * 1000).toISOString(),
+          preferred_lang: 'ar',
+          created_at: new Date().toISOString(),
+        };
+
+        const { data: insertedProf, error: insertErr } = await supabase
+          .from('profiles')
+          .upsert(newProfPayload)
+          .select()
+          .maybeSingle();
+
+        if (insertedProf && !insertErr) {
+          loadedProfile = insertedProf as UserProfile;
+        } else if (insertErr) {
+          console.error('Profile creation fallback error:', insertErr);
+          setIsLoading(false);
+          if (
+            insertErr.message?.includes('relation "public.profiles" does not exist') ||
+            (insertErr as any).code === '42P01' ||
+            lastProfileError?.message?.includes('relation "public.profiles" does not exist')
+          ) {
+            return { success: false, error: 'auth.schema_not_applied' };
+          }
+          return { success: false, error: mapDatabaseError(insertErr.message) };
+        }
+      }
+
       if (!loadedProfile) {
         setIsLoading(false);
+        if (
+          lastProfileError?.message?.includes('relation "public.profiles" does not exist') ||
+          (lastProfileError as any)?.code === '42P01'
+        ) {
+          return { success: false, error: 'auth.schema_not_applied' };
+        }
         return { success: false, error: 'auth.profile_not_created' };
       }
 

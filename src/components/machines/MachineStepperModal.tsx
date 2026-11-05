@@ -32,6 +32,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { MapLocationPicker } from './MapLocationPicker';
 import { compressImage } from '../../lib/imageCompressor';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { mapDatabaseError } from '../../lib/errorHelpers';
 
 interface MachineStepperModalProps {
   isOpen: boolean;
@@ -229,8 +230,8 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
       updated_at: new Date().toISOString(),
     };
 
-    // Save to Supabase if connected
-    if (isSupabaseConfigured && user?.id) {
+    // Save to Supabase with strict error handling & soft-lock RLS check
+    if (user?.id) {
       try {
         const payload = {
           owner_id: user.id,
@@ -259,12 +260,46 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
         };
 
         if (machineToEdit?.id) {
-          await supabase.from('machines').update(payload).eq('id', machineToEdit.id);
+          const { data, error } = await supabase
+            .from('machines')
+            .update(payload)
+            .eq('id', machineToEdit.id)
+            .select()
+            .single();
+
+          if (error) {
+            setIsSubmitting(false);
+            const errKey = mapDatabaseError(error);
+            toast.error(t(errKey));
+            return; // STOP! No onSave, no success toast, no optimistic state
+          }
+
+          if (data) {
+            machineData.id = data.id;
+          }
         } else {
-          await supabase.from('machines').insert(payload);
+          const { data, error } = await supabase
+            .from('machines')
+            .insert(payload)
+            .select()
+            .single();
+
+          if (error) {
+            setIsSubmitting(false);
+            const errKey = mapDatabaseError(error);
+            toast.error(t(errKey));
+            return; // STOP! No onSave, no success toast, no optimistic state
+          }
+
+          if (data) {
+            machineData.id = data.id;
+          }
         }
-      } catch (err) {
-        console.warn('Supabase machine sync notice:', err);
+      } catch (err: any) {
+        setIsSubmitting(false);
+        const errKey = mapDatabaseError(err);
+        toast.error(t(errKey));
+        return; // STOP!
       }
     }
 

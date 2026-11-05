@@ -12,62 +12,6 @@ import { ChatConversationItem, ChatParticipant } from '../types/chat';
 import { Machine } from '../types/database';
 import { ConversationList } from '../features/chat/ConversationList';
 import { ChatThread } from '../features/chat/ChatThread';
-import { MOCK_MACHINES } from '../data/mockData';
-
-// Realistic Moroccan Seed Conversations for Instant Experience & Fallback
-const DEMO_CONVERSATIONS: ChatConversationItem[] = [
-  {
-    id: 'conv_1',
-    participant_a: 'user_1',
-    participant_b: 'user_6',
-    last_message_at: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
-    unread_count: 1,
-    last_message: 'ممتاز! نود بدء العمل يوم الإثنين بورش سيدي معروف لمدة أسبوعين.',
-    other_participant: {
-      id: 'user_6',
-      phone: '+212661998877',
-      full_name: 'Youssef El Alami',
-      company_name: 'BTP Maroc Construction S.A.',
-      role: 'contractor',
-      city: 'Casablanca',
-    },
-    machine: MOCK_MACHINES[0] as Machine,
-  },
-  {
-    id: 'conv_2',
-    participant_a: 'user_1',
-    participant_b: 'user_demo_atlas',
-    last_message_at: new Date(Date.now() - 4 * 3600 * 1000).toISOString(),
-    unread_count: 0,
-    last_message: 'سعر كراء الحفارة الكبيرة كاتربيلر 320D يشمل الصيانة الدورية وتأمين الورش.',
-    other_participant: {
-      id: 'user_demo_atlas',
-      phone: '+212661889900',
-      full_name: 'Karim Benjelloun',
-      company_name: 'Atlas Terrassement S.A.R.L.',
-      role: 'owner',
-      city: 'Casablanca',
-    },
-    machine: MOCK_MACHINES[1] as Machine,
-  },
-  {
-    id: 'conv_3',
-    participant_a: 'user_1',
-    participant_b: 'user_demo_sahara',
-    last_message_at: new Date(Date.now() - 28 * 3600 * 1000).toISOString(),
-    unread_count: 0,
-    last_message: 'الشاحنة المان متوفرة ابتداءً من منتصف الشهر لنقل الحصى والرمال.',
-    other_participant: {
-      id: 'user_demo_sahara',
-      phone: '+212662334455',
-      full_name: 'Tariq Mansouri',
-      company_name: 'Sahara Logistique & BTP',
-      role: 'owner',
-      city: 'Marrakech',
-    },
-    machine: MOCK_MACHINES[2] as Machine,
-  },
-];
 
 export const Messages: React.FC = () => {
   const { t, lang, isRTL } = useLanguage();
@@ -156,13 +100,12 @@ export const Messages: React.FC = () => {
           return mapped;
         }
       } catch (err) {
-        console.warn('Realtime conversations load failed, falling back to demo state:', err);
+        console.warn('Realtime conversations load failed:', err);
       }
     }
 
-    // Default Seed Data
-    setConversations(DEMO_CONVERSATIONS);
-    return DEMO_CONVERSATIONS;
+    setConversations([]);
+    return [];
   }, [currentUserId]);
 
   useEffect(() => {
@@ -188,29 +131,35 @@ export const Messages: React.FC = () => {
         if (matchingConv) {
           setActiveConversation(matchingConv);
         } else {
-          // Find machine from seed or database and initiate conversation
-          const targetMachine = MOCK_MACHINES.find((m: any) => m.id === urlMachineId) as Machine;
-          if (targetMachine) {
-            const newConv: ChatConversationItem = {
-              id: `conv_new_${Date.now()}`,
-              participant_a: currentUserId,
-              participant_b: targetMachine.owner_id || 'owner_partner',
-              last_message_at: new Date().toISOString(),
-              unread_count: 0,
-              last_message: '',
-              other_participant: {
-                id: targetMachine.owner_id || 'owner_partner',
-                phone: targetMachine.owner?.phone || '+212661889900',
-                full_name: targetMachine.owner?.full_name || 'Karim Benjelloun',
-                company_name: targetMachine.owner?.company_name || 'Atlas Terrassement',
-                role: 'owner',
-                city: targetMachine.city || 'Casablanca',
-              },
-              machine: targetMachine,
-            };
-            setConversations((prev) => [newConv, ...prev]);
-            setActiveConversation(newConv);
-          }
+          // Fetch target machine from database
+          supabase
+            .from('machines')
+            .select('*, profiles(*)')
+            .eq('id', urlMachineId)
+            .maybeSingle()
+            .then(({ data: targetMachine }) => {
+              if (targetMachine && isMounted) {
+                const newConv: ChatConversationItem = {
+                  id: `conv_new_${Date.now()}`,
+                  participant_a: currentUserId,
+                  participant_b: targetMachine.owner_id || 'owner_partner',
+                  last_message_at: new Date().toISOString(),
+                  unread_count: 0,
+                  last_message: '',
+                  other_participant: {
+                    id: targetMachine.owner_id || 'owner_partner',
+                    phone: targetMachine.profiles?.phone || '+212600000000',
+                    full_name: targetMachine.profiles?.full_name || 'Partenaire JADIJCB',
+                    company_name: targetMachine.profiles?.company_name || 'Entreprise Partenaire',
+                    role: targetMachine.profiles?.role || 'owner',
+                    city: targetMachine.profiles?.city || targetMachine.city || 'Maroc',
+                  },
+                  machine: targetMachine as unknown as Machine,
+                };
+                setConversations((prev) => [newConv, ...prev]);
+                setActiveConversation(newConv);
+              }
+            });
         }
       } else if (window.innerWidth >= 768 && loaded.length > 0 && !activeConversation) {
         // Desktop default select first conversation

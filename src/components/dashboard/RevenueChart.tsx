@@ -13,14 +13,14 @@ import {
 import { TrendingUp } from 'lucide-react';
 import { useLanguage } from '../../hooks/useLanguage';
 
-interface RevenuePoint {
+export interface RevenuePoint {
   month: string;
   monthFr: string;
   revenue: number;
   rentalsCount: number;
 }
 
-const SIX_MONTH_DATA: RevenuePoint[] = [
+const DEFAULT_SIX_MONTH_DATA: RevenuePoint[] = [
   { month: 'أكتوبر', monthFr: 'Oct', revenue: 64000, rentalsCount: 7 },
   { month: 'نوفمبر', monthFr: 'Nov', revenue: 78500, rentalsCount: 9 },
   { month: 'دجنبر', monthFr: 'Déc', revenue: 92000, rentalsCount: 11 },
@@ -29,8 +29,13 @@ const SIX_MONTH_DATA: RevenuePoint[] = [
   { month: 'مارس', monthFr: 'Mar', revenue: 128400, rentalsCount: 16 },
 ];
 
-export const RevenueChart: React.FC = () => {
+interface RevenueChartProps {
+  data?: RevenuePoint[];
+}
+
+export const RevenueChart: React.FC<RevenueChartProps> = ({ data }) => {
   const { t, lang } = useLanguage();
+  const chartData = data && data.length > 0 ? data : DEFAULT_SIX_MONTH_DATA;
 
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
@@ -75,7 +80,7 @@ export const RevenueChart: React.FC = () => {
       <div className="h-56 sm:h-64 w-full">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart
-            data={SIX_MONTH_DATA}
+            data={chartData}
             margin={{ top: 10, right: 10, left: -15, bottom: 0 }}
           >
             <defs>

@@ -20,6 +20,7 @@ import { toast } from '../ui/Toast';
 import { useLanguage } from '../../hooks/useLanguage';
 import { useAuth } from '../../hooks/useAuth';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { mapDatabaseError } from '../../lib/errorHelpers';
 
 interface CreateBookingModalProps {
   isOpen: boolean;
@@ -112,30 +113,43 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
       created_at: new Date().toISOString(),
     };
 
-    if (isSupabaseConfigured && user?.id) {
+    if (user?.id) {
       try {
-        const { error } = await supabase.from('bookings').insert({
-          machine_id: newBooking.machine_id,
-          owner_id: user.id,
-          client_name: newBooking.client_name,
-          client_phone: newBooking.client_phone,
-          start_at: newBooking.start_at,
-          end_at: newBooking.end_at,
-          total_price: newBooking.total_price,
-          status: newBooking.status,
-          notes: newBooking.notes,
-        });
+        const { data, error } = await supabase
+          .from('bookings')
+          .insert({
+            machine_id: newBooking.machine_id,
+            owner_id: user.id,
+            client_name: newBooking.client_name,
+            client_phone: newBooking.client_phone,
+            start_at: newBooking.start_at,
+            end_at: newBooking.end_at,
+            total_price: newBooking.total_price,
+            status: newBooking.status,
+            notes: newBooking.notes,
+          })
+          .select('*, machines(*)')
+          .single();
 
         if (error) {
-          // PostgreSQL btree_gist exclusion constraint violation code: 23P01
-          if (error.code === '23P01' || error.message?.includes('exclude')) {
-            setOverlapError(t('bookings.overlap_alert_msg'));
-            setIsSubmitting(false);
-            return;
+          setIsSubmitting(false);
+          const errKey = mapDatabaseError(error);
+          const msg = t(errKey);
+          if (errKey === 'bookings.overlap_error') {
+            setOverlapError(msg);
           }
+          toast.error(msg);
+          return; // STOP!
         }
-      } catch (err) {
-        console.warn('Booking insertion warning:', err);
+
+        if (data) {
+          newBooking.id = data.id;
+        }
+      } catch (err: any) {
+        setIsSubmitting(false);
+        const errKey = mapDatabaseError(err);
+        toast.error(t(errKey));
+        return; // STOP!
       }
     }
 

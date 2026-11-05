@@ -2,7 +2,7 @@
 // JADIJCB: Bookings Management (List & Calendar Views + Live Rental Countdowns)
 // ============================================================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   CalendarCheck,
   Plus,
@@ -17,25 +17,30 @@ import {
   MapPin,
   Building2,
   AlertTriangle,
+  AlertCircle,
+  RotateCcw,
 } from 'lucide-react';
 import { Booking, BookingStatus, Machine } from '../types/database';
-import { MOCK_BOOKINGS, MOCK_MACHINES } from '../data/mockData';
 import { formatPriceMAD } from '../data/rentalTerms';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
+import { Skeleton } from '../components/ui/Skeleton';
 import { toast } from '../components/ui/Toast';
 import { useLanguage } from '../hooks/useLanguage';
 import { useAuth } from '../hooks/useAuth';
 import { CreateBookingModal } from '../components/bookings/CreateBookingModal';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { mapDatabaseError } from '../lib/errorHelpers';
 
 export const BookingsPage: React.FC = () => {
   const { t, lang } = useLanguage();
   const { user } = useAuth();
 
-  const [bookings, setBookings] = useState<Booking[]>(MOCK_BOOKINGS);
-  const [machines, setMachines] = useState<Machine[]>(MOCK_MACHINES);
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [machines, setMachines] = useState<Machine[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isError, setIsError] = useState<boolean>(false);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -49,59 +54,128 @@ export const BookingsPage: React.FC = () => {
     return () => clearInterval(timer);
   }, []);
 
-  // Fetch live bookings if Supabase connected
-  useEffect(() => {
-    async function loadData() {
-      if (!isSupabaseConfigured || !user?.id) return;
-
-      try {
-        const { data, error } = await supabase
-          .from('bookings')
-          .select('*, machines(*)')
-          .order('created_at', { ascending: false });
-
-        if (!error && data && data.length > 0) {
-          const mapped: Booking[] = data.map((b: any) => ({
-            id: b.id,
-            machine_id: b.machine_id,
-            owner_id: b.owner_id,
-            client_id: b.client_id,
-            client_name: b.client_name,
-            client_phone: b.client_phone,
-            start_at: b.start_at,
-            end_at: b.end_at,
-            total_price: Number(b.total_price),
-            status: b.status,
-            notes: b.notes,
-            created_at: b.created_at,
-            machine: b.machines,
-            with_operator: true,
-          }));
-          setBookings(mapped);
-        }
-      } catch (err) {
-        console.warn('Booking load notice:', err);
-      }
+  // Fetch live bookings and owner machines
+  const loadData = useCallback(async () => {
+    if (!user?.id) {
+      setIsLoading(false);
+      return;
     }
 
+    setIsLoading(true);
+    setIsError(false);
+
+    try {
+      // 1. Fetch bookings
+      const { data: bData, error: bError } = await supabase
+        .from('bookings')
+        .select('*, machines(*)')
+        .eq('owner_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (bError) {
+        setIsError(true);
+        toast.error(t(mapDatabaseError(bError)));
+        return;
+      }
+
+      const mappedBookings: Booking[] = (bData || []).map((b: any) => ({
+        id: b.id,
+        machine_id: b.machine_id,
+        owner_id: b.owner_id,
+        client_id: b.client_id,
+        client_name: b.client_name,
+        client_phone: b.client_phone,
+        start_at: b.start_at,
+        end_at: b.end_at,
+        start_date: b.start_at,
+        end_date: b.end_at,
+        total_price: Number(b.total_price) || 0,
+        status: b.status,
+        notes: b.notes,
+        created_at: b.created_at,
+        machine: b.machines,
+        with_operator: Boolean(b.with_operator ?? true),
+      }));
+
+      setBookings(mappedBookings);
+
+      // 2. Fetch owner machines for manual booking creation
+      const { data: mData } = await supabase
+        .from('machines')
+        .select('*')
+        .eq('owner_id', user.id);
+
+      if (mData) {
+        const mappedMachines: Machine[] = mData.map((m: any) => ({
+          id: m.id,
+          owner_id: m.owner_id,
+          title_ar: m.title_ar,
+          title_fr: m.title_fr,
+          description_ar: m.description_ar,
+          description_fr: m.description_fr,
+          category: m.category,
+          category_id: m.category,
+          brand: m.brand,
+          model: m.model,
+          year: m.year,
+          listing_mode: m.listing_mode,
+          condition: m.condition || 'good',
+          city: m.city,
+          city_id: m.city,
+          lat: m.lat,
+          lng: m.lng,
+          location_lat: m.lat,
+          location_lng: m.lng,
+          rate_hourly: Number(m.hourly_rate) || 0,
+          rate_daily: Number(m.daily_rate) || 0,
+          rate_weekly: Number(m.weekly_rate) || 0,
+          hourly_rate: Number(m.hourly_rate) || 0,
+          daily_rate: Number(m.daily_rate) || 0,
+          weekly_rate: Number(m.weekly_rate) || 0,
+          sale_price: Number(m.sale_price) || 0,
+          currency: 'MAD',
+          with_operator: Boolean(m.with_operator),
+          fuel_included: Boolean(m.fuel_included),
+          delivery_available: Boolean(m.delivery_available),
+          status: m.is_published ? 'available' : 'inactive',
+          is_published: m.is_published,
+          images: m.images || [],
+          specs: m.specs || {},
+          views_count: m.views_count || 0,
+          rating_avg: m.rating_avg || 0,
+          reviews_count: m.reviews_count || 0,
+          created_at: m.created_at,
+          updated_at: m.created_at,
+        }));
+        setMachines(mappedMachines);
+      }
+    } catch (err: any) {
+      setIsError(true);
+      toast.error(t(mapDatabaseError(err)));
+    } finally {
+      setIsLoading(false);
+    }
+  }, [user?.id, t]);
+
+  useEffect(() => {
     loadData();
-  }, [user]);
+  }, [loadData]);
 
   const handleStatusChange = async (id: string, newStatus: BookingStatus) => {
-    if (isSupabaseConfigured) {
-      try {
-        await supabase
-          .from('bookings')
-          .update({ status: newStatus })
-          .eq('id', id);
-      } catch (err) {
-        console.warn('Status change warning:', err);
-      }
+    const { data, error } = await supabase
+      .from('bookings')
+      .update({ status: newStatus })
+      .eq('id', id)
+      .select('*, machines(*)')
+      .single();
+
+    if (error) {
+      const errKey = mapDatabaseError(error);
+      toast.error(t(errKey));
+      return; // STOP! No optimistic state update, no success toast!
     }
 
-    setBookings((prev) =>
-      prev.map((b) => (b.id === id ? { ...b, status: newStatus } : b))
-    );
+    await loadData();
 
     toast.success(
       lang === 'fr'
@@ -110,56 +184,83 @@ export const BookingsPage: React.FC = () => {
     );
   };
 
-  const handleBookingCreated = (newBooking: Booking) => {
-    setBookings((prev) => [newBooking, ...prev]);
+  const handleBookingCreated = async () => {
+    await loadData();
+    setIsCreateModalOpen(false);
   };
 
-  const formatCountdown = (endDateStr?: string) => {
-    if (!endDateStr) return '';
-    const diff = new Date(endDateStr).getTime() - now;
+  // Remaining Rental Countdown Calculator
+  const getRemainingTime = (endTarget?: string) => {
+    if (!endTarget) return null;
+    const diff = new Date(endTarget).getTime() - now;
     if (diff <= 0) {
-      return lang === 'fr' ? 'Mission terminée' : 'انتهى وقت الكراء';
+      return {
+        isOverdue: true,
+        text: lang === 'fr' ? 'Chantier terminé' : 'انتهى وقت الورش',
+      };
     }
-
     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
     const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
     const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
     const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
     const pad = (n: number) => n.toString().padStart(2, '0');
 
     if (days > 0) {
-      return `${days}j ${pad(hours)}h ${pad(minutes)}m`;
+      return {
+        isOverdue: false,
+        text: `${days}j ${pad(hours)}h ${pad(minutes)}m`,
+      };
     }
-    return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+    return {
+      isOverdue: false,
+      text: `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`,
+    };
   };
 
-  const filteredBookings = bookings.filter((item) => {
+  // Filter Bookings
+  const filteredBookings = bookings.filter((b) => {
     if (statusFilter === 'all') return true;
-    return item.status === statusFilter;
+    return b.status === statusFilter;
   });
+
+  const getStatusBadge = (status: BookingStatus) => {
+    switch (status) {
+      case 'pending':
+        return <Badge variant="warning">{t('bookings.status_pending')}</Badge>;
+      case 'active':
+        return <Badge variant="success">{t('bookings.status_active')}</Badge>;
+      case 'completed':
+        return <Badge variant="neutral">{t('bookings.status_completed')}</Badge>;
+      case 'cancelled':
+        return <Badge variant="danger">{t('bookings.status_cancelled')}</Badge>;
+      default:
+        return <Badge variant="neutral">{status}</Badge>;
+    }
+  };
 
   return (
     <div className="space-y-6 text-start">
-      {/* Top Header */}
+      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-xl sm:text-2xl font-black text-ink">
             {t('bookings.title')}
           </h1>
-          <p className="text-xs text-steel-500 mt-1">
+          <p className="text-xs text-steel-500 mt-0.5">
             {lang === 'fr'
-              ? 'Supervisez vos missions de location en cours, contrats et retours d\'engins'
-              : 'متابعة عقود الكراء النشطة، المواعيد، وتواريخ إرجاع الآليات'}
+              ? 'Suivez les calendriers de location, les retours d\'engins et les contrats chantiers'
+              : 'متابعة مواعيد الكراء، العد التنازلي للآليات قيد التشغيل ووصولات التسليم'}
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
-          {/* View mode toggle */}
-          <div className="flex p-1 bg-steel-100 rounded-xl">
+        <div className="flex items-center gap-2">
+          {/* View Toggle */}
+          <div className="flex items-center bg-steel-100 p-1 rounded-xl border border-steel-200">
             <button
               type="button"
               onClick={() => setViewMode('list')}
-              className={`p-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer min-h-[38px] ${
+              className={`p-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                 viewMode === 'list'
                   ? 'bg-white text-ink shadow-sm'
                   : 'text-steel-600 hover:text-ink'
@@ -167,13 +268,11 @@ export const BookingsPage: React.FC = () => {
               title={t('bookings.list_view')}
             >
               <List className="w-4 h-4" />
-              <span className="hidden sm:inline">{t('bookings.list_view')}</span>
             </button>
-
             <button
               type="button"
               onClick={() => setViewMode('calendar')}
-              className={`p-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer min-h-[38px] ${
+              className={`p-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                 viewMode === 'calendar'
                   ? 'bg-white text-ink shadow-sm'
                   : 'text-steel-600 hover:text-ink'
@@ -181,12 +280,10 @@ export const BookingsPage: React.FC = () => {
               title={t('bookings.calendar_view')}
             >
               <CalendarIcon className="w-4 h-4" />
-              <span className="hidden sm:inline">{t('bookings.calendar_view')}</span>
             </button>
           </div>
 
           <Button
-            type="button"
             variant="primary"
             size="md"
             onClick={() => setIsCreateModalOpen(true)}
@@ -199,238 +296,320 @@ export const BookingsPage: React.FC = () => {
       </div>
 
       {/* Filter Tabs */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+      <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1">
         {['all', 'pending', 'active', 'completed', 'cancelled'].map((st) => (
           <button
             key={st}
             type="button"
             onClick={() => setStatusFilter(st)}
-            className={`px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap min-h-[38px] cursor-pointer ${
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all min-h-[40px] whitespace-nowrap cursor-pointer ${
               statusFilter === st
-                ? 'bg-ink text-white shadow-sm'
-                : 'bg-white text-steel-600 hover:bg-steel-100 border border-steel-200'
+                ? 'bg-ink text-primary shadow-sm'
+                : 'bg-white border border-steel-200 text-steel-600 hover:bg-steel-50'
             }`}
           >
             {st === 'all'
               ? t('bookings.tab_all')
               : st === 'pending'
-              ? t('bookings.tab_pending')
+              ? t('bookings.status_pending')
               : st === 'active'
-              ? t('bookings.tab_active')
+              ? t('bookings.status_active')
               : st === 'completed'
-              ? t('bookings.tab_completed')
-              : t('bookings.tab_cancelled')}
+              ? t('bookings.status_completed')
+              : t('bookings.status_cancelled')}
+            <span className="ms-1.5 opacity-70 font-mono">
+              (
+              {st === 'all'
+                ? bookings.length
+                : bookings.filter((b) => b.status === st).length}
+              )
+            </span>
           </button>
         ))}
       </div>
 
-      {/* VIEW: CALENDAR VIEW */}
-      {viewMode === 'calendar' && (
-        <Card className="p-6 bg-white border border-steel-200">
-          <div className="flex items-center justify-between mb-4 pb-3 border-b border-steel-200">
-            <h3 className="text-sm font-black text-ink flex items-center gap-2">
-              <CalendarIcon className="w-4 h-4 text-primary-dark" />
-              <span>{lang === 'fr' ? 'Planning de rotation du parc (Mars 2026)' : 'جدول تشغيل الأسطول (مارس 2026)'}</span>
-            </h3>
-            <span className="text-xs text-steel-500 font-bold">
-              {filteredBookings.length} {lang === 'fr' ? 'missions' : 'حجوزات'}
-            </span>
-          </div>
-
-          {/* Simple Month Calendar Matrix */}
-          <div className="grid grid-cols-7 gap-1 text-center font-bold text-xs text-steel-500 mb-2">
-            <div>{lang === 'fr' ? 'Lun' : 'الإثنين'}</div>
-            <div>{lang === 'fr' ? 'Mar' : 'الثلاثاء'}</div>
-            <div>{lang === 'fr' ? 'Mer' : 'الأربعاء'}</div>
-            <div>{lang === 'fr' ? 'Jeu' : 'الخميس'}</div>
-            <div>{lang === 'fr' ? 'Ven' : 'الجمعة'}</div>
-            <div>{lang === 'fr' ? 'Sam' : 'السبت'}</div>
-            <div>{lang === 'fr' ? 'Dim' : 'الأحد'}</div>
-          </div>
-
-          <div className="grid grid-cols-7 gap-1.5">
-            {[...Array(31)].map((_, i) => {
-              const day = i + 1;
-              const hasBooking = day >= 3 && day <= 15;
-              const isToday = day === 4;
-
-              return (
-                <div
-                  key={day}
-                  className={`min-h-[64px] p-1.5 rounded-xl border text-start flex flex-col justify-between transition-colors ${
-                    isToday
-                      ? 'border-primary bg-amber-50/70 font-black'
-                      : hasBooking
-                      ? 'border-emerald-200 bg-emerald-50/40'
-                      : 'border-steel-100 bg-surface'
-                  }`}
-                >
-                  <span className={`text-[10px] font-mono ${isToday ? 'text-primary-dark font-black' : 'text-steel-600'}`}>
-                    {day}
-                  </span>
-                  {hasBooking && (
-                    <div className="text-[9px] font-bold p-1 rounded bg-ink text-primary truncate leading-tight">
-                      JCB 3CX (SNTL)
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+      {/* Error state with retry */}
+      {isError && (
+        <Card className="p-8 text-center bg-red-50/50 border border-red-200">
+          <AlertCircle className="w-10 h-10 text-danger mx-auto mb-2" />
+          <h3 className="text-sm font-bold text-ink mb-1">
+            {lang === 'fr'
+              ? 'Erreur lors du chargement des réservations'
+              : 'حدث خطأ أثناء تحميل الحجوزات'}
+          </h3>
+          <p className="text-xs text-steel-500 mb-4">
+            {lang === 'fr'
+              ? 'Impossible de charger vos réservations. Veuillez réessayer.'
+              : 'تعذر الاتصال بقاعدة البيانات. يرجى إعادة المحاولة.'}
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={loadData}
+            leftIcon={<RotateCcw className="w-3.5 h-3.5" />}
+          >
+            {lang === 'fr' ? 'Réessayer' : 'إعادة المحاولة'}
+          </Button>
         </Card>
       )}
 
-      {/* VIEW: LIST VIEW */}
-      {viewMode === 'list' && (
+      {/* Loading Skeletons */}
+      {isLoading && (
         <div className="space-y-3">
-          {filteredBookings.length === 0 ? (
-            <Card className="p-10 text-center bg-white border border-steel-200">
-              <CalendarCheck className="w-10 h-10 text-steel-300 mx-auto mb-2" />
-              <p className="text-xs text-steel-500 font-bold">
-                {lang === 'fr'
-                  ? 'Aucune réservation dans cette catégorie'
-                  : 'لا توجد طلبات كراء في هذا التصنيف'}
-              </p>
+          {[1, 2, 3].map((n) => (
+            <Card key={n} className="p-5 bg-white border border-steel-200 rounded-2xl">
+              <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+                <div className="space-y-2">
+                  <Skeleton className="h-5 w-56" />
+                  <Skeleton className="h-4 w-40" />
+                  <Skeleton className="h-4 w-32" />
+                </div>
+                <div className="flex items-center gap-3">
+                  <Skeleton className="h-8 w-28 rounded-xl" />
+                  <Skeleton className="h-9 w-24 rounded-xl" />
+                </div>
+              </div>
             </Card>
-          ) : (
-            filteredBookings.map((b) => {
-              const isCountdownActive = b.status === 'active' || b.status === 'confirmed';
-              const countdown = isCountdownActive ? formatCountdown(b.end_at || b.end_date) : '';
-
-              return (
-                <Card
-                  key={b.id}
-                  className="p-5 bg-white border border-steel-200 hover:shadow-md transition-all rounded-2xl"
-                >
-                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                    {/* Left: Machine & Client Info */}
-                    <div className="flex items-start gap-3.5">
-                      <div className="w-11 h-11 rounded-2xl bg-amber-100 text-amber-800 flex items-center justify-center shrink-0 font-bold mt-0.5">
-                        <Truck className="w-5 h-5 text-primary-dark" />
-                      </div>
-
-                      <div>
-                        <div className="flex items-center gap-2.5 mb-1">
-                          <h3 className="font-black text-sm text-ink">
-                            {b.machine?.title_ar || b.machine?.title_fr || 'Caterpillar 320D'}
-                          </h3>
-                          <Badge
-                            variant={
-                              b.status === 'active'
-                                ? 'success'
-                                : b.status === 'completed'
-                                ? 'neutral'
-                                : b.status === 'cancelled'
-                                ? 'danger'
-                                : 'warning'
-                            }
-                            size="sm"
-                          >
-                            {b.status === 'active'
-                              ? t('bookings.status_active')
-                              : b.status === 'completed'
-                              ? t('bookings.status_completed')
-                              : b.status === 'cancelled'
-                              ? t('bookings.status_cancelled')
-                              : t('bookings.status_pending')}
-                          </Badge>
-                        </div>
-
-                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-steel-600 mb-1.5">
-                          <span className="flex items-center gap-1 font-bold text-ink">
-                            <Building2 className="w-3.5 h-3.5 text-steel-400" />
-                            {b.client_name || 'Société BTP Casablanca'}
-                          </span>
-                          {b.client_phone && (
-                            <span className="flex items-center gap-1 font-mono" dir="ltr">
-                              <Phone className="w-3.5 h-3.5 text-steel-400" />
-                              {b.client_phone}
-                            </span>
-                          )}
-                          <span className="flex items-center gap-1">
-                            <MapPin className="w-3.5 h-3.5 text-steel-400" />
-                            {b.site_address || 'Casablanca - Sidi Maârouf'}
-                          </span>
-                        </div>
-
-                        {/* Dates & Active Countdown */}
-                        <div className="flex flex-wrap items-center gap-3 text-xs">
-                          <span className="text-steel-500 font-medium font-mono text-[11px]" dir="ltr">
-                            {new Date(b.start_at || b.start_date || '').toLocaleDateString('fr-FR')} →{' '}
-                            {new Date(b.end_at || b.end_date || '').toLocaleDateString('fr-FR')}
-                          </span>
-
-                          {isCountdownActive && countdown && (
-                            <span className="flex items-center gap-1.5 bg-ink text-primary px-2.5 py-0.5 rounded-md font-mono text-[11px] font-black">
-                              <Clock className="w-3 h-3 text-yellow-400 animate-pulse" />
-                              <span>{t('bookings.time_left')} {countdown}</span>
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Right: Price & Status Transition Actions */}
-                    <div className="flex flex-wrap items-center justify-between lg:justify-end gap-3 pt-3 lg:pt-0 border-t lg:border-t-0 border-steel-100">
-                      <div className="text-start lg:text-end">
-                        <span className="text-[10px] text-steel-400 block font-bold">
-                          {t('bookings.total')}
-                        </span>
-                        <span className="font-mono font-black text-base text-ink">
-                          {formatPriceMAD(b.total_price, lang)}
-                        </span>
-                      </div>
-
-                      {/* Status Flow Buttons */}
-                      <div className="flex items-center gap-1.5">
-                        {b.status === 'pending' && (
-                          <>
-                            <Button
-                              type="button"
-                              variant="primary"
-                              size="sm"
-                              onClick={() => handleStatusChange(b.id, 'active')}
-                              leftIcon={<CheckCircle className="w-3.5 h-3.5" />}
-                              className="font-bold text-xs"
-                            >
-                              {t('bookings.action_accept')}
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleStatusChange(b.id, 'cancelled')}
-                              leftIcon={<XCircle className="w-3.5 h-3.5 text-danger" />}
-                              className="text-danger hover:bg-red-50 text-xs"
-                            >
-                              {t('bookings.action_reject')}
-                            </Button>
-                          </>
-                        )}
-
-                        {b.status === 'active' && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleStatusChange(b.id, 'completed')}
-                            leftIcon={<CheckCircle className="w-3.5 h-3.5 text-emerald-600" />}
-                            className="text-xs font-bold"
-                          >
-                            {t('bookings.action_complete')}
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </Card>
-              );
-            })
-          )}
+          ))}
         </div>
       )}
 
-      {/* Manual Booking Creator Modal */}
+      {/* Bookings Content */}
+      {!isLoading && !isError && (
+        <>
+          {viewMode === 'calendar' ? (
+            /* Simple Calendar Overview Grid */
+            <Card className="p-6 bg-white border border-steel-200">
+              <div className="text-center py-6">
+                <CalendarIcon className="w-12 h-12 text-steel-300 mx-auto mb-2" />
+                <h3 className="text-sm font-bold text-ink mb-1">
+                  {lang === 'fr'
+                    ? 'Vue calendrier des missions actives'
+                    : 'جدول تشغيل الأسطول والمشاريع'}
+                </h3>
+                <p className="text-xs text-steel-500 max-w-md mx-auto mb-4">
+                  {lang === 'fr'
+                    ? `${bookings.length} réservations enregistrées sur votre parc`
+                    : `تم تسجيل ${bookings.length} عقد كراء في سجلاتك`}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {filteredBookings.map((b) => {
+                  const endTarget = b.end_at || b.end_date;
+                  const countdown = getRemainingTime(endTarget);
+
+                  return (
+                    <div
+                      key={b.id}
+                      className="p-4 rounded-xl border border-steel-200 bg-surface space-y-2"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-xs text-ink truncate max-w-[170px]">
+                          {b.machine?.title_ar || b.machine?.title_fr || 'Engin JADIJCB'}
+                        </span>
+                        {getStatusBadge(b.status)}
+                      </div>
+
+                      <div className="text-[11px] text-steel-500 space-y-0.5">
+                        <p>
+                          <span className="font-bold text-steel-700">
+                            {b.client_name || 'Client'}
+                          </span>
+                        </p>
+                        <p dir="ltr" className="font-mono text-start">
+                          {b.start_at?.slice(0, 10)} → {b.end_at?.slice(0, 10)}
+                        </p>
+                      </div>
+
+                      {countdown && b.status === 'active' && (
+                        <div className="pt-2 border-t border-steel-200 flex items-center justify-between">
+                          <span className="text-[10px] text-steel-500">
+                            {t('bookings.time_left')}
+                          </span>
+                          <span
+                            className={`text-xs font-mono font-bold px-2 py-0.5 rounded ${
+                              countdown.isOverdue
+                                ? 'bg-red-100 text-danger'
+                                : 'bg-ink text-primary'
+                            }`}
+                          >
+                            {countdown.text}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+          ) : (
+            /* List View */
+            <div className="space-y-3">
+              {filteredBookings.length === 0 ? (
+                <Card className="p-10 text-center bg-white border border-steel-200">
+                  <CalendarCheck className="w-12 h-12 text-steel-300 mx-auto mb-2" />
+                  <h3 className="text-sm font-bold text-ink mb-1">
+                    {lang === 'fr'
+                      ? 'Aucune réservation trouvée'
+                      : 'لا توجد حجوزات في هذا التصنيف'}
+                  </h3>
+                  <p className="text-xs text-steel-500 mb-4">
+                    {lang === 'fr'
+                      ? 'Créez une réservation manuelle ou attendez les demandes des clients sur la marketplace'
+                      : 'أضف حجزاً يدوياً أو انتظر استقبال طلبات المقاولين عبر السوق'}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    onClick={() => setIsCreateModalOpen(true)}
+                    leftIcon={<Plus className="w-4 h-4" />}
+                    className="font-bold"
+                  >
+                    {t('bookings.create_manual_booking')}
+                  </Button>
+                </Card>
+              ) : (
+                filteredBookings.map((b) => {
+                  const endTarget = b.end_at || b.end_date;
+                  const countdown = getRemainingTime(endTarget);
+
+                  return (
+                    <Card
+                      key={b.id}
+                      className="p-4 sm:p-5 bg-white border border-steel-200 hover:shadow-md transition-all rounded-2xl"
+                    >
+                      <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+                        {/* Machine & Client Info */}
+                        <div className="flex items-start gap-3.5">
+                          <div className="w-10 h-10 rounded-xl bg-amber-50 text-primary-dark flex items-center justify-center shrink-0 mt-0.5">
+                            <Truck className="w-5 h-5" />
+                          </div>
+
+                          <div>
+                            <div className="flex items-center gap-2 mb-1">
+                              <h3 className="font-extrabold text-sm text-ink">
+                                {b.machine?.title_ar || b.machine?.title_fr || 'Engin JADIJCB'}
+                              </h3>
+                              {getStatusBadge(b.status)}
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-steel-600 mb-2">
+                              <span className="flex items-center gap-1 font-bold text-ink">
+                                <User className="w-3.5 h-3.5 text-steel-400" />
+                                {b.client_name || 'Client anonyme'}
+                              </span>
+
+                              {b.client_phone && (
+                                <a
+                                  href={`tel:${b.client_phone}`}
+                                  className="flex items-center gap-1 text-primary-dark hover:underline font-mono"
+                                  dir="ltr"
+                                >
+                                  <Phone className="w-3 h-3" />
+                                  {b.client_phone}
+                                </a>
+                              )}
+
+                              {b.site_address && (
+                                <span className="flex items-center gap-1 text-steel-500">
+                                  <MapPin className="w-3.5 h-3.5 text-steel-400" />
+                                  {b.site_address}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Dates & Period */}
+                            <div className="text-xs text-steel-500 flex items-center gap-2">
+                              <span className="font-medium">{t('bookings.dates')}:</span>
+                              <span dir="ltr" className="font-mono text-steel-700 font-bold">
+                                {b.start_at?.slice(0, 10)} → {b.end_at?.slice(0, 10)}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Right: Price, Countdown & Quick Status Actions */}
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between lg:justify-end gap-3 w-full lg:w-auto pt-3 lg:pt-0 border-t lg:border-t-0 border-steel-100">
+                          {/* Live Countdown if active */}
+                          {countdown && (b.status === 'active' || b.status === 'confirmed') && (
+                            <div className="text-start sm:text-end">
+                              <span className="text-[10px] text-steel-500 block">
+                                {t('bookings.time_left')}
+                              </span>
+                              <span
+                                className={`text-xs font-mono font-black px-2.5 py-1 rounded-lg ${
+                                  countdown.isOverdue
+                                    ? 'bg-red-100 text-danger'
+                                    : 'bg-ink text-primary shadow-sm'
+                                }`}
+                              >
+                                {countdown.text}
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Total Price */}
+                          <div className="text-start sm:text-end">
+                            <span className="text-[10px] text-steel-500 block">
+                              {t('bookings.total')}
+                            </span>
+                            <span className="text-base font-black text-ink font-mono latin-nums">
+                              {formatPriceMAD(b.total_price)}
+                            </span>
+                          </div>
+
+                          {/* Status Actions */}
+                          <div className="flex items-center gap-1.5 self-end sm:self-auto">
+                            {b.status === 'pending' && (
+                              <>
+                                <Button
+                                  type="button"
+                                  variant="primary"
+                                  size="sm"
+                                  onClick={() => handleStatusChange(b.id, 'active')}
+                                  className="text-xs font-bold"
+                                >
+                                  {t('bookings.action_accept')}
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleStatusChange(b.id, 'cancelled')}
+                                  className="text-xs text-danger hover:bg-red-50"
+                                >
+                                  {t('bookings.action_reject')}
+                                </Button>
+                              </>
+                            )}
+
+                            {b.status === 'active' && (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleStatusChange(b.id, 'completed')}
+                                className="text-xs font-bold"
+                              >
+                                {t('bookings.action_complete')}
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </Card>
+                  );
+                })
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Manual Booking Creation Modal */}
       <CreateBookingModal
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}

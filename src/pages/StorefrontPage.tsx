@@ -26,8 +26,8 @@ import { Input } from '../components/ui/Input';
 import { toast } from '../components/ui/Toast';
 import { useLanguage } from '../hooks/useLanguage';
 import { useAuth } from '../hooks/useAuth';
-import { MOCK_MACHINES } from '../data/mockData';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { mapDatabaseError } from '../lib/errorHelpers';
 
 export const StorefrontPage: React.FC = () => {
   const { t, lang, isRTL } = useLanguage();
@@ -50,6 +50,7 @@ export const StorefrontPage: React.FC = () => {
   const [activeAboutTab, setActiveAboutTab] = useState<'ar' | 'fr'>('ar');
   const [isCopied, setIsCopied] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [previewMachines, setPreviewMachines] = useState<any[]>([]);
 
   // Fetch live storefront if Supabase is connected
   useEffect(() => {
@@ -70,6 +71,16 @@ export const StorefrontPage: React.FC = () => {
           if (data.about_fr) setAboutFr(data.about_fr);
           if (data.whatsapp) setWhatsapp(data.whatsapp);
           if (data.theme_color) setThemeColor(data.theme_color);
+        }
+
+        const { data: mData } = await supabase
+          .from('machines')
+          .select('*')
+          .eq('owner_id', user.id)
+          .limit(2);
+
+        if (mData) {
+          setPreviewMachines(mData);
         }
       } catch (err) {
         console.warn('Storefront load notice:', err);
@@ -412,32 +423,38 @@ export const StorefrontPage: React.FC = () => {
                 </span>
 
                 <div className="space-y-2">
-                  {MOCK_MACHINES.slice(0, 2).map((m) => (
-                    <div
-                      key={m.id}
-                      className="p-2.5 rounded-xl border border-steel-200 flex items-center justify-between gap-3 text-xs"
-                    >
-                      <div className="flex items-center gap-2">
-                        <img
-                          src={m.images[0]}
-                          alt={m.title_ar}
-                          className="w-10 h-10 rounded-lg object-cover"
-                        />
-                        <div>
-                          <span className="font-black text-ink block truncate max-w-[150px]">
-                            {lang === 'fr' ? m.title_fr : m.title_ar}
-                          </span>
-                          <span className="text-[10px] text-steel-500">
-                            {m.brand} {m.model}
-                          </span>
-                        </div>
-                      </div>
-
-                      <span className="font-mono font-bold text-xs text-ink">
-                        {m.rate_daily} MAD / j
-                      </span>
+                  {previewMachines.length === 0 ? (
+                    <div className="p-3 text-center rounded-xl bg-steel-50 border border-steel-200 text-[11px] text-steel-500">
+                      {lang === 'fr' ? 'Aucun engin dans votre flotte pour l\'instant' : 'لا توجد آليات في أسطولك بعد'}
                     </div>
-                  ))}
+                  ) : (
+                    previewMachines.map((m) => (
+                      <div
+                        key={m.id}
+                        className="p-2.5 rounded-xl border border-steel-200 flex items-center justify-between gap-3 text-xs"
+                      >
+                        <div className="flex items-center gap-2">
+                          <img
+                            src={m.images?.[0] || 'https://images.unsplash.com/photo-1579829366248-204fe8413f31?w=200&q=80'}
+                            alt={m.title_ar}
+                            className="w-10 h-10 rounded-lg object-cover"
+                          />
+                          <div>
+                            <span className="font-black text-ink block truncate max-w-[150px]">
+                              {lang === 'fr' ? m.title_fr : m.title_ar}
+                            </span>
+                            <span className="text-[10px] text-steel-500">
+                              {m.brand} {m.model}
+                            </span>
+                          </div>
+                        </div>
+
+                        <span className="font-mono font-bold text-xs text-ink">
+                          {m.rate_daily || m.daily_rate || 0} MAD / j
+                        </span>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
             </div>

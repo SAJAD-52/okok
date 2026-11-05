@@ -53,11 +53,17 @@ const config: Config = {
       fontFamily: {
         sans: ['"Plus Jakarta Sans"', 'Cairo', 'system-ui', 'sans-serif'],
         arabic: ['Cairo', '"Plus Jakarta Sans"', 'system-ui', 'sans-serif'],
+        cairo: ['Cairo', 'sans-serif'],
       },
       boxShadow: {
         'soft': '0 2px 10px -2px rgba(11, 18, 32, 0.05), 0 4px 20px -2px rgba(11, 18, 32, 0.04)',
         'elevated': '0 10px 30px -5px rgba(11, 18, 32, 0.08), 0 4px 12px -2px rgba(11, 18, 32, 0.04)',
+        'lift': '0 12px 30px -4px rgba(11, 18, 32, 0.12), 0 4px 12px -2px rgba(11, 18, 32, 0.08)',
         'yellow-glow': '0 0 35px -5px rgba(255, 180, 0, 0.25)',
+      },
+      backgroundImage: {
+        'hazard-stripes': 'repeating-linear-gradient(45deg, #FFB400, #FFB400 12px, #0B1220 12px, #0B1220 24px)',
+        'hazard-subtle': 'repeating-linear-gradient(45deg, rgba(255,180,0,0.15), rgba(255,180,0,0.15) 10px, transparent 10px, transparent 20px)',
       },
       borderRadius: {
         '2xl': '1rem',

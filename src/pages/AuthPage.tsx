@@ -16,11 +16,8 @@
 import React, { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Phone,
-  Lock,
   Truck,
   Building2,
-  ShieldCheck,
   CheckCircle2,
   AlertCircle,
   Eye,
@@ -30,7 +27,6 @@ import {
 import { PublicHeader } from '../components/layout/PublicHeader';
 import { Footer } from '../components/layout/Footer';
 import { Card } from '../components/ui/Card';
-import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
 import { toast } from '../components/ui/Toast';
 import { WelcomeModal } from '../components/dashboard/WelcomeModal';
@@ -43,10 +39,10 @@ import {
 import { UserRole } from '../types/database';
 
 export const AuthPage: React.FC = () => {
-  const { t, lang, isRTL } = useLanguage();
+  const { t, lang } = useLanguage();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { loginWithPhone, signupWithPhone, setDemoSession } = useAuth();
+  const { loginWithPhone, signupWithPhone } = useAuth();
 
   const isSignupParam =
     searchParams.get('mode') === 'signup' || searchParams.get('mode') === 'register';
@@ -117,24 +113,6 @@ export const AuthPage: React.FC = () => {
         toast.error(t(res.error || 'auth.signup_failed'));
       }
     }
-  };
-
-  const handleDemoLogin = (demoRole: UserRole) => {
-    setIsLoading(true);
-    setDemoSession(demoRole);
-    setTimeout(() => {
-      setIsLoading(false);
-      toast.success(
-        lang === 'fr'
-          ? `Connecté en mode démo (${demoRole})`
-          : `تم تسجيل الدخول بنجاح كـ ${demoRole === 'owner' ? 'مالك آليات' : demoRole === 'admin' ? 'مشرف المنصة' : 'مقاولة بناء'}`
-      );
-      if (demoRole === 'admin') {
-        navigate('/admin');
-      } else {
-        navigate('/app');
-      }
-    }, 350);
   };
 
   return (
@@ -380,45 +358,6 @@ export const AuthPage: React.FC = () => {
               {mode === 'login' ? t('auth.btn_login') : t('auth.btn_register')}
             </Button>
           </form>
-
-          {/* Sandbox Demo Quick Access */}
-          <div className="pt-6 mt-6 border-t border-steel-200">
-            <p className="text-xs text-steel-500 mb-3 text-center">
-              {t('auth.demo_login')}
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => handleDemoLogin('owner')}
-                className="justify-center text-[11px] font-bold min-h-[40px]"
-                leftIcon={<Truck className="w-3.5 h-3.5 text-primary-dark" />}
-              >
-                {lang === 'fr' ? 'Démo Propriétaire' : 'دخول كمالك آليات'}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => handleDemoLogin('client')}
-                className="justify-center text-[11px] font-bold min-h-[40px]"
-                leftIcon={<Building2 className="w-3.5 h-3.5 text-steel-600" />}
-              >
-                {lang === 'fr' ? 'Démo Client' : 'دخول كمقاولة'}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => handleDemoLogin('admin')}
-                className="justify-center text-[11px] font-bold min-h-[40px] border-primary/60 text-ink bg-amber-50/50"
-                leftIcon={<ShieldCheck className="w-3.5 h-3.5 text-primary-dark" />}
-              >
-                {lang === 'fr' ? 'Démo Admin' : 'دخول كإدارة'}
-              </Button>
-            </div>
-          </div>
         </Card>
       </main>
 

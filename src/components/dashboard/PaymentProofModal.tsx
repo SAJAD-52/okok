@@ -12,6 +12,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { mapDatabaseError } from '../../lib/errorHelpers';
 import {
   BANK_RIB_NUMBER,
   BANK_NAME,
@@ -91,38 +92,48 @@ export const PaymentProofModal: React.FC<PaymentProofModalProps> = ({
     setIsSubmitting(true);
 
     try {
-      let uploadedProofUrl = previewUrl || 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?w=600&q=80';
+      let uploadedProofUrl = previewUrl || '';
 
-      // Upload to Supabase Storage bucket 'payment-proofs' if connected
-      if (isSupabaseConfigured && user?.id && file) {
-        const fileExt = file.name.split('.').pop() || 'jpg';
-        const filePath = `${user.id}/${Date.now()}_receipt.${fileExt}`;
+      if (user?.id) {
+        if (file) {
+          const fileExt = file.name.split('.').pop() || 'jpg';
+          const filePath = `${user.id}/${Date.now()}_receipt.${fileExt}`;
 
-        const { error: uploadError } = await supabase.storage
-          .from('payment-proofs')
-          .upload(filePath, file, {
-            cacheControl: '3600',
-            upsert: false,
-          });
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('payment-proofs')
+            .upload(filePath, file, {
+              cacheControl: '3600',
+              upsert: false,
+            });
 
-        if (uploadError) {
-          console.warn('Storage upload notice (falling back):', uploadError.message);
-        } else {
-          uploadedProofUrl = filePath;
+          if (uploadError) {
+            setIsSubmitting(false);
+            const errKey = mapDatabaseError(uploadError);
+            toast.error(t(errKey));
+            return; // STOP!
+          }
+
+          uploadedProofUrl = uploadData?.path || filePath;
         }
 
-        // Insert into public.payments table
-        const { error: dbError } = await supabase.from('payments').insert({
-          user_id: user.id,
-          amount,
-          method,
-          reference: reference.trim(),
-          proof_url: uploadedProofUrl,
-          status: 'pending',
-        });
+        const { data: paymentData, error: dbError } = await supabase
+          .from('payments')
+          .insert({
+            user_id: user.id,
+            amount,
+            method,
+            reference: reference.trim(),
+            proof_url: uploadedProofUrl,
+            status: 'pending',
+          })
+          .select()
+          .single();
 
         if (dbError) {
-          console.warn('DB payment insert error:', dbError.message);
+          setIsSubmitting(false);
+          const errKey = mapDatabaseError(dbError);
+          toast.error(t(errKey));
+          return; // STOP!
         }
       }
 
@@ -135,9 +146,11 @@ export const PaymentProofModal: React.FC<PaymentProofModalProps> = ({
           onClose();
         }
       }, 3500);
-    } catch (err) {
+    } catch (err: any) {
       setIsSubmitting(false);
-      toast.error(t('common.error'));
+      const errKey = mapDatabaseError(err);
+      toast.error(t(errKey));
+      return; // STOP!
     }
   };
 

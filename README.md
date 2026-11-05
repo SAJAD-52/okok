@@ -114,3 +114,5 @@ Server runs at `http://localhost:3000`.
 ## 📜 License
 
 Proprietary © 2026 JADIJCB Maroc S.A.R.L. Tous droits réservés.
+
+

@@ -77,7 +77,7 @@ Most Moroccan contractors and equipment operators register with a phone number o
 Now new contractor and owner profiles will be activated immediately upon signup, initiating their automatic 72-hour trial subscription without waiting for email activation.
 
 ---
-
+....
 ## 🗄️ Database Architecture & RLS Security
 
 ### Data Model

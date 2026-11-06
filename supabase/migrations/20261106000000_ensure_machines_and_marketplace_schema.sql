@@ -67,6 +67,27 @@ ALTER TABLE public.machines ADD COLUMN IF NOT EXISTS is_published boolean DEFAUL
 ALTER TABLE public.machines ADD COLUMN IF NOT EXISTS views_count int DEFAULT 0;
 ALTER TABLE public.machines ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
 
+-- Convert any restrictive enum columns to flexible text so all categories/modes work
+DO $$ BEGIN
+  ALTER TABLE public.machines ALTER COLUMN category TYPE text USING category::text;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.machines ALTER COLUMN listing_mode TYPE text USING listing_mode::text;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.machines ALTER COLUMN condition TYPE text USING condition::text;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.machines ALTER COLUMN city TYPE text USING city::text;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
 -- Drop any restrictive check constraints that might block inserts
 DO $$ BEGIN
   ALTER TABLE public.machines DROP CONSTRAINT IF EXISTS chk_machines_mode_requirements;

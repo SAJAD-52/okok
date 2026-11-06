@@ -93,7 +93,8 @@ export const AuthPage: React.FC = () => {
         toast.success(
           lang === 'fr' ? 'Connexion réussie !' : 'تم تسجيل الدخول بنجاح!'
         );
-        navigate('/app');
+        const isClient = role === 'client';
+        navigate(isClient ? '/entreprise' : '/app');
       } else {
         toast.error(t(res.error || 'auth.auth_failed'));
       }

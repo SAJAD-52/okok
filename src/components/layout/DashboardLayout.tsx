@@ -13,6 +13,8 @@ import {
   Bell,
   Sparkles,
   Lock,
+  MapPin,
+  HardHat,
 } from 'lucide-react';
 import { Logo } from '../ui/Logo';
 import { LanguageSwitcher } from '../ui/LanguageSwitcher';
@@ -32,11 +34,43 @@ export const DashboardLayout: React.FC = () => {
 
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
 
-  const isChatRoute = location.pathname.startsWith('/app/messages');
-  const shouldShowLock = isLocked && !isChatRoute;
+  const isContractor = profile?.role === 'client' || profile?.role === 'contractor';
+  const isChatRoute = location.pathname.includes('/messages');
+  // Contractors (clients) renting machinery are NEVER blocked by owner trial soft-lock!
+  const shouldShowLock = !isContractor && isLocked && !isChatRoute;
   const unreadMessagesCount = 1;
 
-  const navigationItems = [
+  const contractorNavigationItems = [
+    {
+      to: '/entreprise',
+      exact: true,
+      label: lang === 'fr' ? 'Tableau de bord' : 'لوحة المقاولة',
+      icon: <Building2 className="w-5 h-5" />,
+    },
+    {
+      to: '/entreprise/map',
+      label: lang === 'fr' ? 'Radar Chantiers' : 'رادار الآليات (الخريطة)',
+      icon: <MapPin className="w-5 h-5" />,
+    },
+    {
+      to: '/entreprise/bookings',
+      label: lang === 'fr' ? 'Mes Locations' : 'حجوزاتي وتمديد الكراء',
+      icon: <CalendarCheck className="w-5 h-5" />,
+    },
+    {
+      to: '/entreprise/projects',
+      label: lang === 'fr' ? 'Mes Chantiers' : 'أوراش ومشاريع المقاولة',
+      icon: <HardHat className="w-5 h-5" />,
+    },
+    {
+      to: '/app/messages',
+      label: t('nav.messages'),
+      icon: <MessageSquare className="w-5 h-5" />,
+      badge: unreadMessagesCount,
+    },
+  ];
+
+  const ownerNavigationItems = [
     {
       to: '/app',
       exact: true,
@@ -66,18 +100,20 @@ export const DashboardLayout: React.FC = () => {
     },
   ];
 
+  const navigationItems = isContractor ? contractorNavigationItems : ownerNavigationItems;
+
   const handleLogout = async () => {
     await logout();
     navigate('/auth');
   };
 
-  const displayName = profile?.company_name || profile?.full_name || 'JADIJCB Partner';
+  const displayName = profile?.company_name || profile?.full_name || (isContractor ? 'مقاولة معتمدة' : 'مالك آليات معتمد');
   const roleLabel =
     profile?.role === 'owner'
       ? t('auth.role_owner')
       : profile?.role === 'admin'
       ? 'Super Admin'
-      : t('auth.role_client');
+      : (lang === 'fr' ? 'Entreprise / Client' : 'مقاولة بناء / زبون مستأجر');
 
   return (
     <div className="min-h-screen bg-surface flex flex-col md:flex-row relative">
@@ -201,8 +237,8 @@ export const DashboardLayout: React.FC = () => {
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 pb-20 md:pb-6">
-        {/* Trial Live Banner */}
-        <TrialBanner onOpenPaymentModal={() => setIsPaymentModalOpen(true)} />
+        {/* Trial Live Banner: only for machinery owners */}
+        {!isContractor && <TrialBanner onOpenPaymentModal={() => setIsPaymentModalOpen(true)} />}
 
         {/* Mobile & Tablet Header Bar */}
         <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-steel-200/80 px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
@@ -220,12 +256,22 @@ export const DashboardLayout: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
-            <NavLink
-              to="/marketplace"
-              className="text-xs font-semibold text-steel-700 hover:text-ink px-3 py-1.5 rounded-lg border border-steel-200 bg-steel-50 hover:bg-steel-100 min-h-[44px] flex items-center"
-            >
-              {t('nav.marketplace')}
-            </NavLink>
+            {isContractor ? (
+              <NavLink
+                to="/entreprise/map"
+                className="text-xs font-black text-ink px-3 py-1.5 rounded-xl border border-primary/50 bg-primary hover:bg-primary-hover min-h-[44px] flex items-center gap-1.5 shadow-sm"
+              >
+                <MapPin className="w-3.5 h-3.5" />
+                <span>{lang === 'fr' ? 'Radar Chantiers' : 'رادار الآليات للورش'}</span>
+              </NavLink>
+            ) : (
+              <NavLink
+                to="/marketplace"
+                className="text-xs font-semibold text-steel-700 hover:text-ink px-3 py-1.5 rounded-lg border border-steel-200 bg-steel-50 hover:bg-steel-100 min-h-[44px] flex items-center"
+              >
+                {t('nav.marketplace')}
+              </NavLink>
+            )}
             <div className="md:hidden">
               <LanguageSwitcher />
             </div>

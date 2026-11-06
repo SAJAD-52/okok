@@ -14,9 +14,11 @@ interface WelcomeModalProps {
 export const WelcomeModal: React.FC<WelcomeModalProps> = ({ isOpen, onClose }) => {
   const { t, isRTL } = useLanguage();
   const navigate = useNavigate();
-  const { updateProfile } = useAuth();
+  const { profile, updateProfile } = useAuth();
 
   if (!isOpen) return null;
+
+  const isContractor = profile?.role === 'client' || profile?.role === 'contractor';
 
   const handleGoToOnboarding = async () => {
     await updateProfile({ onboarding_completed: false });
@@ -27,7 +29,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({ isOpen, onClose }) =
   const handleSkipToDashboard = async () => {
     await updateProfile({ onboarding_completed: true });
     onClose();
-    navigate('/app');
+    navigate(isContractor ? '/entreprise' : '/app');
   };
 
   return (

@@ -16,6 +16,10 @@
     "login": "Connexion",
     "register": "Créer un compte",
     "post_machine": "Déposer un engin",
+    "contractor_portal": "Espace Entreprise",
+    "radar_map": "Radar Chantiers 📍",
+    "my_rentals": "Mes Locations",
+    "my_projects": "Mes Chantiers",
     "logout": "Déconnexion"
   },
   "landing": {

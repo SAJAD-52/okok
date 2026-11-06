@@ -21,6 +21,10 @@ import { BookingsPage } from './pages/BookingsPage';
 import { StorefrontPage } from './pages/StorefrontPage';
 import { MessagesPage } from './pages/MessagesPage';
 import { AdminPage } from './pages/AdminPage';
+import { ContractorDashboardPage } from './pages/ContractorDashboardPage';
+import { SiteRadarMapPage } from './pages/SiteRadarMapPage';
+import { ContractorBookingsPage } from './pages/ContractorBookingsPage';
+import { ContractorProjectsPage } from './pages/ContractorProjectsPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -64,7 +68,7 @@ export const App: React.FC = () => {
               }
             />
 
-            {/* Protected / App Dashboard Routes */}
+            {/* Protected Equipment Owner Dashboard Routes */}
             <Route
               path="/app"
               element={
@@ -77,6 +81,22 @@ export const App: React.FC = () => {
               <Route path="machines" element={<MachinesPage />} />
               <Route path="bookings" element={<BookingsPage />} />
               <Route path="storefront" element={<StorefrontPage />} />
+              <Route path="messages" element={<MessagesPage />} />
+            </Route>
+
+            {/* Protected Contractor / Entreprise Portal Routes */}
+            <Route
+              path="/entreprise"
+              element={
+                <ProtectedRoute>
+                  <DashboardLayout />
+                </ProtectedRoute>
+              }
+            >
+              <Route index element={<ContractorDashboardPage />} />
+              <Route path="map" element={<SiteRadarMapPage />} />
+              <Route path="bookings" element={<ContractorBookingsPage />} />
+              <Route path="projects" element={<ContractorProjectsPage />} />
               <Route path="messages" element={<MessagesPage />} />
             </Route>
 

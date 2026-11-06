@@ -36,6 +36,13 @@ export const DashboardOverviewPage: React.FC = () => {
 
   const userId = user?.id || profile?.id;
 
+  // Auto-redirect contractors to their dedicated /entreprise portal
+  React.useEffect(() => {
+    if (profile?.role === 'client' || profile?.role === 'contractor') {
+      navigate('/entreprise', { replace: true });
+    }
+  }, [profile, navigate]);
+
   // 1. TanStack Query: Machines for this owner
   const {
     data: machines = [],

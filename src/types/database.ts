@@ -213,3 +213,17 @@ export interface EquipmentCategory {
   icon_name: string;
   badge_count: number;
 }
+
+export interface ContractorSite {
+  id: string;
+  contractor_id: string;
+  name: string;
+  city: string;
+  address?: string;
+  lat: number;
+  lng: number;
+  manager_name?: string;
+  manager_phone?: string;
+  active_machines_count?: number;
+  created_at: string;
+}

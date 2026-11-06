@@ -1,21 +1,32 @@
 import React, { useState } from 'react';
 import { NavLink, Link, useNavigate } from 'react-router-dom';
-import { PlusCircle, User, Menu, X, Compass, Wrench } from 'lucide-react';
+import { PlusCircle, User, Menu, X, Compass, Wrench, MapPin, Building2, HardHat } from 'lucide-react';
 import { Logo } from '../ui/Logo';
 import { LanguageSwitcher } from '../ui/LanguageSwitcher';
 import { Button } from '../ui/Button';
 import { useLanguage } from '../../hooks/useLanguage';
+import { useAuth } from '../../hooks/useAuth';
 
 export const PublicHeader: React.FC = () => {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
+  const { user, profile } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const navigate = useNavigate();
 
-  const navLinks = [
-    { to: '/marketplace', label: t('nav.marketplace'), icon: <Compass className="w-4 h-4" /> },
-    { to: '/app/machines', label: t('nav.machines'), icon: <Wrench className="w-4 h-4" /> },
-    { to: '/app', label: t('nav.dashboard') },
-  ];
+  const isContractor = profile?.role === 'client' || profile?.role === 'contractor';
+
+  const navLinks = isContractor
+    ? [
+        { to: '/marketplace', label: t('nav.marketplace'), icon: <Compass className="w-4 h-4" /> },
+        { to: '/entreprise/map', label: lang === 'fr' ? 'Radar Chantiers' : 'رادار الأوراش 📍', icon: <MapPin className="w-4 h-4" /> },
+        { to: '/entreprise/bookings', label: lang === 'fr' ? 'Mes Locations' : 'حجوزاتي', icon: <Building2 className="w-4 h-4" /> },
+        { to: '/entreprise', label: lang === 'fr' ? 'Espace Entreprise' : 'بوابة المقاولة' },
+      ]
+    : [
+        { to: '/marketplace', label: t('nav.marketplace'), icon: <Compass className="w-4 h-4" /> },
+        { to: '/app/machines', label: t('nav.machines'), icon: <Wrench className="w-4 h-4" /> },
+        { to: '/app', label: t('nav.dashboard') },
+      ];
 
   return (
     <header className="sticky top-0 z-40 w-full bg-white/90 backdrop-blur-md border-b border-steel-200/80 transition-shadow">
@@ -46,25 +57,51 @@ export const PublicHeader: React.FC = () => {
         <div className="flex items-center gap-2.5 sm:gap-3.5 shrink-0">
           <LanguageSwitcher />
 
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => navigate('/auth')}
-            className="hidden sm:inline-flex"
-            leftIcon={<User className="w-4 h-4" />}
-          >
-            {t('nav.login')}
-          </Button>
+          {user ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => navigate(isContractor ? '/entreprise' : '/app')}
+              className="hidden sm:inline-flex text-xs font-bold"
+              leftIcon={isContractor ? <HardHat className="w-4 h-4 text-primary" /> : <User className="w-4 h-4" />}
+            >
+              {isContractor
+                ? (profile?.company_name || (lang === 'fr' ? 'Mon Entreprise' : 'حساب المقاولة'))
+                : (profile?.company_name || profile?.full_name || t('nav.dashboard'))}
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => navigate('/auth')}
+              className="hidden sm:inline-flex"
+              leftIcon={<User className="w-4 h-4" />}
+            >
+              {t('nav.login')}
+            </Button>
+          )}
 
-          <Button
-            size="sm"
-            variant="primary"
-            onClick={() => navigate('/app/machines')}
-            className="hidden sm:inline-flex"
-            leftIcon={<PlusCircle className="w-4 h-4" />}
-          >
-            {t('nav.post_machine')}
-          </Button>
+          {isContractor ? (
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={() => navigate('/entreprise/map')}
+              className="hidden sm:inline-flex font-black text-xs"
+              leftIcon={<MapPin className="w-4 h-4" />}
+            >
+              {lang === 'fr' ? 'Radar Chantiers' : 'رادار أقرب الآليات 📍'}
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={() => navigate('/app/machines')}
+              className="hidden sm:inline-flex"
+              leftIcon={<PlusCircle className="w-4 h-4" />}
+            >
+              {t('nav.post_machine')}
+            </Button>
+          )}
 
           {/* Mobile hamburger menu toggle */}
           <button
@@ -97,29 +134,47 @@ export const PublicHeader: React.FC = () => {
           </nav>
 
           <div className="pt-3 border-t border-steel-100 flex flex-col gap-2.5">
-            <Button
-              size="md"
-              variant="primary"
-              className="w-full justify-center"
-              onClick={() => {
-                setMobileMenuOpen(false);
-                navigate('/app/machines');
-              }}
-              leftIcon={<PlusCircle className="w-4 h-4" />}
-            >
-              {t('nav.post_machine')}
-            </Button>
+            {isContractor ? (
+              <Button
+                size="md"
+                variant="primary"
+                className="w-full justify-center font-black"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  navigate('/entreprise/map');
+                }}
+                leftIcon={<MapPin className="w-4 h-4" />}
+              >
+                {lang === 'fr' ? 'Radar InDrive Chantiers' : 'رادار أقرب الآليات للورش 📍'}
+              </Button>
+            ) : (
+              <Button
+                size="md"
+                variant="primary"
+                className="w-full justify-center"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  navigate('/app/machines');
+                }}
+                leftIcon={<PlusCircle className="w-4 h-4" />}
+              >
+                {t('nav.post_machine')}
+              </Button>
+            )}
+
             <Button
               size="md"
               variant="outline"
               className="w-full justify-center"
               onClick={() => {
                 setMobileMenuOpen(false);
-                navigate('/auth');
+                navigate(user ? (isContractor ? '/entreprise' : '/app') : '/auth');
               }}
               leftIcon={<User className="w-4 h-4" />}
             >
-              {t('nav.login')}
+              {user
+                ? (isContractor ? (lang === 'fr' ? 'Mon Entreprise' : 'بوابة المقاولة') : t('nav.dashboard'))
+                : t('nav.login')}
             </Button>
           </div>
         </div>

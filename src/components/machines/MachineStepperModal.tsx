@@ -233,7 +233,7 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
     // Save to Supabase with strict error handling & soft-lock RLS check
     if (user?.id) {
       try {
-        const payload = {
+        const payload: any = {
           owner_id: user.id,
           title_ar: machineData.title_ar,
           title_fr: machineData.title_fr,
@@ -243,14 +243,18 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
           brand: machineData.brand,
           model: machineData.model,
           year: machineData.year,
+          year_of_manufacture: machineData.year,
           listing_mode: machineData.listing_mode,
           condition: machineData.condition === 'new' ? 'new' : 'used',
           city: machineData.city,
           lat: machineData.lat,
           lng: machineData.lng,
-          hourly_rate: machineData.hourly_rate,
-          daily_rate: machineData.daily_rate,
-          weekly_rate: machineData.weekly_rate,
+          hourly_rate: machineData.hourly_rate ?? machineData.rate_hourly,
+          daily_rate: machineData.daily_rate ?? machineData.rate_daily,
+          weekly_rate: machineData.weekly_rate ?? machineData.rate_weekly,
+          rate_hourly: machineData.hourly_rate ?? machineData.rate_hourly,
+          rate_daily: machineData.daily_rate ?? machineData.rate_daily,
+          rate_weekly: machineData.weekly_rate ?? machineData.rate_weekly,
           sale_price: machineData.sale_price,
           with_operator: machineData.with_operator,
           fuel_included: machineData.fuel_included,

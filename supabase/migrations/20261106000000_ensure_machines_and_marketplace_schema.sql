@@ -64,8 +64,15 @@ ALTER TABLE public.machines ADD COLUMN IF NOT EXISTS fuel_included boolean DEFAU
 ALTER TABLE public.machines ADD COLUMN IF NOT EXISTS delivery_available boolean DEFAULT false;
 ALTER TABLE public.machines ADD COLUMN IF NOT EXISTS images text[] DEFAULT '{}';
 ALTER TABLE public.machines ADD COLUMN IF NOT EXISTS is_published boolean DEFAULT true;
+ALTER TABLE public.machines ADD COLUMN IF NOT EXISTS year int DEFAULT 2022;
+ALTER TABLE public.machines ADD COLUMN IF NOT EXISTS year_of_manufacture int DEFAULT 2022;
 ALTER TABLE public.machines ADD COLUMN IF NOT EXISTS views_count int DEFAULT 0;
 ALTER TABLE public.machines ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+
+-- Synchronize year and year_of_manufacture
+UPDATE public.machines
+SET year = COALESCE(year, year_of_manufacture, 2022),
+    year_of_manufacture = COALESCE(year_of_manufacture, year, 2022);
 
 -- Convert any restrictive enum columns to flexible text so all categories/modes work
 DO $$ BEGIN
@@ -86,6 +93,26 @@ END $$;
 DO $$ BEGIN
   ALTER TABLE public.machines ALTER COLUMN city TYPE text USING city::text;
 EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+-- Drop all strict NOT NULL constraints on legacy/optional columns in machines
+DO $$ 
+DECLARE
+  r record;
+BEGIN
+  FOR r IN (
+    SELECT column_name 
+    FROM information_schema.columns 
+    WHERE table_schema = 'public' 
+      AND table_name = 'machines' 
+      AND is_nullable = 'NO'
+      AND column_name NOT IN ('id', 'owner_id')
+  ) LOOP
+    BEGIN
+      EXECUTE 'ALTER TABLE public.machines ALTER COLUMN ' || quote_ident(r.column_name) || ' DROP NOT NULL;';
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+  END LOOP;
 END $$;
 
 -- Drop any restrictive check constraints that might block inserts

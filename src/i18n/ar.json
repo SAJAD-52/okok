@@ -266,6 +266,8 @@
     "email_confirmation_required": "تأكيد البريد الإلكتروني مفعل في مشروع Supabase. يرجى إيقاف خيار 'Confirm email' في لوحة تحكم Supabase (Authentication -> Providers -> Email).",
     "rate_limit_exceeded": "تم تجاوز حد المحاولات مؤقتاً بسبب تأكيد البريد في Supabase. يرجى إيقاف 'Confirm email' في Supabase والانتظار بضع دقائق أو تسجيل الدخول.",
     "profile_not_created": "تعذر إنشاء الملف الشخصي تلقائياً في قاعدة البيانات. يرجى المحاولة مرة أخرى.",
+    "provider_disabled": "موفر البريد معطل في Supabase. يرجى تفعيل (Enable email provider) من لوحة تحكم Supabase (Authentication -> Providers -> Email).",
+    "db_trigger_error": "خطأ في تريجر قاعدة البيانات (Database error saving new user). يرجى تشغيل استعلام إصلاح التريجر في Supabase SQL Editor.",
     "schema_not_applied": "جداول قاعدة البيانات غير منشأة في مشروع Supabase بعد. يرجى تشغيل كود ملف (20261104000000_init_schema.sql) في SQL Editor في لوحة تحكم Supabase."
   },
   "welcome": {

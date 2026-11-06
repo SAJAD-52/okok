@@ -30,6 +30,16 @@ const LOCAL_STORAGE_PROFILE_KEY = 'jadijcb_current_profile';
 function mapSupabaseAuthError(message: string): string {
   if (!message) return 'auth.auth_failed';
   const lower = message.toLowerCase();
+  if (
+    lower.includes('email provider is disabled') ||
+    lower.includes('signups not allowed') ||
+    lower.includes('provider is disabled') ||
+    lower.includes('email signups are not allowed') ||
+    lower.includes('signup requires a valid email') ||
+    lower.includes('email logins are disabled')
+  ) {
+    return 'auth.provider_disabled';
+  }
   if (lower.includes('rate limit') || lower.includes('over_email_send_rate_limit')) {
     return 'auth.rate_limit_exceeded';
   }
@@ -38,6 +48,9 @@ function mapSupabaseAuthError(message: string): string {
   }
   if (lower.includes('user already registered') || lower.includes('already registered')) {
     return 'auth.phone_already_registered';
+  }
+  if (lower.includes('database error saving new user')) {
+    return 'auth.db_trigger_error';
   }
   if (lower.includes('email not confirmed')) {
     return 'auth.email_confirmation_required';
@@ -83,8 +96,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (data) {
-        saveProfileLocally(data as UserProfile);
-        return data as UserProfile;
+        const normalized: UserProfile = {
+          ...(data as UserProfile),
+          phone: (data as any).phone || (data as any).phone_number || '',
+        };
+        saveProfileLocally(normalized);
+        return normalized;
       }
     } catch (err) {
       console.warn('Failed to fetch profile from Supabase:', err);
@@ -174,7 +191,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (data?.user) {
         setUser(data.user);
-        await fetchProfile(data.user.id);
+        let prof = await fetchProfile(data.user.id);
+        if (!prof) {
+          const fallbackPayload: any = {
+            id: data.user.id,
+            phone: norm.e164,
+            phone_number: norm.e164,
+            full_name: data.user.user_metadata?.full_name || '',
+            company_name: data.user.user_metadata?.company_name || '',
+            role: data.user.user_metadata?.role || 'client',
+            city: data.user.user_metadata?.city || 'Casablanca',
+            subscription_status: 'trial',
+            trial_started_at: new Date().toISOString(),
+            trial_ends_at: new Date(Date.now() + 72 * 3600 * 1000).toISOString(),
+            preferred_lang: 'ar',
+          };
+          const { data: insertedProf } = await supabase
+            .from('profiles')
+            .upsert(fallbackPayload)
+            .select()
+            .maybeSingle();
+
+          if (insertedProf) {
+            prof = {
+              ...(insertedProf as UserProfile),
+              phone: (insertedProf as any).phone || (insertedProf as any).phone_number || norm.e164,
+            };
+            saveProfileLocally(prof);
+          }
+        }
         setIsLoading(false);
         return { success: true };
       }
@@ -210,6 +255,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         options: {
           data: {
             phone: norm.e164,
+            phone_number: norm.e164,
             role: role === 'owner' ? 'owner' : 'client',
             full_name: meta?.fullName || '',
             company_name: meta?.companyName || '',
@@ -279,6 +325,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const newProfPayload: any = {
           id: activeUser.id,
           phone: norm.e164,
+          phone_number: norm.e164,
           full_name: meta?.fullName || '',
           company_name: meta?.companyName || '',
           role: role === 'owner' ? 'owner' : 'client',
@@ -353,9 +400,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!targetId) return { success: false, error: 'auth.auth_failed' };
 
     try {
+      const sanitizedUpdates: any = { ...updates };
+      if (updates.phone) {
+        sanitizedUpdates.phone_number = updates.phone;
+      }
+
       const { data, error } = await supabase
         .from('profiles')
-        .update(updates)
+        .update(sanitizedUpdates)
         .eq('id', targetId)
         .select()
         .single();
@@ -366,7 +418,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (data) {
-        saveProfileLocally(data as UserProfile);
+        const normalized: UserProfile = {
+          ...(data as UserProfile),
+          phone: (data as any).phone || (data as any).phone_number || '',
+        };
+        saveProfileLocally(normalized);
         return { success: true };
       }
 

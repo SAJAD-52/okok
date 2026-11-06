@@ -266,6 +266,8 @@
     "email_confirmation_required": "La confirmation d'e-mail est activée dans Supabase. Veuillez désactiver 'Confirm email' dans Supabase (Authentication -> Providers -> Email).",
     "rate_limit_exceeded": "Limite de tentatives atteinte temporairement. Veuillez désactiver 'Confirm email' dans Supabase et patienter quelques minutes.",
     "profile_not_created": "Impossible de charger le profil utilisateur créé par la base de données. Veuillez réessayer.",
+    "provider_disabled": "Le fournisseur d'e-mail est désactivé dans Supabase. Veuillez activer 'Enable email provider' dans le tableau de bord Supabase (Authentication -> Providers -> Email).",
+    "db_trigger_error": "Erreur de déclencheur de base de données (Database error saving new user). Veuillez exécuter le script de réparation dans Supabase SQL Editor.",
     "schema_not_applied": "Les tables de base de données ne sont pas encore créées dans Supabase. Veuillez exécuter le fichier (20261104000000_init_schema.sql) dans l'éditeur SQL de Supabase."
   },
   "welcome": {

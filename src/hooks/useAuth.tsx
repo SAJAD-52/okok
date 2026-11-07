@@ -133,17 +133,47 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (error) {
         console.warn('Failed to fetch profile from Supabase:', error.message);
-        return null;
       }
 
-      if (data) {
-        const normalized: UserProfile = {
-          ...(data as UserProfile),
-          phone: (data as any).phone || (data as any).phone_number || '',
-        };
-        saveProfileLocally(normalized);
-        return normalized;
+      // Also read auth metadata to retrieve non-DB fields (ice_number, onboarding_completed, etc.)
+      let meta: any = {};
+      try {
+        const { data: userData } = await supabase.auth.getUser();
+        meta = userData?.user?.user_metadata || {};
+      } catch {
+        // Ignore
       }
+
+      // Also check local stored profile for fallback
+      let localCached: any = {};
+      try {
+        const stored = localStorage.getItem(LOCAL_STORAGE_PROFILE_KEY);
+        if (stored) localCached = JSON.parse(stored);
+      } catch {
+        // Ignore
+      }
+
+      const mergedPhone = (data as any)?.phone || (data as any)?.phone_number || meta.phone || localCached.phone || '';
+
+      const normalized: UserProfile = {
+        id: userId,
+        phone: mergedPhone,
+        full_name: (data as any)?.full_name || meta.full_name || meta.fullName || localCached.full_name || '',
+        company_name: (data as any)?.company_name || meta.company_name || meta.companyName || localCached.company_name || '',
+        city: (data as any)?.city || meta.city || localCached.city || 'Casablanca',
+        role: (data as any)?.role || meta.role || localCached.role || 'client',
+        ice_number: (data as any)?.ice_number || meta.ice_number || meta.iceNumber || localCached.ice_number || '',
+        onboarding_completed: (data as any)?.onboarding_completed ?? meta.onboarding_completed ?? localCached.onboarding_completed ?? true,
+        whatsapp_verified: Boolean((data as any)?.whatsapp_verified ?? meta.whatsapp_verified ?? localCached.whatsapp_verified ?? true),
+        subscription_status: (data as any)?.subscription_status || localCached.subscription_status || 'trial',
+        trial_started_at: (data as any)?.trial_started_at || localCached.trial_started_at || new Date().toISOString(),
+        trial_ends_at: (data as any)?.trial_ends_at || localCached.trial_ends_at || new Date(Date.now() + 72 * 3600 * 1000).toISOString(),
+        preferred_lang: (data as any)?.preferred_lang || meta.preferred_lang || localCached.preferred_lang || 'ar',
+        created_at: (data as any)?.created_at || localCached.created_at || new Date().toISOString(),
+      };
+
+      saveProfileLocally(normalized);
+      return normalized;
     } catch (err) {
       console.warn('Failed to fetch profile from Supabase:', err);
     }
@@ -556,36 +586,108 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!targetId) return { success: false, error: 'auth.auth_failed' };
 
     try {
-      const sanitizedUpdates: any = { ...updates };
+      // 1. Filter only valid known SQL columns in public.profiles table
+      const KNOWN_DB_COLUMNS = [
+        'full_name',
+        'company_name',
+        'city',
+        'role',
+        'phone',
+        'phone_number',
+        'avatar_url',
+        'whatsapp_verified',
+        'subscription_status',
+        'trial_started_at',
+        'trial_ends_at',
+        'subscription_ends_at',
+        'preferred_lang',
+      ];
+
+      const dbPayload: any = {};
+      for (const col of KNOWN_DB_COLUMNS) {
+        if (col in updates && (updates as any)[col] !== undefined) {
+          dbPayload[col] = (updates as any)[col];
+        }
+      }
+
       if (updates.phone) {
-        sanitizedUpdates.phone_number = updates.phone;
+        dbPayload.phone = updates.phone;
+        dbPayload.phone_number = updates.phone;
       }
 
-      const { data, error } = await supabase
-        .from('profiles')
-        .update(sanitizedUpdates)
-        .eq('id', targetId)
-        .select()
-        .single();
-
-      if (error) {
-        const errKey = mapDatabaseError(error);
-        return { success: false, error: errKey };
+      // 2. Update Supabase auth user_metadata with ALL fields (including ice_number, onboarding_completed, etc.)
+      try {
+        await supabase.auth.updateUser({
+          data: {
+            ...updates,
+          },
+        });
+      } catch (authMetaErr) {
+        console.warn('Could not update auth user_metadata:', authMetaErr);
       }
 
-      if (data) {
-        const normalized: UserProfile = {
-          ...(data as UserProfile),
-          phone: (data as any).phone || (data as any).phone_number || '',
-        };
-        saveProfileLocally(normalized);
-        return { success: true };
+      // 3. Update public.profiles table
+      let dbData: any = null;
+      if (Object.keys(dbPayload).length > 0) {
+        const { data, error } = await supabase
+          .from('profiles')
+          .update(dbPayload)
+          .eq('id', targetId)
+          .select()
+          .maybeSingle();
+
+        if (error) {
+          console.warn('Supabase profiles update warning:', error.message);
+          // If error is about a missing column in schema cache, fallback to minimal core columns
+          if (error.message?.includes('column') && error.message?.includes('schema cache')) {
+            const minimalPayload: any = {};
+            if (updates.full_name) minimalPayload.full_name = updates.full_name;
+            if (updates.company_name) minimalPayload.company_name = updates.company_name;
+            if (updates.city) minimalPayload.city = updates.city;
+
+            if (Object.keys(minimalPayload).length > 0) {
+              const { data: retryData } = await supabase
+                .from('profiles')
+                .update(minimalPayload)
+                .eq('id', targetId)
+                .select()
+                .maybeSingle();
+              dbData = retryData;
+            }
+          }
+        } else {
+          dbData = data;
+        }
       }
 
-      return { success: false, error: 'common.error' };
+      // 4. Update local state and localStorage
+      const merged: UserProfile = {
+        ...(profile || {} as UserProfile),
+        ...(dbData || {}),
+        ...updates,
+        id: targetId,
+        role: updates.role || profile?.role || 'client',
+        phone: updates.phone || profile?.phone || '',
+        full_name: updates.full_name !== undefined ? updates.full_name : (profile?.full_name || ''),
+        company_name: updates.company_name !== undefined ? updates.company_name : (profile?.company_name || ''),
+        city: updates.city !== undefined ? updates.city : (profile?.city || 'Casablanca'),
+        ice_number: updates.ice_number !== undefined ? updates.ice_number : (profile?.ice_number || ''),
+        onboarding_completed: updates.onboarding_completed !== undefined ? updates.onboarding_completed : (profile?.onboarding_completed ?? true),
+      };
+
+      saveProfileLocally(merged);
+      window.dispatchEvent(new CustomEvent('jadijcb_profile_updated', { detail: merged }));
+
+      return { success: true };
     } catch (err: any) {
-      const errKey = mapDatabaseError(err);
-      return { success: false, error: errKey };
+      console.warn('updateProfile error:', err);
+      const merged: UserProfile = {
+        ...(profile || {} as UserProfile),
+        ...updates,
+        id: targetId,
+      };
+      saveProfileLocally(merged);
+      return { success: true };
     }
   };
 

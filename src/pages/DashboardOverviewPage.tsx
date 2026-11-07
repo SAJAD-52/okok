@@ -21,6 +21,7 @@ import {
   Sparkles,
   ShieldCheck,
   Zap,
+  User,
 } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -33,6 +34,7 @@ import { UpcomingReturnsList } from '../components/dashboard/UpcomingReturnsList
 import { StorefrontLiveCard } from '../components/dashboard/StorefrontLiveCard';
 import { MachineStepperModal } from '../components/machines/MachineStepperModal';
 import { PaymentProofModal } from '../components/dashboard/PaymentProofModal';
+import { ProfileSettingsModal } from '../components/profile/ProfileSettingsModal';
 import { platformSettingsStore, PlatformSettings } from '../lib/platformSettings';
 import { Machine, Booking } from '../types/database';
 import { bookingStore } from '../lib/bookingStore';
@@ -45,6 +47,7 @@ export const DashboardOverviewPage: React.FC = () => {
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [platformSettings, setPlatformSettings] = useState<PlatformSettings>(() => platformSettingsStore.getSettings());
 
   React.useEffect(() => {
@@ -304,7 +307,18 @@ export const DashboardOverviewPage: React.FC = () => {
             </p>
           </div>
 
-          <div className="flex items-center gap-3 w-full sm:w-auto">
+          <div className="flex items-center gap-3 w-full sm:w-auto flex-wrap">
+            <Button
+              type="button"
+              variant="outline"
+              size="md"
+              onClick={() => setIsProfileModalOpen(true)}
+              leftIcon={<User className="w-4 h-4 text-primary" />}
+              className="w-full sm:w-auto font-bold text-xs text-white border-steel-700 hover:bg-steel-800 min-h-[44px]"
+            >
+              {lang === 'fr' ? 'Modifier mes infos' : 'تعديل معلوماتي'}
+            </Button>
+
             <Button
               variant="primary"
               size="md"
@@ -639,6 +653,12 @@ export const DashboardOverviewPage: React.FC = () => {
       <PaymentProofModal
         isOpen={isUpgradeModalOpen}
         onClose={() => setIsUpgradeModalOpen(false)}
+      />
+
+      {/* Profile Settings Modal */}
+      <ProfileSettingsModal
+        isOpen={isProfileModalOpen}
+        onClose={() => setIsProfileModalOpen(false)}
       />
     </div>
   );

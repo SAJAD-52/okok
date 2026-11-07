@@ -19,6 +19,7 @@ import {
   Phone,
   TrendingUp,
   X,
+  User,
 } from 'lucide-react';
 import { Logo } from '../ui/Logo';
 import { LanguageSwitcher } from '../ui/LanguageSwitcher';
@@ -28,6 +29,7 @@ import { useSubscription } from '../../hooks/useSubscription';
 import { TrialBanner } from '../dashboard/TrialBanner';
 import { SoftLockModal } from '../dashboard/SoftLockModal';
 import { PaymentProofModal } from '../dashboard/PaymentProofModal';
+import { ProfileSettingsModal } from '../profile/ProfileSettingsModal';
 import { Booking } from '../../types/database';
 import { bookingStore } from '../../lib/bookingStore';
 import { chatStore } from '../../lib/chatStore';
@@ -41,6 +43,7 @@ export const DashboardLayout: React.FC = () => {
   const { isLocked, isTrial, formattedCountdown, isActive } = useSubscription();
 
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [pendingBookingsCount, setPendingBookingsCount] = useState<number>(0);
   const [pendingBookingsList, setPendingBookingsList] = useState<Booking[]>([]);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
@@ -331,6 +334,16 @@ export const DashboardLayout: React.FC = () => {
             <LanguageSwitcher variant="dark" />
           </div>
 
+          {/* Edit Profile Button */}
+          <button
+            type="button"
+            onClick={() => setIsProfileModalOpen(true)}
+            className="flex items-center gap-2 px-2.5 py-2 rounded-xl bg-steel-900 hover:bg-steel-800 border border-steel-700/80 text-[11px] font-bold text-steel-300 hover:text-white hover:border-primary transition-colors cursor-pointer w-full text-start"
+          >
+            <User className="w-3.5 h-3.5 text-primary" />
+            <span>{lang === 'fr' ? 'Modifier mes informations' : 'تعديل معلوماتي الشخصية'}</span>
+          </button>
+
           {/* Subscription Mini Pill (Only for machinery owners) */}
           {isTrial && !isLocked && !isContractor && (
             <button
@@ -421,6 +434,18 @@ export const DashboardLayout: React.FC = () => {
                 {t('nav.marketplace')}
               </NavLink>
             )}
+
+            {/* Profile Settings Quick Button */}
+            <button
+              type="button"
+              onClick={() => setIsProfileModalOpen(true)}
+              className="px-2.5 py-1.5 text-xs font-bold text-steel-700 hover:text-ink hover:bg-steel-100 rounded-xl border border-steel-200 bg-white min-h-[44px] flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+              title={lang === 'fr' ? 'Modifier mes informations' : 'تعديل معلوماتي الشخصية'}
+            >
+              <User className="w-4 h-4 text-primary-dark" />
+              <span className="hidden sm:inline">{lang === 'fr' ? 'Mon profil' : 'تعديل حسابي'}</span>
+            </button>
+
             <div className="md:hidden">
               <LanguageSwitcher />
             </div>
@@ -586,6 +611,12 @@ export const DashboardLayout: React.FC = () => {
         isOpen={isPaymentModalOpen}
         onClose={() => setIsPaymentModalOpen(false)}
         isDismissible={true}
+      />
+
+      {/* User Profile Personal Info Settings Modal */}
+      <ProfileSettingsModal
+        isOpen={isProfileModalOpen}
+        onClose={() => setIsProfileModalOpen(false)}
       />
     </div>
   );

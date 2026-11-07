@@ -30,6 +30,7 @@ import { useLanguage } from '../hooks/useLanguage';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabase';
 import { RentalExtensionModal } from '../components/bookings/RentalExtensionModal';
+import { ProfileSettingsModal } from '../components/profile/ProfileSettingsModal';
 
 export const ContractorDashboardPage: React.FC = () => {
   const { t, lang, isRTL } = useLanguage();
@@ -43,6 +44,7 @@ export const ContractorDashboardPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [selectedBookingForExtension, setSelectedBookingForExtension] = useState<Booking | null>(null);
   const [isExtensionModalOpen, setIsExtensionModalOpen] = useState<boolean>(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState<boolean>(false);
 
   useEffect(() => {
     // Load contractor saved sites
@@ -153,6 +155,17 @@ export const ContractorDashboardPage: React.FC = () => {
               className="text-white border-steel-600 hover:bg-steel-800 text-xs font-bold"
             >
               {lang === 'fr' ? 'Mes locations actives' : 'متابعة حجوزاتي النشطة'}
+            </Button>
+
+            <Button
+              type="button"
+              variant="outline"
+              size="md"
+              onClick={() => setIsProfileModalOpen(true)}
+              leftIcon={<Building2 className="w-4 h-4 text-primary" />}
+              className="text-white border-steel-600 hover:bg-steel-800 text-xs font-bold"
+            >
+              {lang === 'fr' ? 'Modifier mes informations' : 'تعديل معلومات المقاولة'}
             </Button>
           </div>
         </div>
@@ -368,6 +381,12 @@ export const ContractorDashboardPage: React.FC = () => {
         onExtensionSubmitted={() => {
           setIsExtensionModalOpen(false);
         }}
+      />
+
+      {/* Profile Settings Modal */}
+      <ProfileSettingsModal
+        isOpen={isProfileModalOpen}
+        onClose={() => setIsProfileModalOpen(false)}
       />
     </div>
   );

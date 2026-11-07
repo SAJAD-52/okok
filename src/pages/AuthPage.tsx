@@ -37,13 +37,14 @@ import {
   normalizeMoroccanPhone,
   calculatePasswordStrength,
 } from '../lib/authHelpers';
+import { MOROCCAN_CITIES } from '../data/cities';
 import { UserRole } from '../types/database';
 
 export const AuthPage: React.FC = () => {
   const { t, lang } = useLanguage();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { loginWithPhone, signupWithPhone } = useAuth();
+  const { loginWithPhone, signupWithPhone, updateProfile } = useAuth();
 
   const isSignupParam =
     searchParams.get('mode') === 'signup' || searchParams.get('mode') === 'register';
@@ -52,6 +53,9 @@ export const AuthPage: React.FC = () => {
   );
 
   // Form State
+  const [fullName, setFullName] = useState('');
+  const [companyName, setCompanyName] = useState('');
+  const [cityId, setCityId] = useState('casablanca');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -101,17 +105,48 @@ export const AuthPage: React.FC = () => {
       }
     } else {
       // Register Mode
-      const res = await signupWithPhone(phone, password, role);
-      setIsLoading(false);
+      if (!fullName.trim()) {
+        toast.error(lang === 'fr' ? 'Veuillez saisir votre nom complet' : 'يرجى إدخال الاسم الكامل للمسؤول');
+        setIsLoading(false);
+        return;
+      }
+
+      if (!companyName.trim()) {
+        toast.error(
+          lang === 'fr'
+            ? 'Veuillez saisir le nom de votre entreprise'
+            : 'يرجى إدخال اسم الشركة أو المقاولة'
+        );
+        setIsLoading(false);
+        return;
+      }
+
+      const cityName = MOROCCAN_CITIES.find((c) => c.id === cityId)?.name_ar || cityId;
+
+      const res = await signupWithPhone(phone, password, role, {
+        fullName: fullName.trim(),
+        companyName: companyName.trim(),
+        city: cityName,
+      });
 
       if (res.success) {
+        // Also ensure updateProfile is called with these details to firmly store in DB & localStorage
+        await updateProfile({
+          full_name: fullName.trim(),
+          company_name: companyName.trim(),
+          city: cityName,
+          role: role === 'owner' ? 'owner' : 'client',
+        });
+
+        setIsLoading(false);
         toast.success(
           lang === 'fr'
             ? 'Compte créé avec succès ! 72h d\'essai activées.'
-            : 'تم إنشاء الحساب بنجاح وتفعيل فترة التجربة (72 ساعة)!'
+            : 'تم إنشاء الحساب وحفظ بياناتك بنجاح!'
         );
         setShowWelcomeModal(true);
       } else {
+        setIsLoading(false);
         toast.error(t(res.error || 'auth.signup_failed'));
       }
     }
@@ -233,6 +268,70 @@ export const AuthPage: React.FC = () => {
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Registration specific fields: Name, Company, City */}
+            {mode === 'register' && (
+              <>
+                <div>
+                  <label className="text-xs font-bold text-steel-700 block mb-1.5">
+                    {lang === 'fr' ? 'Nom complet du responsable' : 'الاسم الكامل للمسؤول'}
+                  </label>
+                  <input
+                    type="text"
+                    placeholder={lang === 'fr' ? 'ex. Karim Benjelloun' : 'مثال: كريم بنجلون أو أحمد التازي'}
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    required
+                    className="w-full px-3.5 py-3 rounded-xl border border-steel-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-steel-700 block mb-1.5">
+                    {lang === 'fr' ? 'Nom de la société / مقاولة' : 'اسم الشركة أو مقاولة الأشغال'}
+                  </label>
+                  <input
+                    type="text"
+                    placeholder={
+                      role === 'owner'
+                        ? lang === 'fr'
+                          ? 'ex. Atlas Terrassement S.A.R.L.'
+                          : 'مثال: شركة أطلس لكراء الآليات'
+                        : lang === 'fr'
+                        ? 'ex. Bâtiment & Travaux Maroc S.A.R.L.'
+                        : 'مثال: مقاولة البناء والأشغال العامة'
+                    }
+                    value={companyName}
+                    onChange={(e) => setCompanyName(e.target.value)}
+                    required
+                    className="w-full px-3.5 py-3 rounded-xl border border-steel-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-steel-700 block mb-1.5">
+                    {role === 'owner'
+                      ? lang === 'fr'
+                        ? 'Ville principale de stationnement des engins'
+                        : 'المدينة الرئيسية لتمركز أسطول الآليات'
+                      : lang === 'fr'
+                      ? 'Ville principale de vos chantiers'
+                      : 'المدينة الرئيسية لمشاريعكم وأوراشكم'}
+                  </label>
+                  <select
+                    value={cityId}
+                    onChange={(e) => setCityId(e.target.value)}
+                    className="w-full px-3.5 py-3 rounded-xl border border-steel-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-white"
+                  >
+                    {MOROCCAN_CITIES.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {lang === 'fr' ? c.name_fr : c.name_ar}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </>
+            )}
+
             {/* Phone Field */}
             <div>
               <label className="text-xs font-bold text-steel-700 block mb-1.5">

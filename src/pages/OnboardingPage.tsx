@@ -35,6 +35,21 @@ export const OnboardingPage: React.FC = () => {
   const [iceNumber, setIceNumber] = useState(profile?.ice_number || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  React.useEffect(() => {
+    if (profile) {
+      if (profile.full_name && !fullName) setFullName(profile.full_name);
+      if (profile.company_name && !companyName) setCompanyName(profile.company_name);
+      if (profile.phone && !whatsappPhone) setWhatsappPhone(profile.phone);
+      if (profile.ice_number && !iceNumber) setIceNumber(profile.ice_number);
+      if (profile.city) {
+        const found = MOROCCAN_CITIES.find(
+          (c) => c.id === profile.city || c.name_ar === profile.city || c.name_fr === profile.city
+        );
+        if (found) setCityId(found.id);
+      }
+    }
+  }, [profile]);
+
   const cityOptions = MOROCCAN_CITIES.map((c) => ({
     value: c.id,
     label: lang === 'fr' ? c.name_fr : c.name_ar,

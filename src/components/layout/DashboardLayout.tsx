@@ -190,35 +190,35 @@ export const DashboardLayout: React.FC = () => {
 
   const ownerNavigationItems = [
     {
-      to: '/app',
+      to: '/owner',
       exact: true,
       label: t('nav.dashboard'),
       icon: <LayoutDashboard className="w-5 h-5" />,
     },
     {
-      to: '/app/machines',
+      to: '/owner/machines',
       label: t('nav.machines'),
       icon: <Truck className="w-5 h-5" />,
     },
     {
-      to: '/app/bookings',
+      to: '/owner/bookings',
       label: t('nav.bookings'),
       icon: <CalendarCheck className="w-5 h-5" />,
       badge: pendingBookingsCount,
     },
     {
-      to: '/app/analytics',
+      to: '/owner/analytics',
       label: lang === 'fr' ? 'Finances & Rentabilité' : 'الإحصائيات والأرباح',
       icon: <TrendingUp className="w-5 h-5" />,
     },
     {
-      to: '/app/messages',
+      to: '/owner/messages',
       label: t('nav.messages'),
       icon: <MessageSquare className="w-5 h-5" />,
       badge: unreadMessagesCount,
     },
     {
-      to: '/app/storefront',
+      to: '/owner/storefront',
       label: t('nav.storefront'),
       icon: <Building2 className="w-5 h-5" />,
     },
@@ -493,7 +493,7 @@ export const DashboardLayout: React.FC = () => {
                               type="button"
                               onClick={() => {
                                 setIsNotificationsOpen(false);
-                                navigate('/app/bookings');
+                                navigate('/owner/bookings');
                               }}
                               className="px-2.5 py-1 rounded-lg bg-primary text-ink font-bold text-[11px] hover:bg-primary-hover transition-colors cursor-pointer"
                             >
@@ -519,7 +519,7 @@ export const DashboardLayout: React.FC = () => {
                       type="button"
                       onClick={() => {
                         setIsNotificationsOpen(false);
-                        navigate('/app/bookings');
+                        navigate('/owner/bookings');
                       }}
                       className="text-xs text-primary-dark font-bold hover:underline cursor-pointer"
                     >

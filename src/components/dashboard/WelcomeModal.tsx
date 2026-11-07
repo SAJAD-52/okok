@@ -23,13 +23,13 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({ isOpen, onClose }) =
   const handleGoToOnboarding = async () => {
     await updateProfile({ onboarding_completed: false });
     onClose();
-    navigate('/app/onboarding');
+    navigate('/owner/onboarding');
   };
 
   const handleSkipToDashboard = async () => {
     await updateProfile({ onboarding_completed: true });
     onClose();
-    navigate(isContractor ? '/entreprise' : '/app');
+    navigate(isContractor ? '/entreprise' : '/owner');
   };
 
   return (

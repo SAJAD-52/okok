@@ -53,13 +53,14 @@ export const App: React.FC = () => {
 
             {/* Protected Onboarding Route */}
             <Route
-              path="/app/onboarding"
+              path="/owner/onboarding"
               element={
                 <ProtectedRoute>
                   <OnboardingPage />
                 </ProtectedRoute>
               }
             />
+            <Route path="/app/onboarding" element={<Navigate to="/owner/onboarding" replace />} />
 
             {/* Protected Admin Console */}
             <Route
@@ -71,9 +72,9 @@ export const App: React.FC = () => {
               }
             />
 
-            {/* Protected Equipment Owner Dashboard Routes */}
+            {/* Protected Equipment Owner Dashboard Routes (/owner) */}
             <Route
-              path="/app"
+              path="/owner"
               element={
                 <ProtectedRoute>
                   <DashboardLayout />
@@ -87,6 +88,14 @@ export const App: React.FC = () => {
               <Route path="storefront" element={<StorefrontPage />} />
               <Route path="messages" element={<MessagesPage />} />
             </Route>
+
+            {/* Backward Compatibility Redirects from /app to /owner */}
+            <Route path="/app" element={<Navigate to="/owner" replace />} />
+            <Route path="/app/machines" element={<Navigate to="/owner/machines" replace />} />
+            <Route path="/app/bookings" element={<Navigate to="/owner/bookings" replace />} />
+            <Route path="/app/analytics" element={<Navigate to="/owner/analytics" replace />} />
+            <Route path="/app/storefront" element={<Navigate to="/owner/storefront" replace />} />
+            <Route path="/app/messages" element={<Navigate to="/owner/messages" replace />} />
 
             {/* Protected Contractor / Entreprise Portal Routes */}
             <Route

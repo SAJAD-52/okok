@@ -95,7 +95,7 @@ export const AuthPage: React.FC = () => {
           lang === 'fr' ? 'Connexion réussie !' : 'تم تسجيل الدخول بنجاح!'
         );
         const isClient = role === 'client';
-        navigate(isClient ? '/entreprise' : '/app');
+        navigate(isClient ? '/entreprise' : '/owner');
       } else {
         toast.error(t(res.error || 'auth.auth_failed'));
       }

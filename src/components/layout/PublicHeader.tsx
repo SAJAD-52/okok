@@ -24,8 +24,8 @@ export const PublicHeader: React.FC = () => {
       ]
     : [
         { to: '/marketplace', label: t('nav.marketplace'), icon: <Compass className="w-4 h-4" /> },
-        { to: '/app/machines', label: t('nav.machines'), icon: <Wrench className="w-4 h-4" /> },
-        { to: '/app', label: t('nav.dashboard') },
+        { to: '/owner/machines', label: t('nav.machines'), icon: <Wrench className="w-4 h-4" /> },
+        { to: '/owner', label: t('nav.dashboard') },
       ];
 
   const navLinks = isSuperAdmin
@@ -65,7 +65,7 @@ export const PublicHeader: React.FC = () => {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => navigate(isContractor ? '/entreprise' : '/app')}
+              onClick={() => navigate(isContractor ? '/entreprise' : '/owner')}
               className="hidden sm:inline-flex text-xs font-bold"
               leftIcon={isContractor ? <HardHat className="w-4 h-4 text-primary" /> : <User className="w-4 h-4" />}
             >
@@ -99,7 +99,7 @@ export const PublicHeader: React.FC = () => {
             <Button
               size="sm"
               variant="primary"
-              onClick={() => navigate('/app/machines')}
+              onClick={() => navigate('/owner/machines')}
               className="hidden sm:inline-flex"
               leftIcon={<PlusCircle className="w-4 h-4" />}
             >
@@ -158,7 +158,7 @@ export const PublicHeader: React.FC = () => {
                 className="w-full justify-center"
                 onClick={() => {
                   setMobileMenuOpen(false);
-                  navigate('/app/machines');
+                  navigate('/owner/machines');
                 }}
                 leftIcon={<PlusCircle className="w-4 h-4" />}
               >
@@ -172,7 +172,7 @@ export const PublicHeader: React.FC = () => {
               className="w-full justify-center"
               onClick={() => {
                 setMobileMenuOpen(false);
-                navigate(user ? (isContractor ? '/entreprise' : '/app') : '/auth');
+                navigate(user ? (isContractor ? '/entreprise' : '/owner') : '/auth');
               }}
               leftIcon={<User className="w-4 h-4" />}
             >

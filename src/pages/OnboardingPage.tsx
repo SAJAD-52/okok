@@ -59,7 +59,7 @@ export const OnboardingPage: React.FC = () => {
 
     if (res.success) {
       toast.success(t('onboarding.success_toast'));
-      navigate('/app');
+      navigate('/owner');
     } else {
       toast.error(res.error || t('common.error'));
     }
@@ -67,7 +67,7 @@ export const OnboardingPage: React.FC = () => {
 
   const handleSkip = async () => {
     await updateProfile({ onboarding_completed: true });
-    navigate('/app');
+    navigate('/owner');
   };
 
   return (

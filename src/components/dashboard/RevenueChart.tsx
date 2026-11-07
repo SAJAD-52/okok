@@ -77,7 +77,7 @@ export const RevenueChart: React.FC<RevenueChartProps> = ({ data }) => {
             <span>+23.4% {lang === 'fr' ? 'ce mois' : 'هذا الشهر'}</span>
           </div>
           <Link
-            to="/app/analytics"
+            to="/owner/analytics"
             className="flex items-center gap-1 px-3 py-1 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-800 text-xs font-black border border-primary/40 transition-colors"
           >
             <BarChart3 className="w-3.5 h-3.5" />

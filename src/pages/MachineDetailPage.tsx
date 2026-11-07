@@ -351,7 +351,7 @@ export const MachineDetailPage: React.FC = () => {
       return;
     }
     const isClient = profile?.role === 'client' || profile?.role === 'contractor';
-    const basePath = isClient ? '/entreprise/messages' : '/app/messages';
+    const basePath = isClient ? '/entreprise/messages' : '/owner/messages';
     navigate(`${basePath}?machine_id=${machine?.id}&target_user=${machine?.owner_id}`);
   };
 

@@ -49,7 +49,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     if (profile?.role === 'client' || profile?.role === 'contractor') {
       return <Navigate to="/entreprise" replace />;
     }
-    return <Navigate to="/app" replace />;
+    return <Navigate to="/owner" replace />;
   }
 
   return children;

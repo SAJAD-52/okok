@@ -324,7 +324,7 @@ export const DashboardOverviewPage: React.FC = () => {
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => navigate('/app/bookings?status=pending')}
+              onClick={() => navigate('/owner/bookings?status=pending')}
               className="text-xs font-bold shrink-0 bg-white"
             >
               {lang === 'fr' ? 'Gérer les réservations →' : 'إدارة الحجوزات ←'}
@@ -536,7 +536,7 @@ export const DashboardOverviewPage: React.FC = () => {
                 type="button"
                 variant="ghost"
                 size="sm"
-                onClick={() => navigate('/app/messages')}
+                onClick={() => navigate('/owner/messages')}
                 className="text-xs font-bold text-steel-600"
               >
                 {lang === 'fr' ? 'Voir tous' : 'عرض الكل'}
@@ -553,7 +553,7 @@ export const DashboardOverviewPage: React.FC = () => {
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => navigate('/app/messages')}
+                onClick={() => navigate('/owner/messages')}
                 leftIcon={<MessageSquare className="w-3.5 h-3.5" />}
               >
                 {t('nav.messages')}

@@ -57,7 +57,7 @@ export const StorefrontLiveCard: React.FC<StorefrontLiveCardProps> = ({
 
         <button
           type="button"
-          onClick={() => navigate('/app/storefront')}
+          onClick={() => navigate('/owner/storefront')}
           className="text-xs font-bold text-steel-600 hover:text-ink flex items-center gap-1 cursor-pointer"
         >
           <Edit3 className="w-3.5 h-3.5" />

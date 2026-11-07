@@ -276,7 +276,7 @@ export const AdminPage: React.FC = () => {
     if (acc.role === 'client' || acc.role === 'contractor') {
       navigate('/entreprise');
     } else {
-      navigate('/app');
+      navigate('/owner');
     }
   };
 
@@ -364,7 +364,7 @@ export const AdminPage: React.FC = () => {
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => navigate('/app')}
+            onClick={() => navigate('/owner')}
             className="text-xs font-bold bg-steel-900 border-steel-700 text-steel-300 hover:text-white"
           >
             فضاء الملاك

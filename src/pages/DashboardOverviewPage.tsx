@@ -18,6 +18,9 @@ import {
   Check,
   Phone,
   CalendarCheck,
+  Sparkles,
+  ShieldCheck,
+  Zap,
 } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -29,6 +32,8 @@ import { RevenueChart, RevenuePoint } from '../components/dashboard/RevenueChart
 import { UpcomingReturnsList } from '../components/dashboard/UpcomingReturnsList';
 import { StorefrontLiveCard } from '../components/dashboard/StorefrontLiveCard';
 import { MachineStepperModal } from '../components/machines/MachineStepperModal';
+import { PaymentProofModal } from '../components/dashboard/PaymentProofModal';
+import { platformSettingsStore, PlatformSettings } from '../lib/platformSettings';
 import { Machine, Booking } from '../types/database';
 import { bookingStore } from '../lib/bookingStore';
 import { toast } from '../components/ui/Toast';
@@ -39,6 +44,21 @@ export const DashboardOverviewPage: React.FC = () => {
   const { profile, user } = useAuth();
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
+  const [platformSettings, setPlatformSettings] = useState<PlatformSettings>(() => platformSettingsStore.getSettings());
+
+  React.useEffect(() => {
+    const handleUpdate = () => {
+      setPlatformSettings(platformSettingsStore.getSettings());
+    };
+    window.addEventListener('jadijcb_settings_updated', handleUpdate);
+    window.addEventListener('storage', handleUpdate);
+    platformSettingsStore.pullFromRemote().then(setPlatformSettings);
+    return () => {
+      window.removeEventListener('jadijcb_settings_updated', handleUpdate);
+      window.removeEventListener('storage', handleUpdate);
+    };
+  }, []);
 
   const userId = user?.id || profile?.id;
 
@@ -298,6 +318,46 @@ export const DashboardOverviewPage: React.FC = () => {
         </div>
       </div>
 
+      {/* PRO Lead Magnet & Subscription Value Card */}
+      <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-r from-amber-500/15 via-primary/10 to-transparent border-2 border-primary/40 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="p-1 rounded-lg bg-primary text-ink font-black">
+              <Sparkles className="w-4 h-4" />
+            </span>
+            <span className="text-xs font-black uppercase tracking-wider text-ink">
+              خطة المالك الاحترافية (JADIJCB PRO)
+            </span>
+            <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">
+              مدة تجريبية {platformSettings.trial_duration_hours} ساعة مجاناً
+            </span>
+          </div>
+          <h2 className="text-base font-black text-ink">
+            عرض غير محدود لأسطولك واستقبال مباشر لطلبات المقاولات في مدينتك
+          </h2>
+          <p className="text-xs text-steel-600 max-w-2xl leading-relaxed">
+            💡 <strong>العائد الأكبر في السوق المغربي:</strong> عملية كراء واحدة لآلية واحدة بمبلغ 2,200 درهم تغطي اشتراكك لأكثر من 10 أشهر كاملة! عمولة 0% وتواصل مباشر مع مديري الأوراش.
+          </p>
+        </div>
+
+        <div className="flex flex-row md:flex-col items-center md:items-end justify-between w-full md:w-auto gap-3 shrink-0">
+          <div className="text-start md:text-end font-mono">
+            <span className="text-2xl font-black text-ink">{platformSettings.monthly_price_mad}</span>
+            <span className="text-xs font-bold text-steel-500 ms-1">د.م / شهر</span>
+          </div>
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
+            onClick={() => setIsUpgradeModalOpen(true)}
+            className="font-black text-xs shadow-md whitespace-nowrap"
+            leftIcon={<ShieldCheck className="w-4 h-4" />}
+          >
+            تفعيل الاشتراك وإرسال الوصل
+          </Button>
+        </div>
+      </div>
+
       {/* Urgent Pending Rental Bookings Alert Banner */}
       {pendingBookings.length > 0 && (
         <Card className="p-5 bg-gradient-to-r from-amber-500/15 to-amber-500/5 border-2 border-primary rounded-2xl space-y-3 shadow-md">
@@ -375,7 +435,7 @@ export const DashboardOverviewPage: React.FC = () => {
                       type="button"
                       variant="outline"
                       size="sm"
-                      onClick={() => navigate(`/app/messages?target=${pb.client_id}&machine=${pb.machine_id}`)}
+                      onClick={() => navigate(`/owner/messages?target=${pb.client_id}&machine=${pb.machine_id}`)}
                       className="text-xs font-bold text-steel-700"
                       leftIcon={<MessageSquare className="w-3.5 h-3.5 text-primary" />}
                     >
@@ -573,6 +633,12 @@ export const DashboardOverviewPage: React.FC = () => {
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
         onSave={handleMachineCreated}
+      />
+
+      {/* Upgrade / Payment Proof Modal */}
+      <PaymentProofModal
+        isOpen={isUpgradeModalOpen}
+        onClose={() => setIsUpgradeModalOpen(false)}
       />
     </div>
   );

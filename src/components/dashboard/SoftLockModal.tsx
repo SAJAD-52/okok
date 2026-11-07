@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Lock,
   ShieldCheck,
@@ -11,18 +11,16 @@ import {
   AlertCircle,
   Clock,
   Sparkles,
+  TrendingUp,
+  CreditCard,
+  Phone,
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import {
-  BANK_RIB_NUMBER,
-  BANK_NAME,
-  BANK_ACCOUNT_HOLDER,
-  WAFACASH_BENEFICIARY_NAME,
-  WAFACASH_CIN,
-  WAFACASH_CITY,
   MONTHLY_PLAN_PRICE_MAD,
   WHATSAPP_ADMIN_LINK,
 } from '../../lib/constants';
+import { platformSettingsStore, PlatformSettings } from '../../lib/platformSettings';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Card } from '../ui/Card';
@@ -39,9 +37,31 @@ export const SoftLockModal: React.FC<SoftLockModalProps> = ({ isLocked }) => {
   const { t, lang } = useLanguage();
   const { profile, user } = useAuth();
 
+  const [settings, setSettings] = useState<PlatformSettings>(() => platformSettingsStore.getSettings());
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      setSettings(platformSettingsStore.getSettings());
+    };
+    window.addEventListener('jadijcb_settings_updated', handleUpdate);
+    window.addEventListener('storage', handleUpdate);
+    platformSettingsStore.pullFromRemote().then(setSettings);
+    return () => {
+      window.removeEventListener('jadijcb_settings_updated', handleUpdate);
+      window.removeEventListener('storage', handleUpdate);
+    };
+  }, []);
+
   const [method, setMethod] = useState<PaymentMethod>('rib');
   const [reference, setReference] = useState('');
-  const [amount, setAmount] = useState<number>(MONTHLY_PLAN_PRICE_MAD);
+  const [amount, setAmount] = useState<number>(() => settings.monthly_price_mad || 200);
+
+  useEffect(() => {
+    if (settings.monthly_price_mad) {
+      setAmount(settings.monthly_price_mad);
+    }
+  }, [settings.monthly_price_mad]);
+
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isCopied, setIsCopied] = useState(false);
@@ -51,9 +71,9 @@ export const SoftLockModal: React.FC<SoftLockModalProps> = ({ isLocked }) => {
   if (!isLocked) return null;
 
   const handleCopyRib = () => {
-    navigator.clipboard.writeText(BANK_RIB_NUMBER.replace(/\s+/g, ''));
+    navigator.clipboard.writeText((settings.rib_number || '').replace(/\s+/g, ''));
     setIsCopied(true);
-    toast.success(t('lock.copied'));
+    toast.success(lang === 'fr' ? 'RIB copié dans le presse-papier !' : 'تم نسخ رقم الـ RIB بنجاح!');
     setTimeout(() => setIsCopied(false), 2500);
   };
 
@@ -119,8 +139,9 @@ export const SoftLockModal: React.FC<SoftLockModalProps> = ({ isLocked }) => {
   };
 
   const userPhone = profile?.phone || '+2126XXXXXXXX';
-  const whatsappUrl = `${WHATSAPP_ADMIN_LINK}${encodeURIComponent(
-    `Salam, j'ai effectué le paiement de l'abonnement JADIJCB pour le compte ${userPhone} (Réf: ${reference || 'en cours'}). Merci de valider.`
+  const cleanPhone = (settings.whatsapp_number || '+212661234567').replace(/[^0-9]/g, '');
+  const whatsappUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(
+    `السلام عليكم، لقد قمت بأداء اشتراك منصة JADIJCB (${settings.monthly_price_mad} د.م) لحساب ${userPhone}. رقم المرجع: ${reference || 'وصل مرفق'}. أرجو التأكيد والتفعيل السريع وشكراً.`
   )}`;
 
   return (
@@ -140,14 +161,16 @@ export const SoftLockModal: React.FC<SoftLockModalProps> = ({ isLocked }) => {
             <div>
               <div className="flex items-center gap-2">
                 <h2 id="softlock-title" className="text-base sm:text-xl font-black text-white">
-                  {t('lock.title')}
+                  {lang === 'fr' ? 'Fin de la période d\'essai gratuite (72h)' : 'انتهاء الفترة التجريبية المجانية (72 ساعة)'}
                 </h2>
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-danger text-white font-black uppercase tracking-wider">
-                  Soft Lock
+                  تفعيل الاشتراك
                 </span>
               </div>
               <p className="text-xs text-steel-400 mt-1 max-w-xl">
-                {t('lock.subtitle')}
+                {lang === 'fr'
+                  ? 'Pour continuer à recevoir des demandes de location des chantiers et entreprises, activez votre abonnement mensuel.'
+                  : 'لتستمر آلياتك في الظهور بمحرك بحث المقاولات واستقبال طلبات الكراء المباشرة، فعّل اشتراكك الشهري الآن.'}
               </p>
             </div>
           </div>
@@ -176,36 +199,50 @@ export const SoftLockModal: React.FC<SoftLockModalProps> = ({ isLocked }) => {
                   className="inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md transition-all min-h-[48px]"
                 >
                   <MessageCircle className="w-5 h-5" />
-                  <span>{t('lock.whatsapp_btn')}</span>
+                  <span>تأكيد التفعيل عبر واتساب ({settings.whatsapp_number})</span>
                 </a>
               </div>
             </div>
           ) : (
             <>
               {/* Subscription Plan Summary Card */}
-              <div className="p-4 rounded-2xl bg-amber-50 border border-primary/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-500/15 via-primary/10 to-amber-500/5 border-2 border-primary/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
                 <div>
                   <div className="flex items-center gap-2">
                     <Sparkles className="w-4 h-4 text-primary-dark" />
                     <span className="text-xs font-black text-ink">
-                      {t('lock.price_box_title')}
+                      اشتراك مالك الآليات الاحترافي (JADIJCB PRO)
                     </span>
                   </div>
-                  <p className="text-[11px] text-steel-600 mt-0.5">
-                    {t('lock.price_perks')}
+                  <p className="text-[11px] text-steel-700 mt-1">
+                    عرض غير محدود للآليات · متجر إلكتروني معتمد · 0% عمولة على عقود الكراء
                   </p>
                 </div>
                 <div className="text-end">
-                  <div className="text-xl font-black text-ink font-mono latin-nums">
-                    {MONTHLY_PLAN_PRICE_MAD} <span className="text-xs font-bold text-steel-600">{t('common.mad')} / {lang === 'fr' ? 'mois' : 'شهر'}</span>
+                  <div className="text-2xl font-black text-ink font-mono latin-nums">
+                    {settings.monthly_price_mad} <span className="text-xs font-bold text-steel-600">د.م / شهر</span>
                   </div>
+                  <span className="text-[10px] text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full font-bold">
+                    بدون أي التزام أو عمولة
+                  </span>
                 </div>
               </div>
 
-              {/* Payment Instruction Options (RIB & Wafacash) */}
+              {/* Moroccan ROI & Lead Magnet Value Proposition */}
+              <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 space-y-1.5">
+                <div className="flex items-center gap-2 text-emerald-900 font-black text-xs">
+                  <TrendingUp className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>استثمار ذكي ومضمون العائد 100%</span>
+                </div>
+                <p className="text-[11px] text-emerald-800 leading-relaxed">
+                  💡 <strong>يوم كراء واحد لآلية واحدة</strong> (بمعدل 2,200 درهم/يوم) يغطي تكلفة اشتراكك الشهري لأكثر من <strong>10 أشهر كاملة</strong>! تواصل مباشر وفوري مع مديري المشاريع والمقاولات بدون أي وسيط.
+                </p>
+              </div>
+
+              {/* Payment Instruction Options (Dynamic Bank RIB & Cash Beneficiary) */}
               <div>
                 <label className="text-xs font-bold text-steel-700 block mb-2">
-                  {t('lock.payment_methods_title')}
+                  طرق الأداء المعتمدة (تحويل بنكي أو وكالات كاش):
                 </label>
 
                 {/* Option 1: Bank RIB */}
@@ -214,47 +251,47 @@ export const SoftLockModal: React.FC<SoftLockModalProps> = ({ isLocked }) => {
                     <div className="flex items-center gap-2">
                       <Building2 className="w-4 h-4 text-primary-dark" />
                       <span className="text-xs font-extrabold text-ink">
-                        {t('lock.rib_title')}
+                        التحويل البنكي المباشر (Virement Bancaire)
                       </span>
                     </div>
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-steel-200 text-steel-700 font-bold">
-                      {BANK_NAME}
+                      {settings.bank_name}
                     </span>
                   </div>
 
                   <p className="text-[11px] text-steel-600 mb-2">
-                    {t('lock.rib_beneficiary')} : <strong>{BANK_ACCOUNT_HOLDER}</strong>
+                    اسم صاحب الحساب: <strong>{settings.account_holder_name}</strong>
                   </p>
 
                   <div className="flex items-center justify-between p-2.5 rounded-xl bg-white border border-steel-300 font-mono text-xs font-bold tracking-wide">
-                    <span className="truncate text-ink select-all">{BANK_RIB_NUMBER}</span>
+                    <span className="truncate text-ink select-all">{settings.rib_number}</span>
                     <Button
                       type="button"
                       variant="outline"
                       size="sm"
                       onClick={handleCopyRib}
-                      className="ms-2 shrink-0 text-xs py-1 px-2.5 min-h-[32px]"
+                      className="ms-2 shrink-0 text-xs py-1 px-2.5 min-h-[32px] font-bold"
                       leftIcon={isCopied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
                     >
-                      {isCopied ? t('lock.copied') : t('lock.copy_rib')}
+                      {isCopied ? 'تم النسخ ✓' : 'نسخ رقم الـ RIB'}
                     </Button>
                   </div>
                 </Card>
 
-                {/* Option 2: Wafacash */}
+                {/* Option 2: Cash Plus / Wafacash */}
                 <Card className="p-4 border-steel-200 bg-surface">
                   <span className="text-xs font-extrabold text-ink block mb-1">
-                    {t('lock.wafacash_title')}
+                    أو التحويل عبر وكالات تحويل الأموال (Wafacash / Cash Plus):
                   </span>
                   <div className="p-2.5 rounded-xl bg-white border border-steel-300 text-xs text-steel-700 space-y-1">
                     <p>
-                      {lang === 'fr' ? 'Bénéficiaire :' : 'المستفيد :'} <strong>{WAFACASH_BENEFICIARY_NAME}</strong>
+                      المستفيد: <strong>{settings.account_holder_name}</strong>
                     </p>
                     <p>
-                      {lang === 'fr' ? 'CIN / Identifiant :' : 'رقم البطاقة الوطنية :'} <strong>{WAFACASH_CIN}</strong>
+                      رقم البطاقة الوطنية (CIN): <strong className="font-mono">{settings.cin_number}</strong>
                     </p>
                     <p>
-                      {lang === 'fr' ? 'Ville :' : 'المدينة :'} <strong>{WAFACASH_CITY}</strong>
+                      المدينة: <strong>{settings.city}</strong>
                     </p>
                   </div>
                 </Card>

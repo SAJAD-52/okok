@@ -51,9 +51,10 @@ import { useAuth, SUPER_ADMIN_EMAIL } from '../hooks/useAuth';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { adminService, AdminAccountDetail, PlatformActivityLog } from '../lib/adminService';
 import { bookingStore } from '../lib/bookingStore';
+import { platformSettingsStore, PlatformSettings } from '../lib/platformSettings';
 import { PaymentRecord, PaymentStatus, Machine, Booking, UserRole } from '../types/database';
 
-type AdminTab = 'accounts' | 'machines' | 'bookings' | 'payments' | 'activity';
+type AdminTab = 'accounts' | 'machines' | 'bookings' | 'payments' | 'activity' | 'settings';
 
 export const AdminPage: React.FC = () => {
   const { t, lang, isRTL } = useLanguage();
@@ -85,6 +86,30 @@ export const AdminPage: React.FC = () => {
   // Activity stream state
   const [activities, setActivities] = useState<PlatformActivityLog[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+
+  // Platform dynamic payment & subscription settings
+  const [settingsForm, setSettingsForm] = useState<PlatformSettings>(() => platformSettingsStore.getSettings());
+  const [isSavingSettings, setIsSavingSettings] = useState<boolean>(false);
+
+  useEffect(() => {
+    platformSettingsStore.pullFromRemote().then((s) => {
+      setSettingsForm(s);
+    });
+  }, []);
+
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingSettings(true);
+    try {
+      const updated = await platformSettingsStore.updateSettings(settingsForm);
+      setSettingsForm(updated);
+      toast.success('✅ تم حفظ وتحديث بيانات الدفع بنجاح! ستظهر فوراً للملاك عند انتهاء المدة التجريبية.');
+    } catch {
+      toast.error('حدث خطأ أثناء حفظ الإعدادات');
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
 
   // Load all platform data
   const loadPlatformData = async () => {
@@ -438,6 +463,7 @@ export const AdminPage: React.FC = () => {
             { id: 'machines', labelAr: '🚜 مراقبة أسطول الآليات وسوق المعدات', labelFr: 'Toutes les Machines', icon: <Truck className="w-4 h-4" /> },
             { id: 'bookings', labelAr: '📋 عقود الكراء والعمليات بالأوراش', labelFr: 'Réservations Chantiers', icon: <CalendarCheck className="w-4 h-4" /> },
             { id: 'payments', labelAr: '💳 تدقيق التحويلات والوصولات البنكية', labelFr: 'Validation des Paiements', icon: <CreditCard className="w-4 h-4" /> },
+            { id: 'settings', labelAr: '⚙️ إعدادات الدفع والاشتراك (RIB/CIN)', labelFr: 'Paramètres RIB & Tarif', icon: <CreditCard className="w-4 h-4" /> },
             { id: 'activity', labelAr: '⚡ سجل الأنشطة المباشر للجميع', labelFr: 'Journal d\'Activité', icon: <Activity className="w-4 h-4" /> },
           ].map((tab) => (
             <button
@@ -799,24 +825,286 @@ export const AdminPage: React.FC = () => {
           </div>
         )}
 
-        {/* TAB 5: LIVE AUDIT ACTIVITY STREAM */}
-        {activeTab === 'activity' && (
-          <div className="space-y-3">
-            {activities.map((act) => (
-              <Card key={act.id} className="p-4 bg-white border border-steel-200 rounded-2xl flex items-start gap-3">
-                <div className="w-9 h-9 rounded-xl bg-amber-50 text-primary-dark flex items-center justify-center shrink-0">
-                  <Activity className="w-4 h-4" />
+        {/* TAB: SETTINGS & PAYMENT CREDENTIALS (SUPER ADMIN AUTHORITY) */}
+        {activeTab === 'settings' && (
+          <div className="space-y-6">
+            <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-amber-500/15 via-primary/10 to-transparent border border-primary/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="p-1.5 rounded-lg bg-primary text-ink font-black">
+                    <Sparkles className="w-4 h-4" />
+                  </span>
+                  <h2 className="text-base sm:text-lg font-black text-ink">
+                    إعدادات الدفع، الـ RIB، والاشتراك الشهري للملاك
+                  </h2>
                 </div>
-                <div className="flex-1">
-                  <div className="flex items-center justify-between">
-                    <span className="font-black text-xs text-ink">{act.user_name} ({act.company_name})</span>
-                    <span className="text-[10px] text-steel-400 font-mono">{act.timestamp}</span>
+                <p className="text-xs text-steel-600 mt-1 max-w-2xl">
+                  تعديل بياناتك البنكية، رقم البطاقة الوطنية (CIN)، واسمك، ورقم الواتساب، وسعر الاشتراك (200 درهم). أي تغيير تحفظه ينعكس مباشرة وفورياً على نافذة الدفع والـ Pop-up التي تظهر للملاك عند انتهاء مدتهم التجريبية (72 ساعة).
+                </p>
+              </div>
+              <Badge variant="warning" className="text-xs font-mono font-bold shrink-0">
+                مزامنة فورية حية
+              </Badge>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Settings Form */}
+              <Card className="lg:col-span-7 p-6 bg-white border border-steel-200 shadow-soft">
+                <form onSubmit={handleSaveSettings} className="space-y-4">
+                  <h3 className="text-sm font-extrabold text-ink border-b border-steel-100 pb-2 flex items-center gap-2">
+                    <CreditCard className="w-4 h-4 text-primary-dark" />
+                    <span>بيانات الحساب البنكي والهوية الوطنية (الظاهرة للملاك)</span>
+                  </h3>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {/* Monthly Price */}
+                    <div>
+                      <label className="block text-xs font-bold text-steel-700 mb-1">
+                        سعر الاشتراك الشهري (درهم مغربي)
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          value={settingsForm.monthly_price_mad}
+                          onChange={(e) => setSettingsForm({ ...settingsForm, monthly_price_mad: Number(e.target.value) || 0 })}
+                          required
+                          min={0}
+                          className="w-full px-3.5 py-2.5 rounded-xl border border-steel-300 font-mono text-sm font-black focus:outline-none focus:ring-2 focus:ring-primary bg-surface"
+                        />
+                        <span className="absolute end-3 top-2.5 text-xs font-bold text-steel-500">
+                          د.م / شهر
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-steel-500 mt-0.5">المبلغ المحدد الحالي هو 200 درهم شهرياً.</p>
+                    </div>
+
+                    {/* Trial Duration */}
+                    <div>
+                      <label className="block text-xs font-bold text-steel-700 mb-1">
+                        مدة الفترة التجريبية المجانية (بالساعات)
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          value={settingsForm.trial_duration_hours}
+                          onChange={(e) => setSettingsForm({ ...settingsForm, trial_duration_hours: Number(e.target.value) || 0 })}
+                          required
+                          min={1}
+                          className="w-full px-3.5 py-2.5 rounded-xl border border-steel-300 font-mono text-sm font-black focus:outline-none focus:ring-2 focus:ring-primary bg-surface"
+                        />
+                        <span className="absolute end-3 top-2.5 text-xs font-bold text-steel-500">
+                          ساعة
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-steel-500 mt-0.5">72 ساعة (3 أيام) لتجربة جميع ميزات المنصة.</p>
+                    </div>
                   </div>
-                  <p className="text-xs text-steel-700 mt-1">{act.details}</p>
-                  <span className="text-[10px] text-steel-400 mt-0.5 block">{act.city} · {act.user_phone}</span>
-                </div>
+
+                  {/* Bank Name */}
+                  <div>
+                    <label className="block text-xs font-bold text-steel-700 mb-1">
+                      اسم المؤسسة البنكية
+                    </label>
+                    <input
+                      type="text"
+                      value={settingsForm.bank_name}
+                      onChange={(e) => setSettingsForm({ ...settingsForm, bank_name: e.target.value })}
+                      placeholder="مثال: Attijariwafa Bank (التجاري وفا بنك) أو CIH Bank"
+                      required
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-steel-300 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-primary bg-surface"
+                    />
+                  </div>
+
+                  {/* RIB Number */}
+                  <div>
+                    <label className="block text-xs font-bold text-steel-700 mb-1">
+                      رقم الـ RIB البنكي (24 رقماً)
+                    </label>
+                    <input
+                      type="text"
+                      value={settingsForm.rib_number}
+                      onChange={(e) => setSettingsForm({ ...settingsForm, rib_number: e.target.value })}
+                      placeholder="007 780 0001234567890123 45"
+                      required
+                      dir="ltr"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-steel-300 font-mono text-xs font-bold tracking-wider focus:outline-none focus:ring-2 focus:ring-primary bg-surface"
+                    />
+                    <p className="text-[10px] text-steel-500 mt-0.5">
+                      يُنسخ بنقرة واحدة من قبل المالك عند التحويل من تطبيقه البنكي (CIH Mobile, Attijari Mobile, إلخ).
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {/* Account Holder Name */}
+                    <div>
+                      <label className="block text-xs font-bold text-steel-700 mb-1">
+                        الاسم الكامل لصاحب الحساب البنكي
+                      </label>
+                      <input
+                        type="text"
+                        value={settingsForm.account_holder_name}
+                        onChange={(e) => setSettingsForm({ ...settingsForm, account_holder_name: e.target.value })}
+                        placeholder="الاسم العائلي والشخصي"
+                        required
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-steel-300 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-primary bg-surface"
+                      />
+                    </div>
+
+                    {/* National ID (CIN) */}
+                    <div>
+                      <label className="block text-xs font-bold text-steel-700 mb-1">
+                        رقم البطاقة الوطنية للتعريف (CIN)
+                      </label>
+                      <input
+                        type="text"
+                        value={settingsForm.cin_number}
+                        onChange={(e) => setSettingsForm({ ...settingsForm, cin_number: e.target.value.toUpperCase() })}
+                        placeholder="مثال: AB 123456"
+                        required
+                        dir="ltr"
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-steel-300 font-mono text-xs font-bold uppercase focus:outline-none focus:ring-2 focus:ring-primary bg-surface"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {/* WhatsApp Helpline */}
+                    <div>
+                      <label className="block text-xs font-bold text-steel-700 mb-1">
+                        رقم الواتساب المباشر لاستقبال وصولات الدفع
+                      </label>
+                      <input
+                        type="text"
+                        value={settingsForm.whatsapp_number}
+                        onChange={(e) => setSettingsForm({ ...settingsForm, whatsapp_number: e.target.value })}
+                        placeholder="+212661234567"
+                        required
+                        dir="ltr"
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-steel-300 font-mono text-xs font-bold focus:outline-none focus:ring-2 focus:ring-primary bg-surface"
+                      />
+                      <p className="text-[10px] text-steel-500 mt-0.5">
+                        يفتح محادثة واتساب فورية مباشرة مع المالك مرفقة ببيانات حسابه.
+                      </p>
+                    </div>
+
+                    {/* City */}
+                    <div>
+                      <label className="block text-xs font-bold text-steel-700 mb-1">
+                        المدينة
+                      </label>
+                      <input
+                        type="text"
+                        value={settingsForm.city}
+                        onChange={(e) => setSettingsForm({ ...settingsForm, city: e.target.value })}
+                        placeholder="Casablanca (الدار البيضاء)"
+                        required
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-steel-300 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-primary bg-surface"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="pt-4 border-t border-steel-100 flex items-center justify-end gap-3">
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      size="md"
+                      disabled={isSavingSettings}
+                      leftIcon={<CheckCircle className="w-4 h-4" />}
+                      className="font-black px-6 shadow-md"
+                    >
+                      {isSavingSettings ? 'جاري الحفظ والمزامنة...' : 'حفظ وتطبيق فوراً على جميع الملاك'}
+                    </Button>
+                  </div>
+                </form>
               </Card>
-            ))}
+
+              {/* Live Preview Panel (How Owners See It) */}
+              <div className="lg:col-span-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black text-ink flex items-center gap-1.5">
+                    <Eye className="w-4 h-4 text-primary-dark" />
+                    <span>معاينة حية: كيف تظهر النافذة للمالك (Pop-up)</span>
+                  </span>
+                  <span className="text-[10px] text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full font-bold">
+                    معاينة متطابقة 100%
+                  </span>
+                </div>
+
+                <div className="border-2 border-primary/50 rounded-3xl p-5 bg-white shadow-xl space-y-4 text-start">
+                  {/* Mini Pop-up Header */}
+                  <div className="p-3 bg-ink text-white rounded-2xl flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-danger/20 border border-danger text-danger flex items-center justify-center font-black shrink-0">
+                      <Lock className="w-4 h-4 text-red-500" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-black">انتهاء المدة التجريبية</span>
+                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-primary text-ink font-bold">
+                          {settingsForm.trial_duration_hours}h
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-steel-400">
+                        قم بتفعيل اشتراكك الشهري لمتابعة استقبال طلبات كراء الآليات
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Plan Price Highlight */}
+                  <div className="p-3.5 rounded-xl bg-amber-50 border border-primary/40 flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-black text-ink">اشتراك المالك الاحترافي</span>
+                      <p className="text-[10px] text-steel-600">وصول كامل لطلبات الأوراش والمقاولات</p>
+                    </div>
+                    <div className="text-end font-mono">
+                      <span className="text-xl font-black text-ink">{settingsForm.monthly_price_mad}</span>
+                      <span className="text-[10px] font-bold text-steel-600 ms-1">د.م / شهر</span>
+                    </div>
+                  </div>
+
+                  {/* Live RIB Display */}
+                  <div className="p-3 rounded-xl bg-surface border border-steel-200 space-y-2">
+                    <div className="flex items-center justify-between text-xs font-bold text-ink">
+                      <span>التحويل البنكي المباشر (Virement)</span>
+                      <span className="text-[10px] text-steel-500 font-normal">{settingsForm.bank_name}</span>
+                    </div>
+                    <div className="text-[11px] text-steel-600">
+                      المستفيد: <strong>{settingsForm.account_holder_name}</strong>
+                    </div>
+                    <div className="p-2 rounded-lg bg-white border border-steel-300 font-mono text-[11px] font-bold flex items-center justify-between">
+                      <span className="truncate">{settingsForm.rib_number}</span>
+                      <span className="text-[10px] text-primary-dark font-sans px-1.5 py-0.5 bg-primary/10 rounded font-bold shrink-0 ms-1">
+                        نسخ RIB
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Live CIN & Cash */}
+                  <div className="p-3 rounded-xl bg-surface border border-steel-200 text-xs space-y-1">
+                    <span className="font-extrabold text-ink block text-[11px]">التحويل النقدي (Wafacash / Cash Plus)</span>
+                    <div className="text-[11px] text-steel-700">
+                      المستفيد: <strong>{settingsForm.account_holder_name}</strong>
+                    </div>
+                    <div className="text-[11px] text-steel-700">
+                      رقم البطاقة الوطنية (CIN): <strong className="font-mono">{settingsForm.cin_number}</strong>
+                    </div>
+                    <div className="text-[11px] text-steel-700">
+                      المدينة: <strong>{settingsForm.city}</strong>
+                    </div>
+                  </div>
+
+                  {/* ROI Pitch */}
+                  <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-[11px] text-emerald-800 font-bold">
+                    💡 عملية كراء واحدة لآلية بـ 2,200 درهم تغطي اشتراكك لأكثر من 10 أشهر!
+                  </div>
+
+                  {/* WhatsApp Support CTA */}
+                  <div className="p-3 rounded-xl bg-emerald-600 text-white text-center font-bold text-xs flex items-center justify-center gap-2 shadow-sm">
+                    <Phone className="w-4 h-4" />
+                    <span>تأكيد الوصل فوراً عبر واتساب ({settingsForm.whatsapp_number})</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </main>

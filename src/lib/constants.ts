@@ -5,7 +5,7 @@
 /**
  * Monthly subscription price in Moroccan Dirhams (MAD)
  */
-export const MONTHLY_PLAN_PRICE_MAD = 290;
+export const MONTHLY_PLAN_PRICE_MAD = 200;
 
 /**
  * Free trial duration in hours (Moroccan owners get 72h full platform access)

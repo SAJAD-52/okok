@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Copy,
   Check,
@@ -10,19 +10,16 @@ import {
   AlertCircle,
   X,
   ShieldCheck,
+  Sparkles,
+  TrendingUp,
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { mapDatabaseError } from '../../lib/errorHelpers';
 import {
-  BANK_RIB_NUMBER,
-  BANK_NAME,
-  BANK_ACCOUNT_HOLDER,
-  WAFACASH_BENEFICIARY_NAME,
-  WAFACASH_CIN,
-  WAFACASH_CITY,
   MONTHLY_PLAN_PRICE_MAD,
   WHATSAPP_ADMIN_LINK,
 } from '../../lib/constants';
+import { platformSettingsStore, PlatformSettings } from '../../lib/platformSettings';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Card } from '../ui/Card';
@@ -45,9 +42,31 @@ export const PaymentProofModal: React.FC<PaymentProofModalProps> = ({
   const { t, lang } = useLanguage();
   const { profile, user } = useAuth();
 
+  const [settings, setSettings] = useState<PlatformSettings>(() => platformSettingsStore.getSettings());
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      setSettings(platformSettingsStore.getSettings());
+    };
+    window.addEventListener('jadijcb_settings_updated', handleUpdate);
+    window.addEventListener('storage', handleUpdate);
+    platformSettingsStore.pullFromRemote().then(setSettings);
+    return () => {
+      window.removeEventListener('jadijcb_settings_updated', handleUpdate);
+      window.removeEventListener('storage', handleUpdate);
+    };
+  }, []);
+
   const [method, setMethod] = useState<PaymentMethod>('rib');
   const [reference, setReference] = useState('');
-  const [amount, setAmount] = useState<number>(MONTHLY_PLAN_PRICE_MAD);
+  const [amount, setAmount] = useState<number>(() => settings.monthly_price_mad || 200);
+
+  useEffect(() => {
+    if (settings.monthly_price_mad) {
+      setAmount(settings.monthly_price_mad);
+    }
+  }, [settings.monthly_price_mad]);
+
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isCopied, setIsCopied] = useState(false);
@@ -57,9 +76,9 @@ export const PaymentProofModal: React.FC<PaymentProofModalProps> = ({
   if (!isOpen) return null;
 
   const handleCopyRib = () => {
-    navigator.clipboard.writeText(BANK_RIB_NUMBER.replace(/\s+/g, ''));
+    navigator.clipboard.writeText((settings.rib_number || '').replace(/\s+/g, ''));
     setIsCopied(true);
-    toast.success(t('lock.copied'));
+    toast.success(lang === 'fr' ? 'RIB copié dans le presse-papier !' : 'تم نسخ رقم الـ RIB بنجاح!');
     setTimeout(() => setIsCopied(false), 2500);
   };
 
@@ -155,26 +174,27 @@ export const PaymentProofModal: React.FC<PaymentProofModalProps> = ({
   };
 
   const userPhone = profile?.phone || '+2126XXXXXXXX';
-  const whatsappUrl = `${WHATSAPP_ADMIN_LINK}${encodeURIComponent(
-    `Salam, j'ai effectué le paiement de l'abonnement JADIJCB pour le compte ${userPhone} (Réf: ${reference || 'en cours'}). Merci de valider.`
+  const cleanPhone = (settings.whatsapp_number || '+212661234567').replace(/[^0-9]/g, '');
+  const whatsappUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(
+    `السلام عليكم، لقد أرسلت وصل أداء اشتراك JADIJCB (${settings.monthly_price_mad} د.م) لحساب ${userPhone}. رقم المرجع: ${reference || 'مرفق'}. شكراً.`
   )}`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/80 backdrop-blur-md overflow-y-auto">
       <div className="relative bg-white border border-steel-200 rounded-3xl max-w-2xl w-full shadow-2xl my-6 overflow-hidden text-start">
         {/* Top Header Strip */}
-        <div className="bg-ink p-6 text-white relative">
+        <div className="bg-ink p-6 text-white relative border-b-2 border-primary">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-primary text-ink flex items-center justify-center font-black">
+              <div className="w-10 h-10 rounded-xl bg-primary text-ink flex items-center justify-center font-black shrink-0">
                 <ShieldCheck className="w-6 h-6" />
               </div>
               <div>
                 <h3 className="text-base sm:text-lg font-extrabold text-white">
-                  {t('lock.price_box_title')}
+                  تفعيل وترقية اشتراك المالك (JADIJCB PRO)
                 </h3>
                 <span className="text-xs text-primary font-bold">
-                  {MONTHLY_PLAN_PRICE_MAD} {t('common.mad')} / {lang === 'fr' ? 'mois' : 'شهرياً'}
+                  {settings.monthly_price_mad} د.م / شهرياً · تجربة 72 ساعة مجانية
                 </span>
               </div>
             </div>
@@ -205,7 +225,7 @@ export const PaymentProofModal: React.FC<PaymentProofModalProps> = ({
               <p className="text-xs text-steel-600 max-w-md mx-auto">
                 {lang === 'fr'
                   ? 'Notre équipe vérifie les virements et transferts bancaires 7j/7. Votre compte sera mis à jour automatiquement.'
-                  : 'فريق العمل يتحقق من الحوالات والتحويلات البنكية على مدار الساعة. سيتم إشعارك فور اكتمال التفعيل.'}
+                  : 'فريق العمل يتحقق من الحوالات والتحويلات البنكية على مدار الساعة. يمكنك مراسلتنا فوراً عبر الواتساب لتسريع التفعيل.'}
               </p>
               <div className="pt-4">
                 <a
@@ -215,16 +235,27 @@ export const PaymentProofModal: React.FC<PaymentProofModalProps> = ({
                   className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-colors shadow-md min-h-[44px]"
                 >
                   <MessageCircle className="w-4 h-4" />
-                  <span>{t('lock.whatsapp_btn')}</span>
+                  <span>تأكيد التفعيل عبر واتساب ({settings.whatsapp_number})</span>
                 </a>
               </div>
             </div>
           ) : (
             <>
-              {/* Payment Instruction Options (RIB & Wafacash) */}
+              {/* ROI Callout */}
+              <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 space-y-1.5">
+                <div className="flex items-center gap-2 text-emerald-900 font-black text-xs">
+                  <TrendingUp className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>استثمار ذكي ومضمون العائد 100%</span>
+                </div>
+                <p className="text-[11px] text-emerald-800 leading-relaxed">
+                  💡 <strong>يوم كراء واحد لآلية واحدة</strong> (بمعدل 2,200 درهم) يغطي تكلفة اشتراكك لأكثر من <strong>10 أشهر كاملة</strong>! طلبات كراء مباشرة بدون أي وسيط أو عمولة مقتطعة.
+                </p>
+              </div>
+
+              {/* Payment Instruction Options (Dynamic Bank RIB & Cash Beneficiary) */}
               <div>
                 <label className="text-xs font-bold text-steel-700 block mb-3">
-                  {t('lock.payment_methods_title')}
+                  طرق الأداء المعتمدة (تحويل بنكي أو وكالات كاش):
                 </label>
 
                 {/* Option 1: Bank RIB */}
@@ -233,47 +264,47 @@ export const PaymentProofModal: React.FC<PaymentProofModalProps> = ({
                     <div className="flex items-center gap-2">
                       <Building2 className="w-4 h-4 text-primary-dark" />
                       <span className="text-xs font-extrabold text-ink">
-                        {t('lock.rib_title')}
+                        التحويل البنكي المباشر (Virement Bancaire)
                       </span>
                     </div>
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-steel-200 text-steel-700 font-bold">
-                      {BANK_NAME}
+                      {settings.bank_name}
                     </span>
                   </div>
 
                   <p className="text-[11px] text-steel-600 mb-2">
-                    {t('lock.rib_beneficiary')} : <strong>{BANK_ACCOUNT_HOLDER}</strong>
+                    اسم صاحب الحساب: <strong>{settings.account_holder_name}</strong>
                   </p>
 
                   <div className="flex items-center justify-between p-2.5 rounded-xl bg-white border border-steel-300 font-mono text-xs font-bold tracking-wide">
-                    <span className="truncate text-ink select-all">{BANK_RIB_NUMBER}</span>
+                    <span className="truncate text-ink select-all">{settings.rib_number}</span>
                     <Button
                       type="button"
                       variant="outline"
                       size="sm"
                       onClick={handleCopyRib}
-                      className="ms-2 shrink-0 text-xs py-1 px-2.5 min-h-[32px]"
+                      className="ms-2 shrink-0 text-xs py-1 px-2.5 min-h-[32px] font-bold"
                       leftIcon={isCopied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
                     >
-                      {isCopied ? t('lock.copied') : t('lock.copy_rib')}
+                      {isCopied ? 'تم النسخ ✓' : 'نسخ رقم الـ RIB'}
                     </Button>
                   </div>
                 </Card>
 
-                {/* Option 2: Wafacash */}
+                {/* Option 2: Cash Plus / Wafacash */}
                 <Card className="p-4 border-steel-200 bg-surface">
                   <span className="text-xs font-extrabold text-ink block mb-1">
-                    {t('lock.wafacash_title')}
+                    أو التحويل عبر وكالات تحويل الأموال (Wafacash / Cash Plus):
                   </span>
                   <div className="p-2.5 rounded-xl bg-white border border-steel-300 text-xs text-steel-700 space-y-1">
                     <p>
-                      {lang === 'fr' ? 'Bénéficiaire :' : 'المستفيد :'} <strong>{WAFACASH_BENEFICIARY_NAME}</strong>
+                      المستفيد: <strong>{settings.account_holder_name}</strong>
                     </p>
                     <p>
-                      {lang === 'fr' ? 'CIN / Identifiant :' : 'رقم البطاقة الوطنية :'} <strong>{WAFACASH_CIN}</strong>
+                      رقم البطاقة الوطنية (CIN): <strong className="font-mono">{settings.cin_number}</strong>
                     </p>
                     <p>
-                      {lang === 'fr' ? 'Ville :' : 'المدينة :'} <strong>{WAFACASH_CITY}</strong>
+                      المدينة: <strong>{settings.city}</strong>
                     </p>
                   </div>
                 </Card>

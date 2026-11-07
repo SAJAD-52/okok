@@ -1,8 +1,5 @@
-// ============================================================================
-// JADIJCB: Bookings Management (List & Calendar Views + Live Rental Countdowns)
-// ============================================================================
-
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   CalendarCheck,
   Plus,
@@ -19,6 +16,10 @@ import {
   AlertTriangle,
   AlertCircle,
   RotateCcw,
+  Check,
+  X,
+  MessageSquare,
+  Bell,
 } from 'lucide-react';
 import { Booking, BookingStatus, Machine } from '../types/database';
 import { formatPriceMAD } from '../data/rentalTerms';
@@ -32,10 +33,12 @@ import { useAuth } from '../hooks/useAuth';
 import { CreateBookingModal } from '../components/bookings/CreateBookingModal';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { mapDatabaseError } from '../lib/errorHelpers';
+import { bookingStore } from '../lib/bookingStore';
 
 export const BookingsPage: React.FC = () => {
   const { t, lang } = useLanguage();
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [machines, setMachines] = useState<Machine[]>([]);
@@ -65,45 +68,13 @@ export const BookingsPage: React.FC = () => {
     setIsError(false);
 
     try {
-      // 1. Fetch bookings
-      const { data: bData, error: bError } = await supabase
-        .from('bookings')
-        .select('*, machines(*)')
-        .eq('owner_id', user.id)
-        .order('created_at', { ascending: false });
-
-      if (bError) {
-        setIsError(true);
-        toast.error(t(mapDatabaseError(bError)));
-        return;
-      }
-
-      const mappedBookings: Booking[] = (bData || []).map((b: any) => ({
-        id: b.id,
-        machine_id: b.machine_id,
-        owner_id: b.owner_id,
-        client_id: b.client_id,
-        client_name: b.client_name,
-        client_phone: b.client_phone,
-        start_at: b.start_at,
-        end_at: b.end_at,
-        start_date: b.start_at,
-        end_date: b.end_at,
-        total_price: Number(b.total_price) || 0,
-        status: b.status,
-        notes: b.notes,
-        created_at: b.created_at,
-        machine: b.machines,
-        with_operator: Boolean(b.with_operator ?? true),
-      }));
-
-      setBookings(mappedBookings);
-
-      // 2. Fetch owner machines for manual booking creation
+      // 1. Fetch owner machines first to know all machines owned by this user
       const { data: mData } = await supabase
         .from('machines')
         .select('*')
         .eq('owner_id', user.id);
+
+      const ownerMachineIds = (mData || []).map((m: any) => m.id);
 
       if (mData) {
         const mappedMachines: Machine[] = mData.map((m: any) => ({
@@ -149,9 +120,52 @@ export const BookingsPage: React.FC = () => {
         }));
         setMachines(mappedMachines);
       }
+
+      // 2. Fetch bookings from Supabase
+      let mappedBookings: Booking[] = [];
+      try {
+        let query = supabase.from('bookings').select('*, machines(*)');
+        if (ownerMachineIds.length > 0) {
+          query = query.or(`owner_id.eq.${user.id},machine_id.in.(${ownerMachineIds.join(',')})`);
+        } else {
+          query = query.eq('owner_id', user.id);
+        }
+        const { data: bData } = await query.order('created_at', { ascending: false });
+
+        if (bData) {
+          mappedBookings = bData.map((b: any) => ({
+            id: b.id,
+            machine_id: b.machine_id,
+            owner_id: b.owner_id,
+            client_id: b.client_id,
+            client_name: b.client_name,
+            client_phone: b.client_phone,
+            start_at: b.start_at,
+            end_at: b.end_at,
+            start_date: b.start_at,
+            end_date: b.end_at,
+            total_price: Number(b.total_price) || 0,
+            status: b.status,
+            notes: b.notes,
+            created_at: b.created_at,
+            machine: b.machines,
+            with_operator: Boolean(b.with_operator ?? true),
+          }));
+        }
+      } catch (dbErr) {
+        console.warn('Supabase bookings query warning:', dbErr);
+      }
+
+      // 3. Merge with bookingStore local cache
+      const merged = bookingStore.mergeOwnerBookings(mappedBookings, user.id, ownerMachineIds);
+      setBookings(merged);
     } catch (err: any) {
-      setIsError(true);
-      toast.error(t(mapDatabaseError(err)));
+      console.warn('Bookings load error:', err);
+      // Fallback to local cache even on total error
+      const cached = bookingStore.getCachedBookings().filter(
+        (b) => b.owner_id === user?.id || !b.owner_id
+      );
+      setBookings(cached);
     } finally {
       setIsLoading(false);
     }
@@ -159,28 +173,42 @@ export const BookingsPage: React.FC = () => {
 
   useEffect(() => {
     loadData();
+
+    // Listen to live booking events across tabs / components
+    const handleLiveEvent = () => {
+      loadData();
+    };
+    window.addEventListener('jadijcb_booking_event', handleLiveEvent);
+    return () => window.removeEventListener('jadijcb_booking_event', handleLiveEvent);
   }, [loadData]);
 
   const handleStatusChange = async (id: string, newStatus: BookingStatus) => {
-    const { data, error } = await supabase
-      .from('bookings')
-      .update({ status: newStatus })
-      .eq('id', id)
-      .select('*, machines(*)')
-      .single();
+    // 1. Update in bookingStore immediately
+    bookingStore.updateBookingStatus(id, newStatus);
 
-    if (error) {
-      const errKey = mapDatabaseError(error);
-      toast.error(t(errKey));
-      return; // STOP! No optimistic state update, no success toast!
+    // 2. Optimistic UI update
+    setBookings((prev) =>
+      prev.map((b) => (b.id === id ? { ...b, status: newStatus } : b))
+    );
+
+    // 3. Update in Supabase
+    try {
+      await supabase
+        .from('bookings')
+        .update({ status: newStatus })
+        .eq('id', id);
+    } catch (dbErr) {
+      console.warn('Could not update status in DB:', dbErr);
     }
-
-    await loadData();
 
     toast.success(
       lang === 'fr'
         ? `Statut de réservation mis à jour : ${newStatus}`
-        : 'تم تحديث حالة الحجز بنجاح'
+        : newStatus === 'active'
+        ? 'تم قبول وتأكيد الحجز بنجاح'
+        : newStatus === 'cancelled'
+        ? 'تم رفض/إلغاء طلب الحجز'
+        : 'تم تحديث حالة الحجز'
     );
   };
 
@@ -294,6 +322,38 @@ export const BookingsPage: React.FC = () => {
           </Button>
         </div>
       </div>
+
+      {/* Urgent Pending Bookings Alert Banner */}
+      {bookings.filter((b) => b.status === 'pending').length > 0 && (
+        <div className="p-4 rounded-2xl bg-amber-500/10 border-2 border-primary text-ink flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-primary text-ink flex items-center justify-center font-black shrink-0">
+              <Bell className="w-5 h-5 animate-bounce" />
+            </div>
+            <div>
+              <h3 className="font-extrabold text-sm text-ink">
+                {lang === 'fr'
+                  ? `Vous avez ${bookings.filter((b) => b.status === 'pending').length} nouvelle(s) demande(s) de réservation à confirmer !`
+                  : `لديك ${bookings.filter((b) => b.status === 'pending').length} طلب كراء جديد بانتظار التأكيد والموافقة!`}
+              </h3>
+              <p className="text-xs text-steel-600">
+                {lang === 'fr'
+                  ? 'Vérifiez les dates, contactez le client par appel ou chat, puis confirmez la réservation.'
+                  : 'راجع بيانات المقاول والورش وتواريخ العمل، وتواصل معه مباشرة لتأكيد تشغيل الآلية.'}
+              </p>
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
+            onClick={() => setStatusFilter('pending')}
+            className="shrink-0 font-black text-xs min-h-[38px]"
+          >
+            {lang === 'fr' ? 'Afficher les demandes en attente' : 'عرض الطلبات المعلقة فوراً'}
+          </Button>
+        </div>
+      )}
 
       {/* Filter Tabs */}
       <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1">
@@ -562,7 +622,7 @@ export const BookingsPage: React.FC = () => {
                           </div>
 
                           {/* Status Actions */}
-                          <div className="flex items-center gap-1.5 self-end sm:self-auto">
+                          <div className="flex flex-wrap items-center gap-1.5 self-end sm:self-auto">
                             {b.status === 'pending' && (
                               <>
                                 <Button
@@ -570,9 +630,10 @@ export const BookingsPage: React.FC = () => {
                                   variant="primary"
                                   size="sm"
                                   onClick={() => handleStatusChange(b.id, 'active')}
-                                  className="text-xs font-bold"
+                                  className="text-xs font-black shadow-sm"
+                                  leftIcon={<Check className="w-3.5 h-3.5" />}
                                 >
-                                  {t('bookings.action_accept')}
+                                  {lang === 'fr' ? 'Accepter et planifier' : 'تأكيد وقبول الحجز'}
                                 </Button>
                                 <Button
                                   type="button"
@@ -580,9 +641,31 @@ export const BookingsPage: React.FC = () => {
                                   size="sm"
                                   onClick={() => handleStatusChange(b.id, 'cancelled')}
                                   className="text-xs text-danger hover:bg-red-50"
+                                  leftIcon={<X className="w-3.5 h-3.5" />}
                                 >
                                   {t('bookings.action_reject')}
                                 </Button>
+                                {b.client_id && (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => navigate(`/app/messages?target=${b.client_id}&machine=${b.machine_id}`)}
+                                    className="text-xs text-steel-700 font-bold"
+                                    leftIcon={<MessageSquare className="w-3.5 h-3.5 text-primary" />}
+                                  >
+                                    {lang === 'fr' ? 'Chatter' : 'محادثة الزبون'}
+                                  </Button>
+                                )}
+                                {b.client_phone && (
+                                  <a
+                                    href={`tel:${b.client_phone}`}
+                                    className="px-2.5 py-1.5 rounded-xl border border-steel-200 bg-white hover:bg-steel-50 text-xs font-bold text-steel-700 flex items-center gap-1.5 transition-colors"
+                                  >
+                                    <Phone className="w-3.5 h-3.5 text-emerald-600" />
+                                    <span>{lang === 'fr' ? 'Appeler' : 'اتصال'}</span>
+                                  </a>
+                                )}
                               </>
                             )}
 

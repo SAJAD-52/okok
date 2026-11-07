@@ -32,6 +32,7 @@ import { useLanguage } from '../hooks/useLanguage';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabase';
 import { RentalExtensionModal } from '../components/bookings/RentalExtensionModal';
+import { bookingStore } from '../lib/bookingStore';
 
 export const ContractorBookingsPage: React.FC = () => {
   const { t, lang, isRTL } = useLanguage();
@@ -64,50 +65,81 @@ export const ContractorBookingsPage: React.FC = () => {
     setIsError(false);
 
     try {
-      // Query bookings where client_id = user.id OR client_phone = profile.phone
       const userPhone = profile?.phone || user.user_metadata?.phone;
-      let query = supabase
-        .from('bookings')
-        .select('*, machines(*)')
-        .order('created_at', { ascending: false });
+      let mapped: Booking[] = [];
 
-      if (userPhone) {
-        query = query.or(`client_id.eq.${user.id},client_phone.eq.${userPhone}`);
-      } else {
-        query = query.eq('client_id', user.id);
+      try {
+        let query = supabase
+          .from('bookings')
+          .select('*, machines(*)');
+
+        if (userPhone) {
+          query = query.or(`client_id.eq.${user.id},client_phone.eq.${userPhone}`);
+        } else {
+          query = query.eq('client_id', user.id);
+        }
+
+        const { data, error } = await query.order('created_at', { ascending: false });
+
+        if (error) {
+          console.warn('Contractor bookings load query warning:', error.message);
+          // Try simpler query fallback
+          const fallbackRes = await supabase
+            .from('bookings')
+            .select('*, machines(*)')
+            .eq('client_id', user.id);
+          if (fallbackRes.data) {
+            mapped = fallbackRes.data.map((b: any) => ({
+              id: b.id,
+              machine_id: b.machine_id,
+              owner_id: b.owner_id,
+              client_id: b.client_id,
+              client_name: b.client_name,
+              client_phone: b.client_phone,
+              start_at: b.start_at,
+              end_at: b.end_at,
+              start_date: b.start_at,
+              end_date: b.end_at,
+              total_price: Number(b.total_price) || 0,
+              status: b.status,
+              notes: b.notes,
+              created_at: b.created_at,
+              machine: b.machines,
+              with_operator: Boolean(b.with_operator ?? true),
+            }));
+          }
+        } else if (data) {
+          mapped = data.map((b: any) => ({
+            id: b.id,
+            machine_id: b.machine_id,
+            owner_id: b.owner_id,
+            client_id: b.client_id,
+            client_name: b.client_name,
+            client_phone: b.client_phone,
+            start_at: b.start_at,
+            end_at: b.end_at,
+            start_date: b.start_at,
+            end_date: b.end_at,
+            total_price: Number(b.total_price) || 0,
+            status: b.status,
+            notes: b.notes,
+            created_at: b.created_at,
+            machine: b.machines,
+            with_operator: Boolean(b.with_operator ?? true),
+          }));
+        }
+      } catch (qErr) {
+        console.warn('Contractor Supabase query failed:', qErr);
       }
 
-      const { data, error } = await query;
-
-      if (error) {
-        console.warn('Contractor bookings load error:', error.message);
-        setIsError(true);
-        return;
-      }
-
-      const mapped: Booking[] = (data || []).map((b: any) => ({
-        id: b.id,
-        machine_id: b.machine_id,
-        owner_id: b.owner_id,
-        client_id: b.client_id,
-        client_name: b.client_name,
-        client_phone: b.client_phone,
-        start_at: b.start_at,
-        end_at: b.end_at,
-        start_date: b.start_at,
-        end_date: b.end_at,
-        total_price: Number(b.total_price) || 0,
-        status: b.status,
-        notes: b.notes,
-        created_at: b.created_at,
-        machine: b.machines,
-        with_operator: Boolean(b.with_operator ?? true),
-      }));
-
-      setBookings(mapped);
+      // Merge with bookingStore local cache
+      const merged = bookingStore.mergeContractorBookings(mapped, user.id, userPhone);
+      setBookings(merged);
     } catch (err) {
       console.warn('Contractor bookings load exception:', err);
-      setIsError(true);
+      const userPhone = profile?.phone || user.user_metadata?.phone;
+      const cached = bookingStore.mergeContractorBookings([], user.id, userPhone);
+      setBookings(cached);
     } finally {
       setIsLoading(false);
     }
@@ -115,6 +147,10 @@ export const ContractorBookingsPage: React.FC = () => {
 
   useEffect(() => {
     loadContractorBookings();
+
+    const handleEvent = () => loadContractorBookings();
+    window.addEventListener('jadijcb_booking_event', handleEvent);
+    return () => window.removeEventListener('jadijcb_booking_event', handleEvent);
   }, [loadContractorBookings]);
 
   // Filter bookings

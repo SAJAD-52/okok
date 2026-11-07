@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -15,6 +15,9 @@ import {
   Lock,
   MapPin,
   HardHat,
+  Check,
+  Phone,
+  X,
 } from 'lucide-react';
 import { Logo } from '../ui/Logo';
 import { LanguageSwitcher } from '../ui/LanguageSwitcher';
@@ -24,6 +27,9 @@ import { useSubscription } from '../../hooks/useSubscription';
 import { TrialBanner } from '../dashboard/TrialBanner';
 import { SoftLockModal } from '../dashboard/SoftLockModal';
 import { PaymentProofModal } from '../dashboard/PaymentProofModal';
+import { Booking } from '../../types/database';
+import { bookingStore } from '../../lib/bookingStore';
+import { supabase } from '../../lib/supabase';
 
 export const DashboardLayout: React.FC = () => {
   const { t, isRTL, lang } = useLanguage();
@@ -33,12 +39,72 @@ export const DashboardLayout: React.FC = () => {
   const { isLocked, isTrial, formattedCountdown, isActive } = useSubscription();
 
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [pendingBookingsCount, setPendingBookingsCount] = useState<number>(0);
+  const [pendingBookingsList, setPendingBookingsList] = useState<Booking[]>([]);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
 
   const isContractor = profile?.role === 'client' || profile?.role === 'contractor';
   const isChatRoute = location.pathname.includes('/messages');
   // Contractors (clients) renting machinery are NEVER blocked by owner trial soft-lock!
   const shouldShowLock = !isContractor && isLocked && !isChatRoute;
   const unreadMessagesCount = 1;
+
+  // Sync pending bookings for owner notification badge
+  useEffect(() => {
+    if (!profile?.id || isContractor) return;
+
+    const checkPending = async () => {
+      try {
+        const cached = bookingStore.getCachedBookings().filter(
+          (b) => (b.owner_id === profile.id || !b.owner_id) && b.status === 'pending'
+        );
+        let list = [...cached];
+
+        const { data } = await supabase
+          .from('bookings')
+          .select('*, machines(*)')
+          .eq('owner_id', profile.id)
+          .eq('status', 'pending');
+
+        if (data) {
+          const mapped: Booking[] = data.map((b: any) => ({
+            id: b.id,
+            machine_id: b.machine_id,
+            owner_id: b.owner_id,
+            client_id: b.client_id,
+            client_name: b.client_name,
+            client_phone: b.client_phone,
+            start_at: b.start_at,
+            end_at: b.end_at,
+            total_price: Number(b.total_price) || 0,
+            status: b.status,
+            notes: b.notes,
+            created_at: b.created_at,
+            machine: b.machines,
+            with_operator: Boolean(b.with_operator ?? true),
+          }));
+
+          for (const m of mapped) {
+            if (!list.some((item) => item.id === m.id)) {
+              list.push(m);
+            }
+          }
+        }
+
+        setPendingBookingsList(list);
+        setPendingBookingsCount(list.length);
+      } catch {
+        const c = bookingStore.getPendingCountForOwner(profile.id);
+        setPendingBookingsCount(c);
+      }
+    };
+
+    checkPending();
+
+    const handleEvent = () => checkPending();
+    window.addEventListener('jadijcb_booking_event', handleEvent);
+    return () => window.removeEventListener('jadijcb_booking_event', handleEvent);
+  }, [profile?.id, isContractor]);
 
   const contractorNavigationItems = [
     {
@@ -86,6 +152,7 @@ export const DashboardLayout: React.FC = () => {
       to: '/app/bookings',
       label: t('nav.bookings'),
       icon: <CalendarCheck className="w-5 h-5" />,
+      badge: pendingBookingsCount,
     },
     {
       to: '/app/messages',
@@ -207,8 +274,8 @@ export const DashboardLayout: React.FC = () => {
             <LanguageSwitcher variant="dark" />
           </div>
 
-          {/* Subscription Mini Pill */}
-          {isTrial && !isLocked && (
+          {/* Subscription Mini Pill (Only for machinery owners) */}
+          {isTrial && !isLocked && !isContractor && (
             <button
               type="button"
               onClick={() => setIsPaymentModalOpen(true)}
@@ -275,14 +342,111 @@ export const DashboardLayout: React.FC = () => {
             <div className="md:hidden">
               <LanguageSwitcher />
             </div>
-            <button
-              type="button"
-              className="p-2 text-steel-600 hover:text-ink hover:bg-steel-100 rounded-lg min-h-[44px] min-w-[44px] flex items-center justify-center relative cursor-pointer"
-              aria-label="Notifications"
-            >
-              <Bell className="w-5 h-5" />
-              <span className="absolute top-2 end-2 w-2 h-2 rounded-full bg-primary" />
-            </button>
+            {/* Notifications Button with Live Badge & Dropdown */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setIsNotificationsOpen((prev) => !prev)}
+                className="p-2 text-steel-600 hover:text-ink hover:bg-steel-100 rounded-lg min-h-[44px] min-w-[44px] flex items-center justify-center relative cursor-pointer"
+                aria-label="Notifications"
+              >
+                <Bell className="w-5 h-5" />
+                {pendingBookingsCount > 0 && (
+                  <span className="absolute top-1.5 end-1.5 px-1.5 py-0.2 rounded-full bg-primary text-ink text-[10px] font-black border border-white animate-pulse">
+                    {pendingBookingsCount}
+                  </span>
+                )}
+              </button>
+
+              {/* Notifications Dropdown */}
+              {isNotificationsOpen && (
+                <div className="absolute top-full end-0 mt-2 w-80 sm:w-96 bg-white border border-steel-200 rounded-2xl shadow-2xl z-50 overflow-hidden text-start animate-fade-in">
+                  <div className="bg-ink p-3.5 text-white flex items-center justify-between border-b border-primary">
+                    <div className="flex items-center gap-2">
+                      <Bell className="w-4 h-4 text-primary" />
+                      <span className="text-xs font-bold">
+                        {lang === 'fr' ? 'Notifications & Demandes' : 'الإشعارات وطلبات الكراء'}
+                      </span>
+                    </div>
+                    {pendingBookingsCount > 0 && (
+                      <span className="px-2 py-0.5 rounded-full bg-primary text-ink text-[10px] font-black">
+                        {pendingBookingsCount} {lang === 'fr' ? 'en attente' : 'قيد التأكيد'}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="max-h-80 overflow-y-auto p-2 space-y-2">
+                    {pendingBookingsList.length === 0 ? (
+                      <div className="p-6 text-center text-steel-400 text-xs">
+                        <Check className="w-8 h-8 mx-auto mb-1 text-steel-300" />
+                        <span>{lang === 'fr' ? 'Aucune nouvelle demande pour le moment.' : 'لا توجد طلبات حجز جديدة حالياً.'}</span>
+                      </div>
+                    ) : (
+                      pendingBookingsList.map((pb) => (
+                        <div
+                          key={pb.id}
+                          className="p-3 bg-amber-50/70 rounded-xl border border-amber-200 space-y-1.5 text-xs"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-black text-ink">
+                              {pb.machine?.title_ar || pb.machine?.title_fr || 'آلية JCB'}
+                            </span>
+                            <span className="text-primary-dark font-black font-mono">
+                              {pb.total_price.toLocaleString('fr-FR')} MAD
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-steel-600 flex items-center gap-2">
+                            <span>{pb.client_name || 'زبون مقاولة'}</span>
+                            {pb.client_phone && (
+                              <span dir="ltr" className="font-mono text-steel-500">
+                                ({pb.client_phone})
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-steel-500 font-mono" dir="ltr">
+                            {pb.start_at?.slice(0, 10)} → {pb.end_at?.slice(0, 10)}
+                          </div>
+                          <div className="flex items-center gap-2 pt-1 border-t border-amber-200/60">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsNotificationsOpen(false);
+                                navigate('/app/bookings');
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-primary text-ink font-bold text-[11px] hover:bg-primary-hover transition-colors cursor-pointer"
+                            >
+                              {lang === 'fr' ? 'Voir et Confirmer' : 'مراجعة وتأكيد'}
+                            </button>
+                            {pb.client_phone && (
+                              <a
+                                href={`tel:${pb.client_phone}`}
+                                className="px-2.5 py-1 rounded-lg bg-white border border-steel-300 text-steel-700 font-bold text-[11px] hover:bg-steel-50 flex items-center gap-1"
+                              >
+                                <Phone className="w-3 h-3 text-emerald-600" />
+                                <span>{lang === 'fr' ? 'Appeler' : 'اتصال'}</span>
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  <div className="p-2 border-t border-steel-100 bg-steel-50 text-center">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsNotificationsOpen(false);
+                        navigate('/app/bookings');
+                      }}
+                      className="text-xs text-primary-dark font-bold hover:underline cursor-pointer"
+                    >
+                      {lang === 'fr' ? 'Accéder au gestionnaire des réservations →' : 'الانتقال إلى سجل الحجوزات الكامل ←'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 

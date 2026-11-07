@@ -24,6 +24,7 @@ import { useLanguage } from '../../hooks/useLanguage';
 import { useAuth } from '../../hooks/useAuth';
 import { supabase } from '../../lib/supabase';
 import { mapDatabaseError } from '../../lib/errorHelpers';
+import { bookingStore } from '../../lib/bookingStore';
 
 interface CreateBookingModalProps {
   isOpen: boolean;
@@ -292,6 +293,7 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
     }
 
     setIsSubmitting(false);
+    bookingStore.saveBooking(newBooking);
     onBookingCreated(newBooking);
     toast.success(
       lang === 'fr'

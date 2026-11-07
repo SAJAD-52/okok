@@ -171,6 +171,7 @@ export const SiteRadarMapPage: React.FC = () => {
           location_lng: m.lng || -7.5898,
           rate_hourly: Number(m.hourly_rate || m.rate_hourly) || 350,
           rate_daily: Number(m.daily_rate || m.rate_daily) || 2200,
+          daily_rate: Number(m.daily_rate || m.rate_daily) || 2200,
           rate_weekly: Number(m.weekly_rate || m.rate_weekly) || 12000,
           sale_price: Number(m.sale_price) || 0,
           currency: 'MAD',

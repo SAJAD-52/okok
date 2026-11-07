@@ -14,6 +14,10 @@ import {
   Layers,
   AlertCircle,
   RotateCcw,
+  Bell,
+  Check,
+  Phone,
+  CalendarCheck,
 } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -26,6 +30,8 @@ import { UpcomingReturnsList } from '../components/dashboard/UpcomingReturnsList
 import { StorefrontLiveCard } from '../components/dashboard/StorefrontLiveCard';
 import { MachineStepperModal } from '../components/machines/MachineStepperModal';
 import { Machine, Booking } from '../types/database';
+import { bookingStore } from '../lib/bookingStore';
+import { toast } from '../components/ui/Toast';
 
 export const DashboardOverviewPage: React.FC = () => {
   const { t, lang } = useLanguage();
@@ -114,32 +120,43 @@ export const DashboardOverviewPage: React.FC = () => {
   } = useQuery<Booking[]>({
     queryKey: ['owner_bookings', userId],
     queryFn: async () => {
-      if (!isSupabaseConfigured || !userId) return [];
-      const { data, error } = await supabase
-        .from('bookings')
-        .select('*, machine:machines(*)')
-        .eq('owner_id', userId)
-        .order('created_at', { ascending: false });
+      let mapped: Booking[] = [];
+      if (isSupabaseConfigured && userId) {
+        try {
+          const { data, error } = await supabase
+            .from('bookings')
+            .select('*, machine:machines(*)')
+            .eq('owner_id', userId)
+            .order('created_at', { ascending: false });
 
-      if (error) throw error;
-      return (data || []).map((b: any) => ({
-        id: b.id,
-        machine_id: b.machine_id,
-        owner_id: b.owner_id,
-        client_id: b.client_id,
-        client_name: b.client_name,
-        client_phone: b.client_phone,
-        start_at: b.start_at,
-        end_at: b.end_at,
-        start_date: b.start_at,
-        end_date: b.end_at,
-        total_price: Number(b.total_price) || 0,
-        status: b.status,
-        notes: b.notes,
-        created_at: b.created_at,
-        machine: b.machine || b.machines,
-        with_operator: Boolean(b.with_operator ?? true),
-      }));
+          if (data) {
+            mapped = data.map((b: any) => ({
+              id: b.id,
+              machine_id: b.machine_id,
+              owner_id: b.owner_id,
+              client_id: b.client_id,
+              client_name: b.client_name,
+              client_phone: b.client_phone,
+              start_at: b.start_at,
+              end_at: b.end_at,
+              start_date: b.start_at,
+              end_date: b.end_at,
+              total_price: Number(b.total_price) || 0,
+              status: b.status,
+              notes: b.notes,
+              created_at: b.created_at,
+              machine: b.machine || b.machines,
+              with_operator: Boolean(b.with_operator ?? true),
+            }));
+          }
+        } catch (e) {
+          console.warn('Dashboard bookings query warning:', e);
+        }
+      }
+
+      // Merge with bookingStore local cache
+      const machineIds = machines.map((m) => m.id);
+      return bookingStore.mergeOwnerBookings(mapped, userId || '', machineIds);
     },
     enabled: Boolean(userId),
   });
@@ -230,6 +247,19 @@ export const DashboardOverviewPage: React.FC = () => {
     refetchMachines();
   };
 
+  const pendingBookings = useMemo(() => bookings.filter((b) => b.status === 'pending'), [bookings]);
+
+  const handleAcceptBooking = async (id: string) => {
+    bookingStore.updateBookingStatus(id, 'active');
+    try {
+      await supabase.from('bookings').update({ status: 'active' }).eq('id', id);
+    } catch (e) {
+      console.warn('DB status update error:', e);
+    }
+    refetchBookings();
+    toast.success(lang === 'fr' ? 'Réservation acceptée et planifiée !' : 'تم قبول وتأكيد الحجز بنجاح!');
+  };
+
   const isGlobalLoading = isLoadingMachines || isLoadingBookings;
 
   return (
@@ -267,6 +297,106 @@ export const DashboardOverviewPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Urgent Pending Rental Bookings Alert Banner */}
+      {pendingBookings.length > 0 && (
+        <Card className="p-5 bg-gradient-to-r from-amber-500/15 to-amber-500/5 border-2 border-primary rounded-2xl space-y-3 shadow-md">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-primary text-ink flex items-center justify-center font-black shrink-0">
+                <Bell className="w-5 h-5 animate-bounce" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-sm text-ink">
+                  {lang === 'fr'
+                    ? `Vous avez ${pendingBookings.length} nouvelle(s) demande(s) de réservation en attente !`
+                    : `لديك ${pendingBookings.length} طلب كراء جديد بانتظار التأكيد والموافقة!`}
+                </h3>
+                <span className="text-xs text-steel-600">
+                  {lang === 'fr'
+                    ? 'Validez les demandes pour planifier vos engins ou contactez les clients.'
+                    : 'قم بمراجعة طلبات المقاولين الواردة والتأكيد أو الاتصال المباشر بالزبون.'}
+                </span>
+              </div>
+            </div>
+
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => navigate('/app/bookings?status=pending')}
+              className="text-xs font-bold shrink-0 bg-white"
+            >
+              {lang === 'fr' ? 'Gérer les réservations →' : 'إدارة الحجوزات ←'}
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2 border-t border-primary/20">
+            {pendingBookings.map((pb) => (
+              <div
+                key={pb.id}
+                className="p-3.5 bg-white rounded-xl border border-steel-200 shadow-sm flex flex-col justify-between gap-2"
+              >
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="font-extrabold text-xs text-ink">
+                      {pb.machine?.title_ar || pb.machine?.title_fr || 'آلية JCB'}
+                    </span>
+                    <span className="font-black text-xs text-primary-dark font-mono">
+                      {pb.total_price.toLocaleString('fr-FR')} MAD
+                    </span>
+                  </div>
+                  <div className="text-xs text-steel-600 mt-1 flex items-center gap-2">
+                    <span className="font-bold text-steel-800">{pb.client_name || 'زبون مقاولة'}</span>
+                    {pb.client_phone && (
+                      <span dir="ltr" className="font-mono text-steel-500">
+                        ({pb.client_phone})
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-steel-500 font-mono mt-0.5" dir="ltr">
+                    {pb.start_at?.slice(0, 10)} → {pb.end_at?.slice(0, 10)}
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-steel-100">
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    onClick={() => handleAcceptBooking(pb.id)}
+                    className="text-xs font-black"
+                    leftIcon={<Check className="w-3.5 h-3.5" />}
+                  >
+                    {lang === 'fr' ? 'Confirmer' : 'تأكيد الحجز'}
+                  </Button>
+                  {pb.client_id && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => navigate(`/app/messages?target=${pb.client_id}&machine=${pb.machine_id}`)}
+                      className="text-xs font-bold text-steel-700"
+                      leftIcon={<MessageSquare className="w-3.5 h-3.5 text-primary" />}
+                    >
+                      {lang === 'fr' ? 'Chatter' : 'محادثة'}
+                    </Button>
+                  )}
+                  {pb.client_phone && (
+                    <a
+                      href={`tel:${pb.client_phone}`}
+                      className="px-2.5 py-1.5 rounded-xl border border-steel-200 bg-white hover:bg-steel-50 text-xs font-bold text-steel-700 flex items-center gap-1.5 transition-colors"
+                    >
+                      <Phone className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>{lang === 'fr' ? 'Appeler' : 'اتصال'}</span>
+                    </a>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {/* Error state if data fetch fails */}
       {(isMachinesError || isBookingsError) && (

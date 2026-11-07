@@ -1,8 +1,8 @@
 // ============================================================================
-// JADIJCB: Manual Booking Creator with Overlap Conflict Prevention
+// JADIJCB: Booking Modal with Overlap Check & Resilient Schema Fallbacks
 // ============================================================================
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   CalendarCheck,
@@ -12,6 +12,9 @@ import {
   Phone,
   Truck,
   Check,
+  ShieldCheck,
+  Building,
+  HardHat,
 } from 'lucide-react';
 import { Booking, Machine, BookingStatus } from '../../types/database';
 import { Button } from '../ui/Button';
@@ -19,7 +22,7 @@ import { Input } from '../ui/Input';
 import { toast } from '../ui/Toast';
 import { useLanguage } from '../../hooks/useLanguage';
 import { useAuth } from '../../hooks/useAuth';
-import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { supabase } from '../../lib/supabase';
 import { mapDatabaseError } from '../../lib/errorHelpers';
 
 interface CreateBookingModalProps {
@@ -41,21 +44,62 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
   const { profile, user } = useAuth();
 
   const [machineId, setMachineId] = useState<string>(machines[0]?.id || '');
-  const [clientName, setClientName] = useState('');
-  const [clientPhone, setClientPhone] = useState('+2126');
+  const [clientName, setClientName] = useState(
+    profile?.company_name || profile?.full_name || ''
+  );
+  const [clientPhone, setClientPhone] = useState(
+    profile?.phone || '+2126'
+  );
   const [startDate, setStartDate] = useState(
     new Date(Date.now() + 24 * 3600 * 1000).toISOString().slice(0, 16)
   );
   const [endDate, setEndDate] = useState(
     new Date(Date.now() + 5 * 24 * 3600 * 1000).toISOString().slice(0, 16)
   );
-  const [totalPrice, setTotalPrice] = useState<number>(11000);
+  const [totalPrice, setTotalPrice] = useState<number>(10000);
   const [withOperator, setWithOperator] = useState(true);
   const [notes, setNotes] = useState('');
   const [overlapError, setOverlapError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Sync initial machine selection when modal opens or machine list changes
+  useEffect(() => {
+    if (machines.length > 0 && (!machineId || !machines.some((m) => m.id === machineId))) {
+      setMachineId(machines[0].id);
+    }
+  }, [machines, isOpen]);
+
+  // Pre-fill profile details when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      if (!clientName && (profile?.company_name || profile?.full_name)) {
+        setClientName(profile.company_name || profile.full_name || '');
+      }
+      if ((!clientPhone || clientPhone === '+2126') && profile?.phone) {
+        setClientPhone(profile.phone);
+      }
+    }
+  }, [isOpen, profile]);
+
+  // Dynamically calculate total price based on date range and machine rate
+  useEffect(() => {
+    const startTs = new Date(startDate).getTime();
+    const endTs = new Date(endDate).getTime();
+    if (!isNaN(startTs) && !isNaN(endTs) && endTs > startTs) {
+      const days = Math.max(1, Math.ceil((endTs - startTs) / (1000 * 60 * 60 * 24)));
+      const targetMachine = machines.find((m) => m.id === machineId) || machines[0];
+      const dailyRate = Number(targetMachine?.daily_rate) || 2000;
+      setTotalPrice(days * dailyRate);
+    }
+  }, [startDate, endDate, machineId, machines]);
+
   if (!isOpen) return null;
+
+  const targetMachine = machines.find((m) => m.id === machineId) || machines[0];
+  const isContractorMode =
+    profile?.role === 'client' ||
+    profile?.role === 'contractor' ||
+    (targetMachine?.owner_id && targetMachine.owner_id !== user?.id);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -93,12 +137,15 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
 
     setIsSubmitting(true);
 
-    const targetMachine = machines.find((m) => m.id === machineId);
+    const isOwner = targetMachine?.owner_id === user?.id;
+    const resolvedOwnerId = targetMachine?.owner_id || user?.id || 'demo-owner';
+    const resolvedClientId = isOwner ? null : (user?.id || null);
 
     const newBooking: Booking = {
       id: 'bk_' + Math.random().toString(36).substring(2, 9),
       machine_id: machineId,
-      owner_id: user?.id || profile?.id || 'demo-owner',
+      owner_id: resolvedOwnerId,
+      client_id: resolvedClientId || undefined,
       client_name: clientName.trim(),
       client_phone: clientPhone.trim(),
       start_at: new Date(startDate).toISOString(),
@@ -115,21 +162,76 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
 
     if (user?.id) {
       try {
-        const { data, error } = await supabase
+        const fullPayload: any = {
+          machine_id: newBooking.machine_id,
+          owner_id: resolvedOwnerId,
+          client_id: resolvedClientId,
+          client_name: newBooking.client_name,
+          client_phone: newBooking.client_phone,
+          start_at: newBooking.start_at,
+          end_at: newBooking.end_at,
+          start_date: newBooking.start_at,
+          end_date: newBooking.end_at,
+          total_price: newBooking.total_price,
+          status: newBooking.status,
+          notes: newBooking.notes,
+          with_operator: withOperator,
+        };
+
+        // 1. Attempt standard insert
+        let { data, error } = await supabase
           .from('bookings')
-          .insert({
+          .insert(fullPayload)
+          .select('*, machines(*)')
+          .maybeSingle();
+
+        // 2. Schema cache / missing column resilient fallback
+        if (error && (error.message?.includes('schema cache') || error.code === 'PGRST204')) {
+          console.warn('Booking insert hit schema cache mismatch, retrying with adaptive columns:', error.message);
+
+          const adaptivePayload: any = {
             machine_id: newBooking.machine_id,
-            owner_id: user.id,
-            client_name: newBooking.client_name,
-            client_phone: newBooking.client_phone,
+            owner_id: resolvedOwnerId,
             start_at: newBooking.start_at,
             end_at: newBooking.end_at,
             total_price: newBooking.total_price,
             status: newBooking.status,
-            notes: newBooking.notes,
-          })
-          .select('*, machines(*)')
-          .single();
+            notes: `${newBooking.notes ? newBooking.notes + ' | ' : ''}العميل: ${newBooking.client_name} (${newBooking.client_phone})`,
+          };
+          if (resolvedClientId) {
+            adaptivePayload.client_id = resolvedClientId;
+          }
+
+          const retry1 = await supabase
+            .from('bookings')
+            .insert(adaptivePayload)
+            .select('*, machines(*)')
+            .maybeSingle();
+
+          if (!retry1.error) {
+            data = retry1.data;
+            error = null;
+          } else {
+            // 3. Fallback to minimal payload
+            const minimalPayload: any = {
+              machine_id: newBooking.machine_id,
+              owner_id: resolvedOwnerId,
+              total_price: newBooking.total_price,
+              status: 'pending',
+              notes: `حجز من: ${startDate} إلى: ${endDate} | العميل: ${newBooking.client_name} (${newBooking.client_phone}) | ${newBooking.notes}`,
+            };
+            const retry2 = await supabase
+              .from('bookings')
+              .insert(minimalPayload)
+              .select('*, machines(*)')
+              .maybeSingle();
+
+            if (!retry2.error) {
+              data = retry2.data;
+              error = null;
+            }
+          }
+        }
 
         if (error) {
           setIsSubmitting(false);
@@ -139,17 +241,53 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
             setOverlapError(msg);
           }
           toast.error(msg);
-          return; // STOP!
+          return;
         }
 
-        if (data) {
+        if (data?.id) {
           newBooking.id = data.id;
+        }
+
+        // Notify machine owner via chat if possible
+        if (targetMachine?.owner_id && user.id !== targetMachine.owner_id) {
+          try {
+            const { data: conv } = await supabase
+              .from('conversations')
+              .select('id')
+              .or(
+                `and(participant_a.eq.${user.id},participant_b.eq.${targetMachine.owner_id}),and(participant_a.eq.${targetMachine.owner_id},participant_b.eq.${user.id})`
+              )
+              .maybeSingle();
+
+            let convId = conv?.id;
+            if (!convId) {
+              const { data: newConv } = await supabase
+                .from('conversations')
+                .insert({
+                  participant_a: user.id,
+                  participant_b: targetMachine.owner_id,
+                })
+                .select('id')
+                .maybeSingle();
+              convId = newConv?.id;
+            }
+
+            if (convId) {
+              await supabase.from('messages').insert({
+                conversation_id: convId,
+                sender_id: user.id,
+                content: `🚜 طلب حجز جديد للآلية (${targetMachine.brand} ${targetMachine.model}):\n- من: ${new Date(startDate).toLocaleDateString('fr-MA')}\n- إلى: ${new Date(endDate).toLocaleDateString('fr-MA')}\n- المبلغ التقديري: ${Number(totalPrice).toLocaleString('fr-FR')} درهم\n- الزبون: ${clientName} (${clientPhone})\n- ملاحظات الورش: ${notes || 'لا توجد'}`,
+              });
+            }
+          } catch (chatErr) {
+            console.warn('Could not post booking alert to chat:', chatErr);
+          }
         }
       } catch (err: any) {
         setIsSubmitting(false);
         const errKey = mapDatabaseError(err);
         toast.error(t(errKey));
-        return; // STOP!
+        return;
       }
     }
 
@@ -157,8 +295,8 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
     onBookingCreated(newBooking);
     toast.success(
       lang === 'fr'
-        ? 'Réservation enregistrée avec succès'
-        : 'تم تسجيل الحجز بنجاح'
+        ? 'Demande de réservation envoyée avec succès'
+        : 'تم إرسال وتأكيد طلب الحجز بنجاح'
     );
     onClose();
   };
@@ -170,14 +308,22 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
         <div className="bg-ink p-5 text-white flex items-center justify-between border-b-2 border-primary">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-primary text-ink flex items-center justify-center font-black">
-              <CalendarCheck className="w-5 h-5" />
+              {isContractorMode ? <HardHat className="w-5 h-5" /> : <CalendarCheck className="w-5 h-5" />}
             </div>
             <div>
               <h3 className="text-base font-black text-white">
-                {t('bookings.create_manual_booking')}
+                {isContractorMode
+                  ? lang === 'fr'
+                    ? 'Réserver cette machine pour votre chantier'
+                    : 'طلب حجز الآلية لمشروعك / ورشك'
+                  : t('bookings.create_manual_booking')}
               </h3>
               <span className="text-[11px] text-steel-400">
-                {lang === 'fr'
+                {isContractorMode
+                  ? lang === 'fr'
+                    ? 'Envoyez votre demande de location directement au propriétaire'
+                    : 'إرسال طلب استئجار الآلية مع فحص التعارض الزمني'
+                  : lang === 'fr'
                   ? 'Planifiez une mission avec vérification de disponibilité'
                   : 'جدولة كراء آلية مع التحقق التلقائي من تعارض المواعيد'}
               </span>
@@ -211,29 +357,43 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
             </div>
           )}
 
-          {/* Machine Selection */}
+          {/* Machine Info / Selection */}
           <div>
             <label className="text-xs font-bold text-steel-700 block mb-1.5">
               {t('bookings.select_machine')}
             </label>
-            <select
-              value={machineId}
-              onChange={(e) => setMachineId(e.target.value)}
-              className="w-full px-3 py-2.5 text-xs font-bold bg-white border border-steel-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary min-h-[44px]"
-              required
-            >
-              {machines.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.title_ar || m.title_fr} ({m.brand} {m.model})
-                </option>
-              ))}
-            </select>
+            {machines.length === 1 ? (
+              <div className="p-3 bg-steel-50 rounded-xl border border-steel-200 flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-black text-ink block">
+                    {machines[0].title_ar || machines[0].title_fr} ({machines[0].brand} {machines[0].model})
+                  </span>
+                  <span className="text-[11px] text-steel-500 font-bold">
+                    {Number(machines[0].daily_rate || 2000).toLocaleString('fr-FR')} MAD / {lang === 'fr' ? 'jour' : 'يوم'}
+                  </span>
+                </div>
+                <Truck className="w-5 h-5 text-primary" />
+              </div>
+            ) : (
+              <select
+                value={machineId}
+                onChange={(e) => setMachineId(e.target.value)}
+                className="w-full px-3 py-2.5 text-xs font-bold bg-white border border-steel-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary min-h-[44px]"
+                required
+              >
+                {machines.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.title_ar || m.title_fr} ({m.brand} {m.model}) - {Number(m.daily_rate || 2000).toLocaleString('fr-FR')} MAD/j
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
 
           {/* Client Details */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Input
-              label={t('bookings.client_name_label')}
+              label={isContractorMode ? (lang === 'fr' ? 'Nom de votre entreprise' : 'اسم المقاولة أو الزبون') : t('bookings.client_name_label')}
               placeholder="ex. Société BTP Tanger"
               value={clientName}
               onChange={(e) => setClientName(e.target.value)}
@@ -285,13 +445,20 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
           </div>
 
           {/* Total Price */}
-          <Input
-            type="number"
-            label={t('bookings.total_price_label')}
-            value={totalPrice}
-            onChange={(e) => setTotalPrice(Number(e.target.value))}
-            required
-          />
+          <div>
+            <Input
+              type="number"
+              label={t('bookings.total_price_label') + ' (MAD)'}
+              value={totalPrice}
+              onChange={(e) => setTotalPrice(Number(e.target.value))}
+              required
+            />
+            <span className="text-[10px] text-steel-500 font-bold mt-1 block">
+              {lang === 'fr'
+                ? `Calculé automatiquement selon le tarif journalier (${Number(targetMachine?.daily_rate || 2000).toLocaleString('fr-FR')} MAD/j)`
+                : `محسوب تلقائياً حسب التسعيرة اليومية للآلية (${Number(targetMachine?.daily_rate || 2000).toLocaleString('fr-FR')} د.م/يوم)`}
+            </span>
+          </div>
 
           {/* Operator Toggle */}
           <label className="flex items-center justify-between p-3 rounded-xl border border-steel-200 bg-surface cursor-pointer">
@@ -315,7 +482,13 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
               rows={2}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="ex. Chantier à Sidi Maârouf, livraison avant 08h00..."
+              placeholder={
+                isContractorMode
+                  ? lang === 'fr'
+                    ? 'Ex: Chantier à Bouskoura, livraison souhaitée avant 08h00...'
+                    : 'مثال: موقع الورش ببوسكورة، التسليم قبل الساعة 08:00 صباحاً...'
+                  : 'ex. Chantier à Sidi Maârouf...'
+              }
               className="w-full px-3 py-2 text-xs border border-steel-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary"
             />
           </div>
@@ -330,7 +503,13 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
               isLoading={isSubmitting}
               leftIcon={<Check className="w-4 h-4" />}
             >
-              {lang === 'fr' ? 'Enregistrer la réservation' : 'تأكيد وحفظ الحجز'}
+              {isContractorMode
+                ? lang === 'fr'
+                  ? 'Confirmer et envoyer la demande'
+                  : 'تأكيد وإرسال طلب الحجز'
+                : lang === 'fr'
+                ? 'Enregistrer la réservation'
+                : 'تأكيد وحفظ الحجز'}
             </Button>
           </div>
         </form>

@@ -16,7 +16,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   children,
   requiredRole,
 }) => {
-  const { isAuthenticated, isLoading, profile } = useAuth();
+  const { isAuthenticated, isLoading, profile, isSuperAdmin } = useAuth();
   const location = useLocation();
 
   // 1. Wait for auth initialization to complete
@@ -31,18 +31,24 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     );
   }
 
-  // 2. Redirect to /auth without an active Supabase session
+  // 2. Redirect to login without active session
   if (!isAuthenticated) {
+    if (requiredRole === 'admin' || location.pathname.startsWith('/admin')) {
+      return <Navigate to="/admin/login" state={{ from: location }} replace />;
+    }
     return <Navigate to="/auth" state={{ from: location }} replace />;
   }
 
-  // 3. Admin role is allowed everywhere
-  if (profile?.role === 'admin') {
+  // 3. Super Admin has full authority and access to every single route in the system
+  if (isSuperAdmin || profile?.role === 'admin') {
     return children;
   }
 
   // 4. Role-specific route gating
   if (requiredRole && profile?.role !== requiredRole) {
+    if (profile?.role === 'client' || profile?.role === 'contractor') {
+      return <Navigate to="/entreprise" replace />;
+    }
     return <Navigate to="/app" replace />;
   }
 

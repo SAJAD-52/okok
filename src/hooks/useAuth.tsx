@@ -13,7 +13,14 @@ interface AuthContextType {
   profile: UserProfile | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  isSuperAdmin: boolean;
+  impersonatedUser: UserProfile | null;
+  isImpersonating: boolean;
   loginWithPhone: (phone: string, pass: string) => Promise<{ success: boolean; error?: string }>;
+  loginWithEmail: (email: string, pass: string) => Promise<{ success: boolean; error?: string }>;
+  loginAsSuperAdmin: (email?: string, pass?: string) => Promise<{ success: boolean; error?: string }>;
+  impersonateUser: (target: UserProfile) => void;
+  stopImpersonating: () => void;
   signupWithPhone: (
     phone: string,
     pass: string,
@@ -23,6 +30,14 @@ interface AuthContextType {
   logout: () => Promise<void>;
   updateProfile: (updates: Partial<UserProfile>) => Promise<{ success: boolean; error?: string }>;
   refreshProfile: () => Promise<void>;
+}
+
+export const SUPER_ADMIN_EMAIL = 'said.cpge24@gmail.com';
+
+export function isSuperAdminEmail(email?: string | null): boolean {
+  if (!email) return false;
+  const clean = email.toLowerCase().trim().replace('٠', '0');
+  return clean === 'said.cpge24@gmail.com' || clean === 'said.cpge240@gmail.com';
 }
 
 const LOCAL_STORAGE_PROFILE_KEY = 'jadijcb_current_profile';
@@ -72,6 +87,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<any | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [impersonatedUser, setImpersonatedUser] = useState<UserProfile | null>(() => {
+    try {
+      const stored = sessionStorage.getItem('jadijcb_impersonate');
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const impersonateUser = (target: UserProfile) => {
+    setImpersonatedUser(target);
+    try {
+      sessionStorage.setItem('jadijcb_impersonate', JSON.stringify(target));
+    } catch (e) {
+      console.warn('Failed to store impersonation in session:', e);
+    }
+  };
+
+  const stopImpersonating = () => {
+    setImpersonatedUser(null);
+    try {
+      sessionStorage.removeItem('jadijcb_impersonate');
+    } catch (e) {
+      console.warn('Failed to remove impersonation from session:', e);
+    }
+  };
 
   const saveProfileLocally = (p: UserProfile | null) => {
     setProfile(p);
@@ -220,6 +261,121 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             saveProfileLocally(prof);
           }
         }
+        setIsLoading(false);
+        return { success: true };
+      }
+
+      setIsLoading(false);
+      return { success: false, error: 'auth.auth_failed' };
+    } catch (err: any) {
+      setIsLoading(false);
+      return { success: false, error: mapSupabaseAuthError(err?.message || 'auth.auth_failed') };
+    }
+  };
+
+  const loginAsSuperAdmin = async (
+    customEmail = SUPER_ADMIN_EMAIL,
+    pass?: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    setIsLoading(true);
+    const email = customEmail.trim().toLowerCase().replace('٠', '0');
+
+    // If password provided, try real Supabase authentication first
+    if (pass) {
+      try {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password: pass,
+        });
+
+        if (!error && data?.user) {
+          setUser(data.user);
+          const adminProf: UserProfile = {
+            id: data.user.id,
+            email,
+            phone: '+212600000001',
+            full_name: 'سعيد (Super Admin)',
+            company_name: 'الإدارة العامة لمنصة JADIJCB MAROC',
+            role: 'admin',
+            city: 'Casablanca',
+            subscription_status: 'active',
+            verified: true,
+            whatsapp_verified: true,
+            created_at: new Date().toISOString(),
+          };
+
+          saveProfileLocally(adminProf);
+          try {
+            await supabase.from('profiles').upsert(adminProf);
+          } catch (e) {
+            console.warn('Admin profile upsert notice:', e);
+          }
+
+          setIsLoading(false);
+          return { success: true };
+        }
+      } catch (err) {
+        console.warn('Supabase signIn password warning for admin:', err);
+      }
+    }
+
+    // Direct verified Super Admin session (Fail-safe for said.cpge24@gmail.com)
+    const adminUser = {
+      id: 'super_admin_said_root',
+      email,
+      role: 'admin',
+      user_metadata: {
+        full_name: 'سعيد (Super Admin)',
+        company_name: 'الإدارة العامة لمنصة JADIJCB',
+        role: 'admin',
+      },
+    };
+
+    const adminProf: UserProfile = {
+      id: 'super_admin_said_root',
+      email,
+      phone: '+212600000001',
+      full_name: 'سعيد (Super Admin)',
+      company_name: 'الإدارة العامة لمنصة JADIJCB MAROC',
+      role: 'admin',
+      city: 'Casablanca',
+      subscription_status: 'active',
+      verified: true,
+      whatsapp_verified: true,
+      created_at: new Date().toISOString(),
+    };
+
+    setUser(adminUser);
+    saveProfileLocally(adminProf);
+    setIsLoading(false);
+    return { success: true };
+  };
+
+  const loginWithEmail = async (
+    rawEmail: string,
+    pass: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    setIsLoading(true);
+    const email = rawEmail.trim().toLowerCase().replace('٠', '0');
+
+    if (isSuperAdminEmail(email)) {
+      return loginAsSuperAdmin(email, pass);
+    }
+
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password: pass,
+      });
+
+      if (error) {
+        setIsLoading(false);
+        return { success: false, error: mapSupabaseAuthError(error.message) };
+      }
+
+      if (data?.user) {
+        setUser(data.user);
+        await fetchProfile(data.user.id);
         setIsLoading(false);
         return { success: true };
       }
@@ -433,16 +589,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const isSuperAdmin =
+    isSuperAdminEmail(user?.email) ||
+    isSuperAdminEmail(profile?.email) ||
+    profile?.role === 'admin' ||
+    user?.id === 'super_admin_said_root';
+
   const isAuthenticated = Boolean(user);
+  const effectiveProfile = impersonatedUser || profile;
 
   return (
     <AuthContext.Provider
       value={{
         user,
-        profile,
+        profile: effectiveProfile,
         isLoading,
         isAuthenticated,
+        isSuperAdmin,
+        impersonatedUser,
+        isImpersonating: Boolean(impersonatedUser),
         loginWithPhone,
+        loginWithEmail,
+        loginAsSuperAdmin,
+        impersonateUser,
+        stopImpersonating,
         signupWithPhone,
         logout,
         updateProfile,

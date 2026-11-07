@@ -36,7 +36,7 @@ export const DashboardLayout: React.FC = () => {
   const { t, isRTL, lang } = useLanguage();
   const navigate = useNavigate();
   const location = useLocation();
-  const { profile, logout } = useAuth();
+  const { profile, logout, isSuperAdmin, isImpersonating, stopImpersonating, impersonatedUser } = useAuth();
   const { isLocked, isTrial, formattedCountdown, isActive } = useSubscription();
 
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -310,6 +310,31 @@ export const DashboardLayout: React.FC = () => {
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 pb-20 md:pb-6">
+        {/* Super Admin Impersonation Active Banner */}
+        {isImpersonating && (
+          <div className="bg-amber-400 text-ink px-4 py-2.5 text-xs font-black flex flex-wrap items-center justify-between gap-2 shadow-md z-40 border-b-2 border-ink">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-ink animate-ping" />
+              <span>
+                👑 {lang === 'fr' ? 'Super Admin actif' : 'وضع المشرف العام (Super Admin)'}:{' '}
+                {lang === 'fr'
+                  ? `Vous visualisez l'espace en tant que : ${impersonatedUser?.company_name || impersonatedUser?.full_name}`
+                  : `أنت تتصفح المنصة حالياً بصلاحية حساب: ${impersonatedUser?.company_name || impersonatedUser?.full_name}`}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                stopImpersonating();
+                navigate('/admin');
+              }}
+              className="px-3 py-1 rounded-xl bg-ink text-white font-bold hover:bg-steel-900 transition-colors text-[11px] cursor-pointer"
+            >
+              {lang === 'fr' ? 'Quitter la vue & Retourner au SuperAdmin ↩' : 'الرجوع إلى لوحة السوبر أدمن ↩'}
+            </button>
+          </div>
+        )}
+
         {/* Trial Live Banner: only for machinery owners */}
         {!isContractor && <TrialBanner onOpenPaymentModal={() => setIsPaymentModalOpen(true)} />}
 

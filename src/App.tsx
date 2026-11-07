@@ -22,6 +22,7 @@ import { StorefrontPage } from './pages/StorefrontPage';
 import { MessagesPage } from './pages/MessagesPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { AdminPage } from './pages/AdminPage';
+import { AdminLoginPage } from './pages/AdminLoginPage';
 import { ContractorDashboardPage } from './pages/ContractorDashboardPage';
 import { SiteRadarMapPage } from './pages/SiteRadarMapPage';
 import { ContractorBookingsPage } from './pages/ContractorBookingsPage';
@@ -45,6 +46,7 @@ export const App: React.FC = () => {
             {/* Public Routes */}
             <Route path="/" element={<LandingPage />} />
             <Route path="/auth" element={<AuthPage />} />
+            <Route path="/admin/login" element={<AdminLoginPage />} />
             <Route path="/marketplace" element={<MarketplacePage />} />
             <Route path="/marketplace/:id" element={<MachineDetailPage />} />
             <Route path="/s/:slug" element={<PublicStorefrontPage />} />

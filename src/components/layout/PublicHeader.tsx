@@ -9,13 +9,13 @@ import { useAuth } from '../../hooks/useAuth';
 
 export const PublicHeader: React.FC = () => {
   const { t, lang } = useLanguage();
-  const { user, profile } = useAuth();
+  const { user, profile, isSuperAdmin } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const navigate = useNavigate();
 
   const isContractor = profile?.role === 'client' || profile?.role === 'contractor';
 
-  const navLinks = isContractor
+  const baseLinks = isContractor
     ? [
         { to: '/marketplace', label: t('nav.marketplace'), icon: <Compass className="w-4 h-4" /> },
         { to: '/entreprise/map', label: lang === 'fr' ? 'Radar Chantiers' : 'رادار الأوراش 📍', icon: <MapPin className="w-4 h-4" /> },
@@ -27,6 +27,10 @@ export const PublicHeader: React.FC = () => {
         { to: '/app/machines', label: t('nav.machines'), icon: <Wrench className="w-4 h-4" /> },
         { to: '/app', label: t('nav.dashboard') },
       ];
+
+  const navLinks = isSuperAdmin
+    ? [...baseLinks, { to: '/admin', label: '👑 Super Admin' }]
+    : baseLinks;
 
   return (
     <header className="sticky top-0 z-40 w-full bg-white/90 backdrop-blur-md border-b border-steel-200/80 transition-shadow">

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ExternalLink,
@@ -17,6 +17,10 @@ import { Badge } from '../ui/Badge';
 import { toast } from '../ui/Toast';
 import { useLanguage } from '../../hooks/useLanguage';
 import { useAuth } from '../../hooks/useAuth';
+import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { generateUniqueStorefrontSlug } from '../../lib/storefrontSlug';
+
+const LOCAL_STOREFRONT_SLUG_KEY = 'jadijcb_owner_storefront_slug';
 
 interface StorefrontLiveCardProps {
   publishedCount: number;
@@ -27,11 +31,69 @@ export const StorefrontLiveCard: React.FC<StorefrontLiveCardProps> = ({
 }) => {
   const { t, lang } = useLanguage();
   const navigate = useNavigate();
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const [isCopied, setIsCopied] = useState(false);
 
-  const slug = 'atlas-terrassement';
-  const publicPath = `/s/${slug}`;
+  const [slug, setSlug] = useState<string>(() => {
+    try {
+      const stored = localStorage.getItem(LOCAL_STOREFRONT_SLUG_KEY);
+      if (stored) return stored;
+    } catch {
+      // Ignore
+    }
+    return '';
+  });
+
+  const [bannerUrl, setBannerUrl] = useState<string>(
+    'https://images.unsplash.com/photo-1541888946425-d0fbb186c5f7?w=800&q=80'
+  );
+  const [avatarUrl, setAvatarUrl] = useState<string>(profile?.avatar_url || '');
+  const [themeColor, setThemeColor] = useState<string>('#FFB400');
+
+  useEffect(() => {
+    async function loadStorefront() {
+      if (!user?.id && !profile) return;
+
+      let foundSlug = '';
+
+      if (isSupabaseConfigured && user?.id) {
+        try {
+          const { data, error } = await supabase
+            .from('storefronts')
+            .select('slug, banner_url, avatar_url, theme_color')
+            .eq('owner_id', user.id)
+            .maybeSingle();
+
+          if (!error && data) {
+            if (data.slug) foundSlug = data.slug;
+            if (data.banner_url) setBannerUrl(data.banner_url);
+            if (data.avatar_url) setAvatarUrl(data.avatar_url);
+            if (data.theme_color) setThemeColor(data.theme_color);
+          }
+        } catch (e) {
+          console.warn('StorefrontLiveCard fetch notice:', e);
+        }
+      }
+
+      if (!foundSlug) {
+        const local = localStorage.getItem(LOCAL_STOREFRONT_SLUG_KEY);
+        if (local) {
+          foundSlug = local;
+        } else {
+          const baseName = profile?.company_name || profile?.full_name || 'jadijcb-owner';
+          foundSlug = generateUniqueStorefrontSlug(baseName);
+          localStorage.setItem(LOCAL_STOREFRONT_SLUG_KEY, foundSlug);
+        }
+      }
+
+      setSlug(foundSlug);
+    }
+
+    loadStorefront();
+  }, [user, profile]);
+
+  const effectiveSlug = slug || 'store';
+  const publicPath = `/s/${effectiveSlug}`;
   const fullUrl = `https://jadijcb.ma${publicPath}`;
 
   const handleCopyLink = () => {
@@ -41,8 +103,9 @@ export const StorefrontLiveCard: React.FC<StorefrontLiveCardProps> = ({
     setTimeout(() => setIsCopied(false), 2500);
   };
 
-  const companyName = profile?.company_name || 'Atlas Terrassement & Travaux';
+  const companyName = profile?.company_name || 'شركة الأشغال والآليات المعتمدة';
   const city = profile?.city || 'Casablanca';
+  const iceNumber = profile?.ice_number || '001928471';
 
   return (
     <div className="bg-white border border-steel-200 rounded-2xl shadow-soft overflow-hidden text-start flex flex-col h-full">
@@ -70,17 +133,28 @@ export const StorefrontLiveCard: React.FC<StorefrontLiveCardProps> = ({
         {/* Banner Mockup */}
         <div className="relative rounded-2xl overflow-hidden border border-steel-200 bg-ink shadow-inner">
           <img
-            src="https://images.unsplash.com/photo-1541888946425-d0fbb186c5f7?w=800&q=80"
+            src={bannerUrl}
             alt="Bannière d'entreprise"
-            className="w-full h-28 object-cover opacity-60"
+            className="w-full h-28 object-cover opacity-80"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-ink via-transparent to-transparent" />
 
           {/* Floating Logo Badge */}
           <div className="absolute -bottom-1 start-4 flex items-end gap-2.5">
-            <div className="w-12 h-12 rounded-xl bg-primary text-ink border-2 border-white flex items-center justify-center font-black text-sm shadow-md">
-              AT
-            </div>
+            {avatarUrl || profile?.avatar_url ? (
+              <img
+                src={avatarUrl || profile?.avatar_url}
+                alt={companyName}
+                className="w-12 h-12 rounded-xl object-cover border-2 border-white shadow-md bg-white shrink-0"
+              />
+            ) : (
+              <div
+                className="w-12 h-12 rounded-xl text-ink border-2 border-white flex items-center justify-center font-black text-sm shadow-md shrink-0"
+                style={{ backgroundColor: themeColor }}
+              >
+                {companyName.slice(0, 2).toUpperCase()}
+              </div>
+            )}
             <div className="mb-1">
               <span className="text-white text-xs font-black block truncate max-w-[170px]">
                 {companyName}
@@ -101,7 +175,7 @@ export const StorefrontLiveCard: React.FC<StorefrontLiveCardProps> = ({
             </span>
             <span className="flex items-center gap-1 text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-md text-[11px]">
               <ShieldCheck className="w-3.5 h-3.5" />
-              <span>ICE 001928471</span>
+              <span>ICE {iceNumber}</span>
             </span>
           </div>
 
@@ -116,8 +190,8 @@ export const StorefrontLiveCard: React.FC<StorefrontLiveCardProps> = ({
 
           {/* Quick Slug URL Box */}
           <div className="p-2.5 rounded-xl bg-steel-100 border border-steel-200 flex items-center justify-between text-[11px] font-mono">
-            <span className="truncate text-steel-700 select-all" dir="ltr">
-              jadijcb.ma{publicPath}
+            <span className="truncate text-steel-700 select-all font-bold" dir="ltr">
+              jadijcb.ma/s/{slug || '...'}
             </span>
             <button
               type="button"

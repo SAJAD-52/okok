@@ -430,6 +430,7 @@ export const PublicStorefrontPage: React.FC = () => {
       storefrontData?.about_fr ||
       'Atlas Terrassement & Travaux Publics S.A.R.L. : Partenaire privilégié des chantiers BTP au Maroc.',
     theme_color: storefrontData?.theme_color || '#FFB400',
+    avatar: storefrontData?.avatar_url || storefrontData?.profiles?.avatar_url || null,
   };
 
   const fullStoreUrl = window.location.href;
@@ -579,10 +580,18 @@ export const PublicStorefrontPage: React.FC = () => {
               {/* Identity & Verified Badges */}
               <div className="flex items-start sm:items-center gap-4 sm:gap-5">
                 <div
-                  className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl border-4 border-white flex items-center justify-center font-black text-ink text-2xl shadow-xl shrink-0"
+                  className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl border-4 border-white flex items-center justify-center font-black text-ink text-2xl shadow-xl shrink-0 overflow-hidden bg-white"
                   style={{ backgroundColor: company.theme_color }}
                 >
-                  {company.name.slice(0, 2).toUpperCase()}
+                  {company.avatar ? (
+                    <img
+                      src={company.avatar}
+                      alt={company.name}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    company.name.slice(0, 2).toUpperCase()
+                  )}
                 </div>
 
                 <div className="space-y-1.5">

@@ -1,5 +1,6 @@
 // ============================================================================
-// JADIJCB: Owner Storefront Builder Page
+// JADIJCB: Owner Storefront Builder Page (/owner/storefront)
+// Features Auto-Generated Unique Slug & Direct File Uploads for Banner & Logo
 // ============================================================================
 
 import React, { useState, useEffect } from 'react';
@@ -14,11 +15,10 @@ import {
   Phone,
   MessageCircle,
   MapPin,
-  Palette,
-  Image,
-  Globe,
-  Truck,
+  Lock,
   Sparkles,
+  Link as LinkIcon,
+  CheckCircle2,
 } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -27,23 +27,39 @@ import { toast } from '../components/ui/Toast';
 import { useLanguage } from '../hooks/useLanguage';
 import { useAuth } from '../hooks/useAuth';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { mapDatabaseError } from '../lib/errorHelpers';
+import { generateUniqueStorefrontSlug } from '../lib/storefrontSlug';
+import { ImageUploadField } from '../components/storefront/ImageUploadField';
+
+const LOCAL_STOREFRONT_SLUG_KEY = 'jadijcb_owner_storefront_slug';
 
 export const StorefrontPage: React.FC = () => {
   const { t, lang, isRTL } = useLanguage();
   const navigate = useNavigate();
-  const { profile, user } = useAuth();
+  const { profile, user, updateProfile } = useAuth();
 
-  // Storefront Form State
-  const [slug, setSlug] = useState('atlas-terrassement');
-  const [bannerUrl, setBannerUrl] = useState(
+  // Auto-generated unique slug state
+  const [slug, setSlug] = useState<string>(() => {
+    try {
+      const stored = localStorage.getItem(LOCAL_STOREFRONT_SLUG_KEY);
+      if (stored) return stored;
+    } catch {
+      // Ignore
+    }
+    return '';
+  });
+
+  // Images state (Direct file uploads)
+  const [bannerUrl, setBannerUrl] = useState<string>(
     'https://images.unsplash.com/photo-1541888946425-d0fbb186c5f7?w=1200&q=80'
   );
+  const [avatarUrl, setAvatarUrl] = useState<string>(profile?.avatar_url || '');
+
+  // Form info state
   const [aboutAr, setAboutAr] = useState(
-    'شركة أطلس للأشغال العمومية والترابية، متخصصة في كراء آليات الحفر والتسوية الثقيلة مع سائقين معتمدين في جهة الدار البيضاء-سطات ومختلف المدن المغربية منذ 2012.'
+    'شركة متخصصة في كراء آليات ومعدات الأشغال العمومية والبناء مع سائقين معتمدين وصيانة دورية لضمان استمرارية الأوراش بأعلى جودة.'
   );
   const [aboutFr, setAboutFr] = useState(
-    'Atlas Terrassement & Travaux Publics S.A.R.L. : Partenaire privilégié des chantiers au Maroc. Location d\'engins lourds avec chauffeurs certifiés et maintenance sur site.'
+    'Entreprise spécialisée dans la location d\'engins lourds et matériels de BTP avec opérateurs qualifiés et maintenance sur site.'
   );
   const [whatsapp, setWhatsapp] = useState(profile?.phone || '+212661234567');
   const [themeColor, setThemeColor] = useState('#FFB400');
@@ -52,81 +68,129 @@ export const StorefrontPage: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [previewMachines, setPreviewMachines] = useState<any[]>([]);
 
-  // Fetch live storefront if Supabase is connected
+  // 1. Fetch or initialize storefront with unique non-repeating slug
   useEffect(() => {
     async function loadStorefront() {
-      if (!isSupabaseConfigured || !user?.id) return;
+      if (!user?.id && !profile) return;
 
-      try {
-        const { data, error } = await supabase
-          .from('storefronts')
-          .select('*')
-          .eq('owner_id', user.id)
-          .maybeSingle();
+      let loadedSlug = '';
 
-        if (!error && data) {
-          if (data.slug) setSlug(data.slug);
-          if (data.banner_url) setBannerUrl(data.banner_url);
-          if (data.about_ar) setAboutAr(data.about_ar);
-          if (data.about_fr) setAboutFr(data.about_fr);
-          if (data.whatsapp) setWhatsapp(data.whatsapp);
-          if (data.theme_color) setThemeColor(data.theme_color);
+      if (isSupabaseConfigured && user?.id) {
+        try {
+          const { data, error } = await supabase
+            .from('storefronts')
+            .select('*')
+            .eq('owner_id', user.id)
+            .maybeSingle();
+
+          if (!error && data) {
+            if (data.slug) loadedSlug = data.slug;
+            if (data.banner_url) setBannerUrl(data.banner_url);
+            if (data.avatar_url) setAvatarUrl(data.avatar_url);
+            if (data.about_ar) setAboutAr(data.about_ar);
+            if (data.about_fr) setAboutFr(data.about_fr);
+            if (data.whatsapp) setWhatsapp(data.whatsapp);
+            if (data.theme_color) setThemeColor(data.theme_color);
+          }
+
+          const { data: mData } = await supabase
+            .from('machines')
+            .select('*')
+            .eq('owner_id', user.id)
+            .limit(2);
+
+          if (mData && mData.length > 0) {
+            setPreviewMachines(mData);
+          }
+        } catch (err) {
+          console.warn('Storefront load notice:', err);
         }
-
-        const { data: mData } = await supabase
-          .from('machines')
-          .select('*')
-          .eq('owner_id', user.id)
-          .limit(2);
-
-        if (mData) {
-          setPreviewMachines(mData);
-        }
-      } catch (err) {
-        console.warn('Storefront load notice:', err);
       }
+
+      // If no slug exists in DB, check local storage or generate a unique non-repeating slug
+      if (!loadedSlug) {
+        const storedLocalSlug = localStorage.getItem(LOCAL_STOREFRONT_SLUG_KEY);
+        if (storedLocalSlug) {
+          loadedSlug = storedLocalSlug;
+        } else {
+          // Generate a guaranteed unique slug using company name or full name + unique suffix
+          const baseName = profile?.company_name || profile?.full_name || 'jadijcb-owner';
+          loadedSlug = generateUniqueStorefrontSlug(baseName);
+          localStorage.setItem(LOCAL_STOREFRONT_SLUG_KEY, loadedSlug);
+        }
+      }
+
+      setSlug(loadedSlug);
     }
 
     loadStorefront();
-  }, [user]);
+  }, [user, profile]);
 
-  const publicUrl = `/s/${slug}`;
+  // Keep avatar in sync with profile if not overridden
+  useEffect(() => {
+    if (profile?.avatar_url && !avatarUrl) {
+      setAvatarUrl(profile.avatar_url);
+    }
+  }, [profile?.avatar_url, avatarUrl]);
+
+  const publicUrl = `/s/${slug || 'store'}`;
   const fullPublicUrl = `https://jadijcb.ma${publicUrl}`;
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(fullPublicUrl);
     setIsCopied(true);
-    toast.success(t('dashboard.link_copied'));
+    toast.success(lang === 'fr' ? 'Lien unique copié !' : 'تم نسخ رابط المتجر بنجاح!');
     setTimeout(() => setIsCopied(false), 2500);
   };
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSave = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     setIsSaving(true);
 
-    const cleanSlug = slug
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9\-]/g, '-');
+    // Ensure we have a valid unique slug
+    const finalSlug = slug || generateUniqueStorefrontSlug(profile?.company_name || profile?.full_name);
+    setSlug(finalSlug);
+    try {
+      localStorage.setItem(LOCAL_STOREFRONT_SLUG_KEY, finalSlug);
+    } catch {
+      // Ignore
+    }
 
-    setSlug(cleanSlug);
+    // Update profile avatar if updated
+    if (avatarUrl && avatarUrl !== profile?.avatar_url) {
+      try {
+        await updateProfile({ avatar_url: avatarUrl });
+      } catch (e) {
+        console.warn('Profile avatar update notice:', e);
+      }
+    }
 
     if (isSupabaseConfigured && user?.id) {
       try {
-        const { error } = await supabase.from('storefronts').upsert({
+        const payload: any = {
           owner_id: user.id,
-          slug: cleanSlug,
+          slug: finalSlug,
           banner_url: bannerUrl,
+          avatar_url: avatarUrl,
           about_ar: aboutAr,
           about_fr: aboutFr,
           whatsapp,
           theme_color: themeColor,
-        });
+        };
+
+        const { error } = await supabase.from('storefronts').upsert(payload);
 
         if (error) {
-          toast.error(error.message);
-          setIsSaving(false);
-          return;
+          console.warn('Storefront upsert warning, attempting fallback:', error.message);
+          // If avatar_url column is not present in storefronts schema cache, omit it
+          if (error.message?.includes('avatar_url') || error.message?.includes('column')) {
+            delete payload.avatar_url;
+            await supabase.from('storefronts').upsert(payload);
+          } else {
+            toast.error(error.message);
+            setIsSaving(false);
+            return;
+          }
         }
       } catch (err: any) {
         console.warn('Storefront save error:', err);
@@ -137,11 +201,11 @@ export const StorefrontPage: React.FC = () => {
     toast.success(
       lang === 'fr'
         ? 'Vitrine mise à jour avec succès !'
-        : 'تم حفظ إعدادات المتجر بنجاح!'
+        : 'تم حفظ إعدادات وصور المتجر بنجاح!'
     );
   };
 
-  const companyName = profile?.company_name || 'Atlas Terrassement & Travaux S.A.R.L.';
+  const companyName = profile?.company_name || 'شركة الأشغال والآليات المعتمدة';
   const city = profile?.city || 'Casablanca';
 
   return (
@@ -153,7 +217,9 @@ export const StorefrontPage: React.FC = () => {
             {t('storefront.title')}
           </h1>
           <p className="text-xs text-steel-500 mt-1">
-            {t('storefront.subtitle')}
+            {lang === 'fr'
+              ? 'Générez et personnalisez votre vitrine B2B avec votre logo, bannière et lien unique protégé.'
+              : 'خصص واجهة متجرك الإلكتروني العام مع رفع الغلاف والشعار ورابط فريد ومحمي ضد التكرار.'}
           </p>
         </div>
 
@@ -173,7 +239,7 @@ export const StorefrontPage: React.FC = () => {
             type="button"
             variant="primary"
             size="sm"
-            onClick={handleSave}
+            onClick={() => handleSave()}
             isLoading={isSaving}
             leftIcon={<Save className="w-3.5 h-3.5" />}
             className="font-black text-xs shadow-sm"
@@ -187,46 +253,103 @@ export const StorefrontPage: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left: Builder Form (7 Cols) */}
         <div className="lg:col-span-7 space-y-5">
-          <Card className="p-6 bg-white border border-steel-200 shadow-soft">
-            <form onSubmit={handleSave} className="space-y-4">
-              {/* Custom Slug */}
-              <div>
-                <label className="text-xs font-bold text-steel-700 block mb-1">
-                  {t('storefront.slug_label')}
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 start-0 ps-3 flex items-center pointer-events-none text-xs text-steel-400 font-mono" dir="ltr">
-                    jadijcb.ma/s/
+          <Card className="p-6 bg-white border border-steel-200 shadow-soft space-y-6">
+            <form onSubmit={handleSave} className="space-y-5">
+              {/* 1. Auto-generated Read-only Unique Slug Box */}
+              <div className="p-4 rounded-2xl bg-amber-50/70 border border-amber-200 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-900 flex items-center justify-center">
+                      <Lock className="w-4 h-4 text-amber-700" />
+                    </div>
+                    <div>
+                      <span className="text-xs font-black text-ink block">
+                        {lang === 'fr'
+                          ? 'Lien public unique et vérifié'
+                          : 'رابط متجرك العام (فريد ومحمي ضد التكرار)'}
+                      </span>
+                      <span className="text-[10px] text-amber-800 font-medium block">
+                        {lang === 'fr'
+                          ? 'Généré automatiquement pour garantir une adresse exclusive à votre entreprise'
+                          : 'تم إنشاء هذا الرابط تلقائياً لضمان هوية حصرية غير مكررة لمتجرك أمام الزبائن'}
+                      </span>
+                    </div>
                   </div>
+
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold border border-emerald-300 flex items-center gap-1 shrink-0">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                    <span>{lang === 'fr' ? 'Actif' : 'معتمد'}</span>
+                  </span>
+                </div>
+
+                {/* Readonly URL Box with 1-Click Copy */}
+                <div className="flex items-center gap-2 p-2 rounded-xl bg-white border border-steel-300">
+                  <span className="ps-2 text-steel-400 font-mono text-xs select-none">
+                    <LinkIcon className="w-3.5 h-3.5 text-steel-400 inline me-1" />
+                  </span>
                   <input
                     type="text"
+                    readOnly
                     dir="ltr"
-                    value={slug}
-                    onChange={(e) => setSlug(e.target.value)}
-                    className="w-full ps-28 pe-4 py-2.5 rounded-xl border border-steel-300 text-xs font-mono font-bold focus:outline-none focus:ring-2 focus:ring-primary bg-surface min-h-[44px]"
-                    placeholder={t('storefront.slug_placeholder')}
-                    required
+                    value={fullPublicUrl}
+                    className="flex-1 bg-transparent font-mono text-xs font-bold text-ink focus:outline-none select-all cursor-text truncate"
+                    title={fullPublicUrl}
                   />
+                  <button
+                    type="button"
+                    onClick={handleCopyLink}
+                    className="px-3 py-1.5 rounded-lg bg-steel-900 hover:bg-steel-800 text-primary font-bold text-xs flex items-center gap-1.5 transition-colors shrink-0 cursor-pointer shadow-xs"
+                  >
+                    {isCopied ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <span className="text-emerald-400 font-black">{lang === 'fr' ? 'Copié' : 'تم النسخ'}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>{lang === 'fr' ? 'Copier' : 'نسخ الرابط'}</span>
+                      </>
+                    )}
+                  </button>
                 </div>
-                <p className="text-[11px] text-steel-400 mt-1">
-                  {t('storefront.slug_url_preview')} <strong className="font-mono text-ink" dir="ltr">{fullPublicUrl}</strong>
-                </p>
               </div>
 
-              {/* Banner URL */}
-              <div>
-                <label className="text-xs font-bold text-steel-700 block mb-1">
-                  {t('storefront.banner_url_label')}
-                </label>
-                <Input
-                  placeholder="https://images.unsplash.com/..."
+              {/* 2. Banner Image Upload */}
+              <div className="pt-1">
+                <ImageUploadField
+                  label={lang === 'fr' ? 'Bannière de couverture (Upload)' : 'صورة الغلاف (Banner Upload)'}
+                  description={
+                    lang === 'fr'
+                      ? 'Téléversez une photo panoramique de vos chantiers ou engins pour habiller le haut de votre vitrine.'
+                      : 'ارفع صورة عريضة تعبر عن أسطولك أو أوراشك الميدانية لتظهر في أعلى المتجر أمام المقاولين.'
+                  }
                   value={bannerUrl}
-                  onChange={(e) => setBannerUrl(e.target.value)}
-                  dir="ltr"
+                  onChange={(url) => setBannerUrl(url)}
+                  onRemove={() => setBannerUrl('')}
+                  aspectRatio="banner"
+                  recommendedDimensions="1200 × 400 px"
                 />
               </div>
 
-              {/* WhatsApp Direct Phone */}
+              {/* 3. Company Profile / Logo Upload */}
+              <div className="pt-1">
+                <ImageUploadField
+                  label={lang === 'fr' ? 'Logo de l\'entreprise ou Photo de profil' : 'شعار المقاولة أو الصورة الشخصية (Logo Upload)'}
+                  description={
+                    lang === 'fr'
+                      ? 'Téléversez le logo de votre société BTP ou votre photo professionnelle.'
+                      : 'ارفع الشعار الرسمي لشركتك أو الصورة الشخصية للمسؤول لإعطاء ثقة فورية للزبائن.'
+                  }
+                  value={avatarUrl}
+                  onChange={(url) => setAvatarUrl(url)}
+                  onRemove={() => setAvatarUrl('')}
+                  aspectRatio="square"
+                  recommendedDimensions="400 × 400 px"
+                />
+              </div>
+
+              {/* 4. WhatsApp Direct Phone */}
               <Input
                 label={t('storefront.whatsapp_label')}
                 placeholder="+212 6 XX XX XX XX"
@@ -236,7 +359,7 @@ export const StorefrontPage: React.FC = () => {
                 required
               />
 
-              {/* Theme Color Picker */}
+              {/* 5. Theme Color Picker */}
               <div>
                 <label className="text-xs font-bold text-steel-700 block mb-1.5">
                   {t('storefront.theme_color_label')}
@@ -263,11 +386,11 @@ export const StorefrontPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Bilingual About Text with Tabs */}
+              {/* 6. Bilingual About Text with Tabs */}
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className="text-xs font-bold text-steel-700">
-                    {lang === 'fr' ? 'Présentation de l\'entreprise :' : 'نبذة تعريفية عن الشركة:'}
+                    {lang === 'fr' ? 'Présentation de l\'entreprise :' : 'نبذة تعريفية عن الشركة ومجالات التدخل:'}
                   </label>
                   <div className="flex bg-steel-100 p-0.5 rounded-lg text-xs font-bold">
                     <button
@@ -316,6 +439,7 @@ export const StorefrontPage: React.FC = () => {
                 )}
               </div>
 
+              {/* Save Submit Button */}
               <div className="pt-2">
                 <Button
                   type="submit"
@@ -356,19 +480,28 @@ export const StorefrontPage: React.FC = () => {
               <img
                 src={bannerUrl || 'https://images.unsplash.com/photo-1541888946425-d0fbb186c5f7?w=800&q=80'}
                 alt="Bannière"
-                className="w-full h-36 object-cover"
+                className="w-full h-36 object-cover bg-ink"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-ink/90 via-ink/40 to-transparent" />
 
               {/* Floating Avatar & Details */}
               <div className="absolute bottom-3 start-4 end-4 flex items-end justify-between">
                 <div className="flex items-end gap-3">
-                  <div
-                    className="w-14 h-14 rounded-2xl border-2 border-white flex items-center justify-center font-black text-ink text-base shadow-lg shrink-0"
-                    style={{ backgroundColor: themeColor }}
-                  >
-                    AT
-                  </div>
+                  {avatarUrl ? (
+                    <img
+                      src={avatarUrl}
+                      alt={companyName}
+                      className="w-14 h-14 rounded-2xl border-2 border-white object-cover shadow-lg shrink-0 bg-white"
+                    />
+                  ) : (
+                    <div
+                      className="w-14 h-14 rounded-2xl border-2 border-white flex items-center justify-center font-black text-ink text-base shadow-lg shrink-0"
+                      style={{ backgroundColor: themeColor }}
+                    >
+                      {companyName.slice(0, 2).toUpperCase()}
+                    </div>
+                  )}
+
                   <div className="text-white">
                     <h3 className="font-black text-sm truncate max-w-[190px]">
                       {companyName}
@@ -380,7 +513,7 @@ export const StorefrontPage: React.FC = () => {
                       </span>
                       <span className="flex items-center gap-1 text-emerald-300 font-bold">
                         <ShieldCheck className="w-3 h-3" />
-                        ICE 001928471
+                        ICE {profile?.ice_number || '001928471'}
                       </span>
                     </div>
                   </div>
@@ -390,8 +523,18 @@ export const StorefrontPage: React.FC = () => {
 
             {/* Storefront Body Preview */}
             <div className="p-4 space-y-4">
+              {/* Unique Slug badge in preview */}
+              <div className="p-2 rounded-xl bg-steel-100 border border-steel-200 flex items-center justify-between text-[11px] font-mono">
+                <span className="truncate text-steel-700 select-all" dir="ltr">
+                  jadijcb.ma/s/{slug || '...'}
+                </span>
+                <span className="text-[10px] bg-primary/20 text-ink px-1.5 py-0.5 rounded font-sans font-bold">
+                  {lang === 'fr' ? 'Lien unique' : 'رابط حصري'}
+                </span>
+              </div>
+
               {/* About Snippet */}
-              <div className="p-3 rounded-xl bg-steel-50 border border-steel-200 text-xs text-steel-700 leading-relaxed">
+              <div className="p-3 rounded-xl bg-steel-50 border border-steel-200 text-xs text-steel-700 leading-relaxed font-medium">
                 {lang === 'fr' ? aboutFr : aboutAr}
               </div>
 
@@ -456,6 +599,20 @@ export const StorefrontPage: React.FC = () => {
                     ))
                   )}
                 </div>
+              </div>
+
+              {/* Open Public Page Button */}
+              <div className="pt-1">
+                <Button
+                  type="button"
+                  variant="dark"
+                  size="md"
+                  onClick={() => navigate(publicUrl)}
+                  className="w-full justify-center font-bold text-xs min-h-[42px]"
+                  rightIcon={<ExternalLink className="w-3.5 h-3.5" />}
+                >
+                  {t('dashboard.view_public_storefront')}
+                </Button>
               </div>
             </div>
           </Card>

@@ -22,6 +22,7 @@ import { LanguageSwitcher } from '../components/ui/LanguageSwitcher';
 import { useLanguage } from '../hooks/useLanguage';
 import { useAuth } from '../hooks/useAuth';
 import { MOROCCAN_CITIES } from '../data/cities';
+import { generateUniqueStorefrontSlug } from '../lib/storefrontSlug';
 
 export const OnboardingPage: React.FC = () => {
   const { t, lang, isRTL } = useLanguage();
@@ -69,6 +70,17 @@ export const OnboardingPage: React.FC = () => {
       whatsapp_verified: Boolean(whatsappPhone),
       onboarding_completed: true,
     });
+
+    // Ensure unique storefront slug is generated for this owner
+    try {
+      const existingSlug = localStorage.getItem('jadijcb_owner_storefront_slug');
+      if (!existingSlug) {
+        const newSlug = generateUniqueStorefrontSlug(companyName.trim() || fullName.trim());
+        localStorage.setItem('jadijcb_owner_storefront_slug', newSlug);
+      }
+    } catch {
+      // Ignore
+    }
 
     setIsSubmitting(false);
 

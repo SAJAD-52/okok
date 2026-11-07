@@ -7,6 +7,7 @@ import { supabase } from '../lib/supabase';
 import { normalizeMoroccanPhone, phoneToSyntheticEmail } from '../lib/authHelpers';
 import { mapDatabaseError } from '../lib/errorHelpers';
 import { UserProfile, UserRole } from '../types/database';
+import { generateUniqueStorefrontSlug } from '../lib/storefrontSlug';
 
 interface AuthContextType {
   user: any | null;
@@ -559,6 +560,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       saveProfileLocally(loadedProfile);
       setUser(activeUser);
+
+      // Auto-generate unique storefront slug for machinery owners
+      if (role === 'owner') {
+        const autoSlug = generateUniqueStorefrontSlug(meta?.companyName || meta?.fullName);
+        try {
+          localStorage.setItem('jadijcb_owner_storefront_slug', autoSlug);
+        } catch {
+          // Ignore
+        }
+        if (activeUser?.id) {
+          try {
+            await supabase.from('storefronts').upsert({
+              owner_id: activeUser.id,
+              slug: autoSlug,
+              whatsapp: norm.e164,
+              theme_color: '#FFB400',
+            });
+          } catch (e) {
+            console.warn('Auto storefront slug creation notice:', e);
+          }
+        }
+      }
+
       setIsLoading(false);
       return { success: true, isNewUser: true };
     } catch (err: any) {

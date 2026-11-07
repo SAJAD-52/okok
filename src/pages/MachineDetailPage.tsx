@@ -42,6 +42,7 @@ import { Skeleton } from '../components/ui/Skeleton';
 import { toast } from '../components/ui/Toast';
 import { useLanguage } from '../hooks/useLanguage';
 import { useFavorites } from '../hooks/useFavorites';
+import { useAuth } from '../hooks/useAuth';
 import { formatPriceMAD } from '../data/rentalTerms';
 import { MachineCard } from '../components/marketplace/MachineCard';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
@@ -52,6 +53,7 @@ export const MachineDetailPage: React.FC = () => {
   const navigate = useNavigate();
   const { t, lang, isRTL } = useLanguage();
   const { isFavorite, toggleFavorite } = useFavorites();
+  const { user, profile } = useAuth();
 
   const [machine, setMachine] = useState<Machine | null>(null);
   const [similarMachines, setSimilarMachines] = useState<Machine[]>([]);
@@ -343,7 +345,14 @@ export const MachineDetailPage: React.FC = () => {
   };
 
   const handleStartChat = async () => {
-    navigate(`/app/messages?machine_id=${machine.id}&target_user=${machine.owner_id}`);
+    if (!user) {
+      toast.info(lang === 'fr' ? 'Veuillez vous connecter pour discuter avec le propriétaire' : 'يرجى تسجيل الدخول أولاً للتواصل المباشر مع المالك');
+      navigate('/auth?redirect=/marketplace/' + machine?.id);
+      return;
+    }
+    const isClient = profile?.role === 'client' || profile?.role === 'contractor';
+    const basePath = isClient ? '/entreprise/messages' : '/app/messages';
+    navigate(`${basePath}?machine_id=${machine?.id}&target_user=${machine?.owner_id}`);
   };
 
   return (

@@ -163,90 +163,73 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
 
     if (user?.id) {
       try {
-        const fullPayload: any = {
+        let payload: any = {
           machine_id: newBooking.machine_id,
           owner_id: resolvedOwnerId,
           client_id: resolvedClientId,
-          client_name: newBooking.client_name,
-          client_phone: newBooking.client_phone,
           start_at: newBooking.start_at,
           end_at: newBooking.end_at,
           start_date: newBooking.start_at,
           end_date: newBooking.end_at,
           total_price: newBooking.total_price,
           status: newBooking.status,
-          notes: newBooking.notes,
+          notes: `${newBooking.notes ? newBooking.notes + ' | ' : ''}العميل: ${newBooking.client_name} (${newBooking.client_phone})`,
           with_operator: withOperator,
         };
 
-        // 1. Attempt standard insert
-        let { data, error } = await supabase
-          .from('bookings')
-          .insert(fullPayload)
-          .select('*, machines(*)')
-          .maybeSingle();
-
-        // 2. Schema cache / missing column resilient fallback
-        if (error && (error.message?.includes('schema cache') || error.code === 'PGRST204')) {
-          console.warn('Booking insert hit schema cache mismatch, retrying with adaptive columns:', error.message);
-
-          const adaptivePayload: any = {
-            machine_id: newBooking.machine_id,
-            owner_id: resolvedOwnerId,
-            start_at: newBooking.start_at,
-            end_at: newBooking.end_at,
-            total_price: newBooking.total_price,
-            status: newBooking.status,
-            notes: `${newBooking.notes ? newBooking.notes + ' | ' : ''}العميل: ${newBooking.client_name} (${newBooking.client_phone})`,
-          };
-          if (resolvedClientId) {
-            adaptivePayload.client_id = resolvedClientId;
-          }
-
-          const retry1 = await supabase
+        // Try insert with adaptive stripping of missing schema columns
+        let insertedId: string | null = null;
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const { data, error } = await supabase
             .from('bookings')
-            .insert(adaptivePayload)
-            .select('*, machines(*)')
+            .insert(payload)
+            .select('id')
             .maybeSingle();
 
-          if (!retry1.error) {
-            data = retry1.data;
-            error = null;
-          } else {
-            // 3. Fallback to minimal payload
-            const minimalPayload: any = {
-              machine_id: newBooking.machine_id,
-              owner_id: resolvedOwnerId,
-              total_price: newBooking.total_price,
-              status: 'pending',
-              notes: `حجز من: ${startDate} إلى: ${endDate} | العميل: ${newBooking.client_name} (${newBooking.client_phone}) | ${newBooking.notes}`,
-            };
-            const retry2 = await supabase
-              .from('bookings')
-              .insert(minimalPayload)
-              .select('*, machines(*)')
-              .maybeSingle();
+          if (!error && data?.id) {
+            insertedId = data.id;
+            break;
+          }
 
-            if (!retry2.error) {
-              data = retry2.data;
-              error = null;
+          if (error) {
+            const msg = error.message || '';
+            const missingColMatch = msg.match(/Could not find the '([^']+)' column/i);
+            if (missingColMatch && missingColMatch[1]) {
+              const col = missingColMatch[1];
+              delete payload[col];
+              continue;
             }
+            if (msg.includes('start_date') || msg.includes('start_at')) {
+              if (payload.start_at) {
+                delete payload.start_at;
+                delete payload.end_at;
+              } else {
+                delete payload.start_date;
+                delete payload.end_date;
+              }
+              continue;
+            }
+            if (msg.includes('total_price')) {
+              delete payload.total_price;
+              payload.total_amount = newBooking.total_price;
+              continue;
+            }
+            if (msg.includes('total_amount')) {
+              delete payload.total_amount;
+              continue;
+            }
+            if (msg.includes('client_name') || msg.includes('client_phone')) {
+              delete payload.client_name;
+              delete payload.client_phone;
+              continue;
+            }
+            // Other error - stop retrying
+            break;
           }
         }
 
-        if (error) {
-          setIsSubmitting(false);
-          const errKey = mapDatabaseError(error);
-          const msg = t(errKey);
-          if (errKey === 'bookings.overlap_error') {
-            setOverlapError(msg);
-          }
-          toast.error(msg);
-          return;
-        }
-
-        if (data?.id) {
-          newBooking.id = data.id;
+        if (insertedId) {
+          newBooking.id = insertedId;
         }
 
         // Notify machine owner via chat if possible

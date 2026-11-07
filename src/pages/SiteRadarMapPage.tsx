@@ -381,7 +381,7 @@ export const SiteRadarMapPage: React.FC = () => {
       navigate('/auth');
       return;
     }
-    navigate(`/app/messages?target=${m.owner_id}&machine=${m.id}`);
+    navigate(`/entreprise/messages?target=${m.owner_id}&machine=${m.id}`);
   };
 
   return (

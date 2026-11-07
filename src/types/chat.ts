@@ -2,14 +2,14 @@
 // JADIJCB: Real-Time Chat Types
 // ============================================================================
 
-import { Machine } from './database';
+import { Machine, UserRole } from './database';
 
 export interface ChatParticipant {
   id: string;
   phone: string;
   full_name: string;
   company_name?: string;
-  role: 'owner' | 'client' | 'admin' | 'contractor' | 'equipment_owner';
+  role: UserRole;
   avatar_url?: string;
   city?: string;
 }

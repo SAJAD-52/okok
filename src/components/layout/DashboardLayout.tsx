@@ -30,6 +30,7 @@ import { SoftLockModal } from '../dashboard/SoftLockModal';
 import { PaymentProofModal } from '../dashboard/PaymentProofModal';
 import { Booking } from '../../types/database';
 import { bookingStore } from '../../lib/bookingStore';
+import { chatStore } from '../../lib/chatStore';
 import { supabase } from '../../lib/supabase';
 
 export const DashboardLayout: React.FC = () => {
@@ -48,7 +49,21 @@ export const DashboardLayout: React.FC = () => {
   const isChatRoute = location.pathname.includes('/messages');
   // Contractors (clients) renting machinery are NEVER blocked by owner trial soft-lock!
   const shouldShowLock = !isContractor && isLocked && !isChatRoute;
-  const unreadMessagesCount = 1;
+
+  const [unreadMessagesCount, setUnreadMessagesCount] = useState<number>(() => {
+    return profile?.id ? chatStore.getTotalUnread(profile.id) : 1;
+  });
+
+  useEffect(() => {
+    const updateUnread = () => {
+      if (profile?.id) {
+        setUnreadMessagesCount(chatStore.getTotalUnread(profile.id));
+      }
+    };
+    updateUnread();
+    window.addEventListener('jadijcb_chat_event', updateUnread);
+    return () => window.removeEventListener('jadijcb_chat_event', updateUnread);
+  }, [profile?.id]);
 
   // Sync pending bookings for owner notification badge
   useEffect(() => {
@@ -130,7 +145,7 @@ export const DashboardLayout: React.FC = () => {
       icon: <HardHat className="w-5 h-5" />,
     },
     {
-      to: '/app/messages',
+      to: '/entreprise/messages',
       label: t('nav.messages'),
       icon: <MessageSquare className="w-5 h-5" />,
       badge: unreadMessagesCount,

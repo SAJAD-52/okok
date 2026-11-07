@@ -1,5 +1,5 @@
 // ============================================================================
-// JADIJCB: Chat Thread Component (WhatsApp-style with Realtime & Read Receipts)
+// JADIJCB: Chat Thread Component (WhatsApp-style with Realtime & Quick Chips)
 // ============================================================================
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -12,9 +12,10 @@ import {
   CheckCheck,
   Clock,
   ShieldCheck,
-  User,
   Sparkles,
-  Paperclip,
+  Truck,
+  Building2,
+  MapPin,
 } from 'lucide-react';
 import { ChatConversationItem, ChatMessageItem } from '../../types/chat';
 import { useLanguage } from '../../hooks/useLanguage';
@@ -46,6 +47,25 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
     sendTypingStatus,
   } = useChatRealtime(conversation);
 
+  const isContractor = profile?.role === 'client' || profile?.role === 'contractor';
+
+  // Quick Moroccan Construction Phrases
+  const quickChips = isContractor
+    ? [
+        '🚜 هل الآلية متوفرة هذا الأسبوع؟',
+        '👷 هل تتوفر مع سائق معتمد؟',
+        '⛽ هل السعر يشمل الكازوال والنقل للورش؟',
+        '📍 كم تكلفة الديباناج وسطحة النقل (Porte-char)؟',
+        '⏱️ هل يمكن بدء العمل بعد غد صباحاً؟',
+      ]
+    : [
+        '✅ وعليكم السلام، نعم الآلية جاهزة ومتوفرة فوراً',
+        '👷 السائق متوفر ومؤهل مع بطاقة السلامة المهنية',
+        '🚚 يمكننا توفير النقل عبر السطحة لموقع الورش',
+        '📍 يرجى تزويدنا بموقع الورش ومدة الكراء بالضبط',
+        '🤝 تم تأكيد الحجز وجدولة الآلية لكم',
+      ];
+
   // Auto-scroll to bottom on messages change
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -60,11 +80,11 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
     sendTypingStatus(e.target.value.length > 0);
   };
 
-  const handleSend = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!inputMessage.trim()) return;
+  const handleSend = (textToSend?: string) => {
+    const text = (textToSend || inputMessage).trim();
+    if (!text) return;
 
-    sendMessage(inputMessage);
+    sendMessage(text);
     setInputMessage('');
   };
 
@@ -75,7 +95,6 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
     }
   };
 
-  // Date Separator Helper
   const formatDateSeparator = (dateStr: string) => {
     const d = new Date(dateStr);
     const today = new Date();
@@ -103,8 +122,8 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
   const other = conversation.other_participant;
 
   return (
-    <div className="flex flex-col h-full bg-[#EFEAE2]/30 dark:bg-ink relative overflow-hidden">
-      {/* 1. WhatsApp-like Header */}
+    <div className="flex flex-col h-full bg-[#EFEAE2]/30 dark:bg-ink relative overflow-hidden select-none">
+      {/* 1. WhatsApp-like Header with Dual-Sided Indicators */}
       <header className="p-3.5 bg-white border-b border-steel-200 flex items-center justify-between gap-3 shrink-0 z-10 shadow-xs">
         <div className="flex items-center gap-2.5 min-w-0">
           {/* Back button on mobile */}
@@ -119,10 +138,10 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
             </button>
           )}
 
-          {/* Peer Avatar */}
+          {/* Peer Avatar with Role Icon */}
           <div className="relative shrink-0">
-            <div className="w-10 h-10 rounded-full bg-primary text-ink border border-primary-dark/20 flex items-center justify-center font-black text-xs uppercase shadow-sm">
-              {other.full_name?.slice(0, 2) || 'MA'}
+            <div className="w-10 h-10 rounded-2xl bg-amber-100 text-ink border border-primary/40 flex items-center justify-center font-black text-xs uppercase shadow-xs">
+              {other.role === 'owner' ? <Truck className="w-5 h-5 text-primary-dark" /> : <Building2 className="w-5 h-5 text-primary-dark" />}
             </div>
             <span className="absolute bottom-0 end-0 w-3 h-3 rounded-full bg-emerald-500 border-2 border-white" />
           </div>
@@ -136,15 +155,22 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
             </div>
 
-            <p className="text-[11px] text-steel-500 truncate">
+            <p className="text-[11px] text-steel-500 truncate flex items-center gap-1.5">
               {isPeerTyping ? (
                 <span className="text-emerald-700 font-bold animate-pulse">
                   {t('chat.typing')}
                 </span>
               ) : (
-                <span>
-                  {other.city || 'Maroc'} · {t('chat.online')}
-                </span>
+                <>
+                  <span className="font-bold text-steel-700">
+                    {other.role === 'owner'
+                      ? (lang === 'fr' ? 'Propriétaire d\'engins' : 'مالك آليات ومعدات')
+                      : (lang === 'fr' ? 'Entreprise BTP / Client' : 'مقاولة بناء / زبون')}
+                  </span>
+                  <span>·</span>
+                  <span>{other.city || 'المغرب'}</span>
+                  <span className="text-emerald-600 font-bold font-mono">● {t('chat.online')}</span>
+                </>
               )}
             </p>
           </div>
@@ -154,16 +180,16 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
         {other.phone && (
           <a
             href={`tel:${other.phone}`}
-            className="w-9 h-9 rounded-xl bg-steel-100 hover:bg-steel-200 text-steel-700 hover:text-ink flex items-center justify-center transition-colors cursor-pointer shrink-0"
+            className="h-9 px-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 font-bold text-xs"
             title={other.phone}
-            aria-label="Appeler"
           >
-            <Phone className="w-4 h-4" />
+            <Phone className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">{lang === 'fr' ? 'Appeler' : 'اتصال هاتفي'}</span>
           </a>
         )}
       </header>
 
-      {/* 2. Pinned Machine Context Card */}
+      {/* 2. Pinned Machine Context Card if Associated with this Chat */}
       {conversation.machine && (
         <ChatMachineContextCard machine={conversation.machine} />
       )}
@@ -176,7 +202,9 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
               <Sparkles className="w-6 h-6 text-primary-dark" />
             </div>
             <p className="text-xs text-steel-600 max-w-sm mx-auto leading-relaxed">
-              {t('chat.no_messages')}
+              {lang === 'fr'
+                ? 'Démarrez la conversation en envoyant un message ou en choisissant une question rapide ci-dessous.'
+                : 'ابدأ المحادثة بإرسال رسالة أو باختيار استفسار سريع من القائمة في الأسفل.'}
             </p>
           </div>
         )}
@@ -210,12 +238,12 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
                 <div
                   className={`max-w-[85%] sm:max-w-[70%] px-3.5 py-2.5 rounded-2xl shadow-xs text-start relative space-y-1 transition-all ${
                     isSender
-                      ? 'bg-amber-100/90 text-ink border border-amber-300/80 rounded-ee-xs'
+                      ? 'bg-amber-100/95 text-ink border border-amber-300/80 rounded-ee-xs'
                       : 'bg-white text-ink border border-steel-200 rounded-es-xs'
                   }`}
                 >
                   {/* Message Body */}
-                  <p className="text-xs sm:text-sm whitespace-pre-wrap leading-relaxed select-text">
+                  <p className="text-xs sm:text-sm whitespace-pre-wrap leading-relaxed select-text font-medium">
                     {msg.body}
                   </p>
 
@@ -269,15 +297,39 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* 4. WhatsApp-style Input Footer */}
+      {/* 4. Interactive Quick Chips (اقتراحات سريعة للمحادثة) */}
+      <div className="px-3 pt-2 pb-1 bg-white border-t border-steel-100 flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0">
+        {quickChips.map((chip, idx) => (
+          <button
+            key={idx}
+            type="button"
+            onClick={() => handleSend(chip)}
+            className="px-2.5 py-1 rounded-xl bg-steel-50 hover:bg-amber-100 text-steel-700 hover:text-ink text-[11px] font-bold border border-steel-200 hover:border-primary/40 whitespace-nowrap transition-all cursor-pointer shadow-2xs"
+          >
+            {chip}
+          </button>
+        ))}
+      </div>
+
+      {/* 5. WhatsApp-style Input Footer */}
       <footer className="p-3 bg-white border-t border-steel-200 shrink-0">
-        <form onSubmit={handleSend} className="flex items-center gap-2">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSend();
+          }}
+          className="flex items-center gap-2"
+        >
           <input
             type="text"
             value={inputMessage}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
-            placeholder={t('chat.placeholder')}
+            placeholder={
+              isContractor
+                ? (lang === 'fr' ? 'Écrivez votre message au propriétaire...' : 'اكتب استفسارك لمالك الآلية هنا...')
+                : (lang === 'fr' ? 'Répondez au client...' : 'اكتب ردك للزبون / المقاول هنا...')
+            }
             className="flex-1 px-4 py-2.5 text-xs sm:text-sm bg-surface border border-steel-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary min-h-[44px]"
           />
 

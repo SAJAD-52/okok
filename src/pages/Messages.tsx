@@ -1,15 +1,16 @@
 // ============================================================================
-// JADIJCB: Real-Time Messages Page (Responsive WhatsApp Layout)
+// JADIJCB: Real-Time Messages Page (Dual-Sided: Owners ↔ Contractors)
 // ============================================================================
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { MessageSquare, Sparkles, Truck } from 'lucide-react';
+import { MessageSquare, Sparkles, Truck, ShieldCheck, CheckCircle2 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
 import { useLanguage } from '../hooks/useLanguage';
 import { ChatConversationItem, ChatParticipant } from '../types/chat';
 import { Machine } from '../types/database';
+import { chatStore } from '../lib/chatStore';
 import { ConversationList } from '../features/chat/ConversationList';
 import { ChatThread } from '../features/chat/ChatThread';
 
@@ -19,105 +20,132 @@ export const Messages: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
 
-  const currentUserId = user?.id || profile?.id || 'user_1';
+  const currentUserId = user?.id || profile?.id || 'current-user-demo';
 
   const [conversations, setConversations] = useState<ChatConversationItem[]>([]);
   const [activeConversation, setActiveConversation] = useState<ChatConversationItem | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // 1. Fetch Conversations from Supabase or Fallback to Demo Data
+  // 1. Fetch Conversations from chatStore and Supabase
   const loadConversations = useCallback(async () => {
     setIsLoading(true);
 
-    if (isSupabaseConfigured) {
-      try {
-        const { data: convData, error: convError } = await supabase
-          .from('conversations')
-          .select(`
-            id,
-            machine_id,
-            participant_a,
-            participant_b,
-            last_message_at,
-            machines:machine_id (*)
-          `)
-          .or(`participant_a.eq.${currentUserId},participant_b.eq.${currentUserId}`)
-          .order('last_message_at', { ascending: false });
+    try {
+      // Load from chatStore
+      const storeList = await chatStore.getConversationsForUser(currentUserId);
+      let combined: ChatConversationItem[] = [...storeList];
 
-        if (!convError && convData && convData.length > 0) {
-          // Fetch participants and unread counts
-          const mapped: ChatConversationItem[] = await Promise.all(
-            convData.map(async (c: any) => {
-              const otherId = c.participant_a === currentUserId ? c.participant_b : c.participant_a;
+      // Pull from Supabase if configured
+      if (isSupabaseConfigured && currentUserId) {
+        try {
+          const { data: convData, error: convError } = await supabase
+            .from('conversations')
+            .select(`
+              id,
+              machine_id,
+              participant_a,
+              participant_b,
+              last_message_at,
+              machines:machine_id (*)
+            `)
+            .or(`participant_a.eq.${currentUserId},participant_b.eq.${currentUserId}`)
+            .order('last_message_at', { ascending: false });
 
-              // Fetch other profile
-              const { data: otherProfile } = await supabase
-                .from('profiles')
-                .select('*')
-                .eq('id', otherId)
-                .single();
+          if (!convError && convData && convData.length > 0) {
+            const mapped: ChatConversationItem[] = await Promise.all(
+              convData.map(async (c: any) => {
+                const otherId = c.participant_a === currentUserId ? c.participant_b : c.participant_a;
 
-              // Fetch last message & unread count
-              const { data: msgList } = await supabase
-                .from('messages')
-                .select('*')
-                .eq('conversation_id', c.id)
-                .order('created_at', { ascending: false })
-                .limit(1);
+                const { data: otherProfile } = await supabase
+                  .from('profiles')
+                  .select('*')
+                  .eq('id', otherId)
+                  .maybeSingle();
 
-              const { count: unreadCount } = await supabase
-                .from('messages')
-                .select('*', { count: 'exact', head: true })
-                .eq('conversation_id', c.id)
-                .eq('sender_id', otherId)
-                .is('read_at', null);
+                const { data: msgList } = await supabase
+                  .from('messages')
+                  .select('*')
+                  .eq('conversation_id', c.id)
+                  .order('created_at', { ascending: false })
+                  .limit(1);
 
-              const otherParticipant: ChatParticipant = {
-                id: otherId,
-                phone: otherProfile?.phone || '+212600000000',
-                full_name: otherProfile?.full_name || 'Partenaire JADIJCB',
-                company_name: otherProfile?.company_name,
-                role: otherProfile?.role || 'owner',
-                city: otherProfile?.city || 'Maroc',
-                avatar_url: otherProfile?.avatar_url,
-              };
+                const { count: unreadCount } = await supabase
+                  .from('messages')
+                  .select('*', { count: 'exact', head: true })
+                  .eq('conversation_id', c.id)
+                  .eq('sender_id', otherId)
+                  .is('read_at', null);
 
-              return {
-                id: c.id,
-                machine_id: c.machine_id,
-                participant_a: c.participant_a,
-                participant_b: c.participant_b,
-                last_message_at: c.last_message_at || new Date().toISOString(),
-                other_participant: otherParticipant,
-                machine: c.machines as Machine,
-                unread_count: unreadCount || 0,
-                last_message: msgList?.[0]?.body || msgList?.[0]?.content || '',
-              };
-            })
-          );
+                const otherParticipant: ChatParticipant = {
+                  id: otherId,
+                  phone: otherProfile?.phone || otherProfile?.phone_number || '+212600000000',
+                  full_name: otherProfile?.full_name || 'شريك JADIJCB',
+                  company_name: otherProfile?.company_name,
+                  role: otherProfile?.role || 'owner',
+                  city: otherProfile?.city || 'المغرب',
+                  avatar_url: otherProfile?.avatar_url,
+                };
 
-          setConversations(mapped);
-          return mapped;
+                return {
+                  id: c.id,
+                  machine_id: c.machine_id,
+                  participant_a: c.participant_a,
+                  participant_b: c.participant_b,
+                  last_message_at: c.last_message_at || new Date().toISOString(),
+                  other_participant: otherParticipant,
+                  machine: c.machines as Machine,
+                  unread_count: unreadCount || 0,
+                  last_message: msgList?.[0]?.body || msgList?.[0]?.content || '',
+                };
+              })
+            );
+
+            for (const item of mapped) {
+              const existingIdx = combined.findIndex((x) => x.id === item.id);
+              if (existingIdx >= 0) {
+                combined[existingIdx] = item;
+              } else {
+                combined.unshift(item);
+              }
+            }
+          }
+        } catch (dbErr) {
+          console.warn('Realtime Supabase conversations notice:', dbErr);
         }
-      } catch (err) {
-        console.warn('Realtime conversations load failed:', err);
       }
-    }
 
-    setConversations([]);
-    return [];
+      setConversations(combined);
+      return combined;
+    } catch (err) {
+      console.warn('Failed to load conversations:', err);
+      return [];
+    } finally {
+      setIsLoading(false);
+    }
   }, [currentUserId]);
 
   useEffect(() => {
     let isMounted = true;
-    loadConversations().then((loaded) => {
+
+    async function initSelection() {
+      const loaded = await loadConversations();
       if (!isMounted) return;
-      setIsLoading(false);
 
-      // Handle Query Params: ?conversationId= or ?machineId=
-      const urlConvId = searchParams.get('conversationId');
-      const urlMachineId = searchParams.get('machineId');
+      // Extract all possible query parameters
+      const urlConvId = searchParams.get('conversationId') || searchParams.get('conv');
+      const urlMachineId =
+        searchParams.get('machine_id') ||
+        searchParams.get('machineId') ||
+        searchParams.get('machine');
+      const targetUserId =
+        searchParams.get('target_user') ||
+        searchParams.get('target') ||
+        searchParams.get('user_id') ||
+        searchParams.get('userId') ||
+        searchParams.get('client_id') ||
+        searchParams.get('owner_id');
 
+      // 1. Direct conversation ID
       if (urlConvId) {
         const found = loaded.find((c) => c.id === urlConvId);
         if (found) {
@@ -126,53 +154,95 @@ export const Messages: React.FC = () => {
         }
       }
 
-      if (urlMachineId) {
-        const matchingConv = loaded.find((c) => c.machine_id === urlMachineId || c.machine?.id === urlMachineId);
-        if (matchingConv) {
-          setActiveConversation(matchingConv);
-        } else {
-          // Fetch target machine from database
-          supabase
-            .from('machines')
-            .select('*, profiles(*)')
-            .eq('id', urlMachineId)
-            .maybeSingle()
-            .then(({ data: targetMachine }) => {
-              if (targetMachine && isMounted) {
-                const newConv: ChatConversationItem = {
-                  id: `conv_new_${Date.now()}`,
-                  participant_a: currentUserId,
-                  participant_b: targetMachine.owner_id || 'owner_partner',
-                  last_message_at: new Date().toISOString(),
-                  unread_count: 0,
-                  last_message: '',
-                  other_participant: {
-                    id: targetMachine.owner_id || 'owner_partner',
-                    phone: targetMachine.profiles?.phone || '+212600000000',
-                    full_name: targetMachine.profiles?.full_name || 'Partenaire JADIJCB',
-                    company_name: targetMachine.profiles?.company_name || 'Entreprise Partenaire',
-                    role: targetMachine.profiles?.role || 'owner',
-                    city: targetMachine.profiles?.city || targetMachine.city || 'Maroc',
-                  },
-                  machine: targetMachine as unknown as Machine,
-                };
-                setConversations((prev) => [newConv, ...prev]);
-                setActiveConversation(newConv);
-              }
-            });
+      // 2. Direct Target User or Machine context
+      if (targetUserId || urlMachineId) {
+        // Look for matching conversation in loaded list
+        const matching = loaded.find(
+          (c) =>
+            (targetUserId &&
+              (c.other_participant.id === targetUserId ||
+                c.participant_a === targetUserId ||
+                c.participant_b === targetUserId)) ||
+            (urlMachineId && (c.machine_id === urlMachineId || c.machine?.id === urlMachineId))
+        );
+
+        if (matching) {
+          setActiveConversation(matching);
+          return;
         }
-      } else if (window.innerWidth >= 768 && loaded.length > 0 && !activeConversation) {
-        // Desktop default select first conversation
+
+        // Fetch machine or target user profile to create a clean new conversation
+        let targetMachine: any = null;
+        let targetProfile: any = null;
+
+        if (urlMachineId && isSupabaseConfigured) {
+          try {
+            const { data: mData } = await supabase
+              .from('machines')
+              .select('*, profiles(*)')
+              .eq('id', urlMachineId)
+              .maybeSingle();
+            if (mData) {
+              targetMachine = mData;
+              targetProfile = mData.profiles;
+            }
+          } catch (e) {
+            console.warn('Machine fetch error:', e);
+          }
+        }
+
+        if (targetUserId && !targetProfile && isSupabaseConfigured) {
+          try {
+            const { data: pData } = await supabase
+              .from('profiles')
+              .select('*')
+              .eq('id', targetUserId)
+              .maybeSingle();
+            if (pData) {
+              targetProfile = pData;
+            }
+          } catch (e) {
+            console.warn('Profile fetch error:', e);
+          }
+        }
+
+        const effectiveTargetId = targetUserId || targetMachine?.owner_id || 'partner_user';
+        const newConv = await chatStore.getOrCreateConversation(
+          currentUserId,
+          effectiveTargetId,
+          targetMachine,
+          targetProfile
+        );
+
+        setConversations((prev) => {
+          if (prev.some((c) => c.id === newConv.id)) return prev;
+          return [newConv, ...prev];
+        });
+        setActiveConversation(newConv);
+        return;
+      }
+
+      // 3. Desktop default: select first conversation if available
+      if (window.innerWidth >= 768 && loaded.length > 0 && !activeConversation) {
         setActiveConversation(loaded[0]);
       }
-    });
+    }
+
+    initSelection();
+
+    // Listen to local chat events
+    const handleChatEvent = () => {
+      loadConversations();
+    };
+    window.addEventListener('jadijcb_chat_event', handleChatEvent);
 
     return () => {
       isMounted = false;
+      window.removeEventListener('jadijcb_chat_event', handleChatEvent);
     };
-  }, [loadConversations, searchParams]);
+  }, [loadConversations, searchParams, currentUserId]);
 
-  // 2. Global Realtime Subscription on Conversations
+  // Global Realtime Subscription on Conversations table
   useEffect(() => {
     if (!isSupabaseConfigured) return;
 
@@ -200,8 +270,8 @@ export const Messages: React.FC = () => {
   const handleSelectConversation = (conv: ChatConversationItem) => {
     setActiveConversation(conv);
     setSearchParams({ conversationId: conv.id });
+    chatStore.markAsRead(conv.id, currentUserId);
 
-    // Mark as locally read
     setConversations((prev) =>
       prev.map((c) => (c.id === conv.id ? { ...c, unread_count: 0 } : c))
     );
@@ -247,22 +317,24 @@ export const Messages: React.FC = () => {
 
             <div className="space-y-1">
               <h3 className="text-base font-black text-ink">
-                {t('chat.title')}
+                {lang === 'fr' ? 'Messagerie Directe BTP & Engins' : 'نظام المحادثات المباشرة بين الملاك والمقاولات'}
               </h3>
               <p className="text-xs text-steel-500 leading-relaxed">
-                {t('chat.select_conversation')}
+                {lang === 'fr'
+                  ? 'Sélectionnez une discussion pour échanger en direct avec le loueur ou le client.'
+                  : 'اختر محادثة من القائمة للتواصل الفوري ومناقشة تفاصيل الكراء وجدولة الآليات.'}
               </p>
             </div>
 
             <div className="p-4 rounded-2xl bg-surface border border-steel-200 text-start space-y-2">
               <div className="flex items-center gap-2 text-xs font-bold text-ink">
                 <Sparkles className="w-4 h-4 text-primary" />
-                <span>{lang === 'fr' ? 'Messagerie directe sécurisée' : 'تواصل مباشر وموثوق'}</span>
+                <span>{lang === 'fr' ? 'Messagerie directe sécurisée' : 'تواصل ميداني فوري وموثوق'}</span>
               </div>
               <p className="text-[11px] text-steel-500 leading-normal">
                 {lang === 'fr'
                   ? 'Discutez en temps réel des disponibilités, chauffeurs, et tarifs sans intermédiaire.'
-                  : 'ناقش شروط الكراء وتوافر السائقين ومواعيد التوصيل مباشرة مع ملاك الآليات في مختلف مدن المغرب.'}
+                  : 'ناقش شروط الكراء وتوافر السائقين ومواعيد التوصيل للورش مباشرة مع الشركاء في كافة مدن المغرب.'}
               </p>
             </div>
           </div>

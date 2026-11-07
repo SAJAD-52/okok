@@ -50,7 +50,7 @@ export function useChatRealtime(activeConversation: ChatConversationItem | null)
             id: m.id,
             conversation_id: m.conversation_id,
             sender_id: m.sender_id,
-            body: m.body || m.content || '',
+            body: m.body || m.content || m.message || m.text || '',
             read_at: m.read_at,
             created_at: m.created_at,
           }));
@@ -83,11 +83,30 @@ export function useChatRealtime(activeConversation: ChatConversationItem | null)
   useEffect(() => {
     loadMessages();
 
+    // 1. Heartbeat poll every 2.5s to ensure messages arrive even if Realtime WebSockets are pending/unreplicated
+    const pollTimer = setInterval(() => {
+      loadMessages();
+    }, 2500);
+
+    // 2. Window custom event
     const handleChatEvent = () => {
       loadMessages();
     };
     window.addEventListener('jadijcb_chat_event', handleChatEvent);
-    return () => window.removeEventListener('jadijcb_chat_event', handleChatEvent);
+
+    // 3. Cross-tab storage event
+    const handleStorageEvent = (e: StorageEvent) => {
+      if (e.key === 'jadijcb_chat_messages' || e.key === 'jadijcb_chat_conversations') {
+        loadMessages();
+      }
+    };
+    window.addEventListener('storage', handleStorageEvent);
+
+    return () => {
+      clearInterval(pollTimer);
+      window.removeEventListener('jadijcb_chat_event', handleChatEvent);
+      window.removeEventListener('storage', handleStorageEvent);
+    };
   }, [loadMessages]);
 
   // 2. Setup Supabase Realtime Subscription & Presence for Active Conversation
@@ -108,11 +127,18 @@ export function useChatRealtime(activeConversation: ChatConversationItem | null)
           filter: `conversation_id=eq.${convId}`,
         },
         async (payload: any) => {
+          const bodyText =
+            payload.new.body ||
+            payload.new.content ||
+            payload.new.message ||
+            payload.new.text ||
+            '';
+
           const newMsg: ChatMessageItem = {
             id: payload.new.id,
             conversation_id: payload.new.conversation_id,
             sender_id: payload.new.sender_id,
-            body: payload.new.body,
+            body: bodyText,
             read_at: payload.new.read_at,
             created_at: payload.new.created_at,
           };

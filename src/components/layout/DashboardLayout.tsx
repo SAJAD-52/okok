@@ -31,7 +31,7 @@ import { PaymentProofModal } from '../dashboard/PaymentProofModal';
 import { Booking } from '../../types/database';
 import { bookingStore } from '../../lib/bookingStore';
 import { chatStore } from '../../lib/chatStore';
-import { supabase } from '../../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 
 export const DashboardLayout: React.FC = () => {
   const { t, isRTL, lang } = useLanguage();
@@ -50,19 +50,55 @@ export const DashboardLayout: React.FC = () => {
   // Contractors (clients) renting machinery are NEVER blocked by owner trial soft-lock!
   const shouldShowLock = !isContractor && isLocked && !isChatRoute;
 
-  const [unreadMessagesCount, setUnreadMessagesCount] = useState<number>(() => {
-    return profile?.id ? chatStore.getTotalUnread(profile.id) : 1;
-  });
+  const [unreadMessagesCount, setUnreadMessagesCount] = useState<number>(0);
 
   useEffect(() => {
-    const updateUnread = () => {
-      if (profile?.id) {
-        setUnreadMessagesCount(chatStore.getTotalUnread(profile.id));
+    const updateUnread = async () => {
+      if (!profile?.id) {
+        setUnreadMessagesCount(0);
+        return;
       }
+
+      let count = chatStore.getTotalUnread(profile.id);
+
+      if (isSupabaseConfigured) {
+        try {
+          const { data: convs } = await supabase
+            .from('conversations')
+            .select('id')
+            .or(`participant_a.eq.${profile.id},participant_b.eq.${profile.id}`);
+
+          if (convs && convs.length > 0) {
+            const convIds = convs.map((c: any) => c.id);
+            const { count: dbCount } = await supabase
+              .from('messages')
+              .select('*', { count: 'exact', head: true })
+              .in('conversation_id', convIds)
+              .neq('sender_id', profile.id)
+              .is('read_at', null);
+
+            if (typeof dbCount === 'number') {
+              count = dbCount;
+            }
+          }
+        } catch {
+          // Fallback to local store count
+        }
+      }
+
+      setUnreadMessagesCount(count);
     };
+
     updateUnread();
+    const interval = setInterval(updateUnread, 4000);
     window.addEventListener('jadijcb_chat_event', updateUnread);
-    return () => window.removeEventListener('jadijcb_chat_event', updateUnread);
+    window.addEventListener('storage', updateUnread);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('jadijcb_chat_event', updateUnread);
+      window.removeEventListener('storage', updateUnread);
+    };
   }, [profile?.id]);
 
   // Sync pending bookings for owner notification badge

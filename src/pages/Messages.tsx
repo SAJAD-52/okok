@@ -40,14 +40,7 @@ export const Messages: React.FC = () => {
         try {
           const { data: convData, error: convError } = await supabase
             .from('conversations')
-            .select(`
-              id,
-              machine_id,
-              participant_a,
-              participant_b,
-              last_message_at,
-              machines:machine_id (*)
-            `)
+            .select('id, machine_id, participant_a, participant_b, last_message_at')
             .or(`participant_a.eq.${currentUserId},participant_b.eq.${currentUserId}`)
             .order('last_message_at', { ascending: false });
 
@@ -61,6 +54,22 @@ export const Messages: React.FC = () => {
                   .select('*')
                   .eq('id', otherId)
                   .maybeSingle();
+
+                let machineData: Machine | undefined = undefined;
+                if (c.machine_id) {
+                  try {
+                    const { data: mData } = await supabase
+                      .from('machines')
+                      .select('*')
+                      .eq('id', c.machine_id)
+                      .maybeSingle();
+                    if (mData) {
+                      machineData = mData as Machine;
+                    }
+                  } catch (e) {
+                    // Ignore machine fetch error
+                  }
+                }
 
                 const { data: msgList } = await supabase
                   .from('messages')
@@ -86,6 +95,13 @@ export const Messages: React.FC = () => {
                   avatar_url: otherProfile?.avatar_url,
                 };
 
+                const latestMsg =
+                  msgList?.[0]?.body ||
+                  msgList?.[0]?.content ||
+                  msgList?.[0]?.message ||
+                  msgList?.[0]?.text ||
+                  '';
+
                 return {
                   id: c.id,
                   machine_id: c.machine_id,
@@ -93,9 +109,9 @@ export const Messages: React.FC = () => {
                   participant_b: c.participant_b,
                   last_message_at: c.last_message_at || new Date().toISOString(),
                   other_participant: otherParticipant,
-                  machine: c.machines as Machine,
+                  machine: machineData,
                   unread_count: unreadCount || 0,
-                  last_message: msgList?.[0]?.body || msgList?.[0]?.content || '',
+                  last_message: latestMsg,
                 };
               })
             );
@@ -230,15 +246,30 @@ export const Messages: React.FC = () => {
 
     initSelection();
 
+    // Heartbeat poll for conversations every 3s
+    const pollInterval = setInterval(() => {
+      loadConversations();
+    }, 3000);
+
     // Listen to local chat events
     const handleChatEvent = () => {
       loadConversations();
     };
     window.addEventListener('jadijcb_chat_event', handleChatEvent);
 
+    // Cross-tab storage sync
+    const handleStorageEvent = (e: StorageEvent) => {
+      if (e.key === 'jadijcb_chat_messages' || e.key === 'jadijcb_chat_conversations') {
+        loadConversations();
+      }
+    };
+    window.addEventListener('storage', handleStorageEvent);
+
     return () => {
       isMounted = false;
+      clearInterval(pollInterval);
       window.removeEventListener('jadijcb_chat_event', handleChatEvent);
+      window.removeEventListener('storage', handleStorageEvent);
     };
   }, [loadConversations, searchParams, currentUserId]);
 

@@ -292,16 +292,28 @@ class ChatStore {
       this.saveConvs();
     }
 
-    // Attempt to persist in Supabase if configured and valid UUID
+    // Attempt to persist in Supabase if configured
     if (isSupabaseConfigured) {
       try {
-        await supabase
-          .from('messages')
-          .insert({
-            conversation_id: conversationId,
-            sender_id: senderId,
-            body: trimmed,
-          });
+        let msgPayload: any = {
+          conversation_id: conversationId,
+          sender_id: senderId,
+          body: trimmed,
+          content: trimmed,
+        };
+
+        let { error: msgErr } = await supabase.from('messages').insert(msgPayload);
+
+        // If schema cache complains about body or content, adaptively retry
+        if (msgErr && (msgErr.message?.includes('schema cache') || msgErr.code === 'PGRST204')) {
+          if (msgErr.message.includes("'body'")) {
+            delete msgPayload.body;
+            await supabase.from('messages').insert(msgPayload);
+          } else if (msgErr.message.includes("'content'")) {
+            delete msgPayload.content;
+            await supabase.from('messages').insert(msgPayload);
+          }
+        }
 
         await supabase
           .from('conversations')
@@ -342,7 +354,7 @@ class ChatStore {
       try {
         const { data: dbConv } = await supabase
           .from('conversations')
-          .select('*, machines(*)')
+          .select('id, machine_id, participant_a, participant_b, last_message_at')
           .or(
             `and(participant_a.eq.${userAId},participant_b.eq.${userBId}),and(participant_a.eq.${userBId},participant_b.eq.${userAId})`
           )
@@ -366,7 +378,7 @@ class ChatStore {
               role: participantProfile.role || 'owner',
               city: participantProfile.city || 'Maroc',
             },
-            machine: (dbConv.machines as unknown as Machine) || (machine as Machine),
+            machine: machine as Machine,
           };
 
           this.conversations.unshift(item);
@@ -374,16 +386,23 @@ class ChatStore {
           return item;
         }
 
-        // Insert new conversation in Supabase
+        // Insert new conversation in Supabase with UUID check on machine_id
+        const isMachineUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          machine?.id || ''
+        );
+        const convInsertPayload: any = {
+          participant_a: userAId,
+          participant_b: userBId,
+        };
+        if (isMachineUuid) {
+          convInsertPayload.machine_id = machine!.id;
+        }
+
         const { data: inserted, error: insErr } = await supabase
           .from('conversations')
-          .insert({
-            participant_a: userAId,
-            participant_b: userBId,
-            machine_id: machine?.id || null,
-          })
+          .insert(convInsertPayload)
           .select()
-          .single();
+          .maybeSingle();
 
         if (!insErr && inserted) {
           const item: ChatConversationItem = {

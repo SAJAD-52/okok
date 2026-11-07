@@ -244,7 +244,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
                 >
                   {/* Message Body */}
                   <p className="text-xs sm:text-sm whitespace-pre-wrap leading-relaxed select-text font-medium">
-                    {msg.body}
+                    {msg.body || (msg as any).content || (msg as any).message || (msg as any).text || ''}
                   </p>
 
                   {/* Metadata: Timestamp & Read Receipts */}

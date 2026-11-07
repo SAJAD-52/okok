@@ -20,6 +20,7 @@ import { MachinesPage } from './pages/MachinesPage';
 import { BookingsPage } from './pages/BookingsPage';
 import { StorefrontPage } from './pages/StorefrontPage';
 import { MessagesPage } from './pages/MessagesPage';
+import { AnalyticsPage } from './pages/AnalyticsPage';
 import { AdminPage } from './pages/AdminPage';
 import { ContractorDashboardPage } from './pages/ContractorDashboardPage';
 import { SiteRadarMapPage } from './pages/SiteRadarMapPage';
@@ -80,6 +81,7 @@ export const App: React.FC = () => {
               <Route index element={<DashboardOverviewPage />} />
               <Route path="machines" element={<MachinesPage />} />
               <Route path="bookings" element={<BookingsPage />} />
+              <Route path="analytics" element={<AnalyticsPage />} />
               <Route path="storefront" element={<StorefrontPage />} />
               <Route path="messages" element={<MessagesPage />} />
             </Route>

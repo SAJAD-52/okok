@@ -17,6 +17,7 @@ import {
   HardHat,
   Check,
   Phone,
+  TrendingUp,
   X,
 } from 'lucide-react';
 import { Logo } from '../ui/Logo';
@@ -153,6 +154,11 @@ export const DashboardLayout: React.FC = () => {
       label: t('nav.bookings'),
       icon: <CalendarCheck className="w-5 h-5" />,
       badge: pendingBookingsCount,
+    },
+    {
+      to: '/app/analytics',
+      label: lang === 'fr' ? 'Finances & Rentabilité' : 'الإحصائيات والأرباح',
+      icon: <TrendingUp className="w-5 h-5" />,
     },
     {
       to: '/app/messages',

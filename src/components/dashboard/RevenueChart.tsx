@@ -10,7 +10,8 @@ import {
   Area,
   AreaChart,
 } from 'recharts';
-import { TrendingUp } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { TrendingUp, BarChart3, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useLanguage } from '../../hooks/useLanguage';
 
 export interface RevenuePoint {
@@ -70,9 +71,19 @@ export const RevenueChart: React.FC<RevenueChartProps> = ({ data }) => {
           </p>
         </div>
 
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-black self-start sm:self-auto">
-          <TrendingUp className="w-3.5 h-3.5" />
-          <span>+23.4% {lang === 'fr' ? 'ce mois' : 'هذا الشهر'}</span>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-black">
+            <TrendingUp className="w-3.5 h-3.5" />
+            <span>+23.4% {lang === 'fr' ? 'ce mois' : 'هذا الشهر'}</span>
+          </div>
+          <Link
+            to="/app/analytics"
+            className="flex items-center gap-1 px-3 py-1 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-800 text-xs font-black border border-primary/40 transition-colors"
+          >
+            <BarChart3 className="w-3.5 h-3.5" />
+            <span>{lang === 'fr' ? 'Rentabilité détaillée' : 'الإحصائيات والأرباح'}</span>
+            {useLanguage().isRTL ? <ChevronLeft className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+          </Link>
         </div>
       </div>
 

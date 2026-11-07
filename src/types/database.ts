@@ -227,3 +227,29 @@ export interface ContractorSite {
   active_machines_count?: number;
   created_at: string;
 }
+
+export type ExpenseCategory =
+  | 'fuel'               // وقود وديزل
+  | 'operator'           // أجرة / راتب / سلفة السائق
+  | 'preventive_service' // صيانة دورية، زيوت وفيش (Vidange)
+  | 'repair_breakdown'   // إصلاح أعطاب وقطع غيار (Pannes & Pièces)
+  | 'transport'          // نقل وديباناج (Porte-char)
+  | 'insurance_tech'     // تأمين وفحص تقني (Assurance & Contrôle)
+  | 'other';             // مصاريف وتكاليف أخرى
+
+export interface MachineExpense {
+  id: string;
+  owner_id: string;
+  machine_id: string;
+  category: ExpenseCategory;
+  amount: number; // MAD
+  date: string; // YYYY-MM-DD
+  title: string;
+  description?: string;
+  receipt_number?: string;
+  vendor_name?: string;
+  downtime_hours?: number; // ساعات توقف الآلية
+  created_at: string;
+  machine?: Partial<Machine>;
+}
+

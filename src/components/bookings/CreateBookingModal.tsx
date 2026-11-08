@@ -1,5 +1,6 @@
 // ============================================================================
-// JADIJCB: Booking Modal with Overlap Check & Resilient Schema Fallbacks
+// JADIJCB: Booking Modal with Conflict Protection & Clients Integration
+// Enforces overlap prevention, client directory selection, rate options & deposit
 // ============================================================================
 
 import React, { useState, useEffect } from 'react';
@@ -15,16 +16,19 @@ import {
   ShieldCheck,
   Building,
   HardHat,
+  Banknote,
+  Fuel,
+  MapPin,
 } from 'lucide-react';
-import { Booking, Machine, BookingStatus } from '../../types/database';
+import { Booking, Machine, Client } from '../../types/database';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { toast } from '../ui/Toast';
 import { useLanguage } from '../../hooks/useLanguage';
 import { useAuth } from '../../hooks/useAuth';
 import { supabase } from '../../lib/supabase';
-import { mapDatabaseError } from '../../lib/errorHelpers';
 import { bookingStore } from '../../lib/bookingStore';
+import { clientService } from '../../lib/clientService';
 
 interface CreateBookingModalProps {
   isOpen: boolean;
@@ -41,70 +45,143 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
   existingBookings,
   onBookingCreated,
 }) => {
-  const { t, lang } = useLanguage();
+  const { t, lang, isRTL } = useLanguage();
   const { profile, user } = useAuth();
 
   const [machineId, setMachineId] = useState<string>(machines[0]?.id || '');
-  const [clientName, setClientName] = useState(
-    profile?.company_name || profile?.full_name || ''
-  );
-  const [clientPhone, setClientPhone] = useState(
-    profile?.phone || '+2126'
-  );
+  const [selectedClientId, setSelectedClientId] = useState<string>('new');
+  const [clientName, setClientName] = useState('');
+  const [clientPhone, setClientPhone] = useState('');
+  const [cinOrIce, setCinOrIce] = useState('');
+  const [clientsList, setClientsList] = useState<Client[]>([]);
+
   const [startDate, setStartDate] = useState(
     new Date(Date.now() + 24 * 3600 * 1000).toISOString().slice(0, 16)
   );
   const [endDate, setEndDate] = useState(
     new Date(Date.now() + 5 * 24 * 3600 * 1000).toISOString().slice(0, 16)
   );
+
+  const [rateType, setRateType] = useState<'hourly' | 'daily' | 'weekly'>('daily');
   const [totalPrice, setTotalPrice] = useState<number>(10000);
+  const [depositAmount, setDepositAmount] = useState<number>(3000);
   const [withOperator, setWithOperator] = useState(true);
+  const [fuelIncluded, setFuelIncluded] = useState(false);
+  const [deliveryAvailable, setDeliveryAvailable] = useState(false);
+  const [deliveryFee, setDeliveryFee] = useState<number>(0);
+  const [siteAddress, setSiteAddress] = useState('');
   const [notes, setNotes] = useState('');
+
   const [overlapError, setOverlapError] = useState<string | null>(null);
+  const [conflictingBooking, setConflictingBooking] = useState<Booking | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Sync initial machine selection when modal opens or machine list changes
+  const ownerId = user?.id || profile?.id;
+
+  // Load clients list for this owner
+  useEffect(() => {
+    if (isOpen && ownerId) {
+      clientService.getClients(ownerId).then(setClientsList);
+    }
+  }, [isOpen, ownerId]);
+
+  // Sync initial machine selection
   useEffect(() => {
     if (machines.length > 0 && (!machineId || !machines.some((m) => m.id === machineId))) {
       setMachineId(machines[0].id);
     }
   }, [machines, isOpen]);
 
-  // Pre-fill profile details when modal opens
-  useEffect(() => {
-    if (isOpen) {
-      if (!clientName && (profile?.company_name || profile?.full_name)) {
-        setClientName(profile.company_name || profile.full_name || '');
-      }
-      if ((!clientPhone || clientPhone === '+2126') && profile?.phone) {
-        setClientPhone(profile.phone);
+  // Handle client selection change
+  const handleClientSelectChange = (val: string) => {
+    setSelectedClientId(val);
+    if (val === 'new') {
+      setClientName('');
+      setClientPhone('');
+      setCinOrIce('');
+    } else {
+      const found = clientsList.find((c) => c.id === val);
+      if (found) {
+        setClientName(found.name);
+        setClientPhone(found.phone);
+        setCinOrIce(found.cin_or_ice || '');
       }
     }
-  }, [isOpen, profile]);
+  };
 
-  // Dynamically calculate total price based on date range and machine rate
+  // Dynamically calculate total price based on dates, machine rates, delivery
   useEffect(() => {
     const startTs = new Date(startDate).getTime();
     const endTs = new Date(endDate).getTime();
     if (!isNaN(startTs) && !isNaN(endTs) && endTs > startTs) {
-      const days = Math.max(1, Math.ceil((endTs - startTs) / (1000 * 60 * 60 * 24)));
       const targetMachine = machines.find((m) => m.id === machineId) || machines[0];
-      const dailyRate = Number(targetMachine?.daily_rate) || 2000;
-      setTotalPrice(days * dailyRate);
+      const hours = (endTs - startTs) / (1000 * 60 * 60);
+      const days = Math.max(1, Math.ceil(hours / 24));
+
+      let base = 0;
+      if (rateType === 'hourly') {
+        const hourlyRate = Number(targetMachine?.hourly_rate || targetMachine?.rate_hourly) || 350;
+        base = Math.max(1, Math.round(hours)) * hourlyRate;
+      } else if (rateType === 'weekly') {
+        const weeklyRate = Number(targetMachine?.weekly_rate || targetMachine?.rate_weekly) || 12000;
+        const weeks = Math.max(1, Math.ceil(days / 7));
+        base = weeks * weeklyRate;
+      } else {
+        const dailyRate = Number(targetMachine?.daily_rate || targetMachine?.rate_daily) || 2000;
+        base = days * dailyRate;
+      }
+
+      const total = base + (deliveryAvailable ? Number(deliveryFee) || 0 : 0);
+      setTotalPrice(total);
     }
-  }, [startDate, endDate, machineId, machines]);
+  }, [startDate, endDate, machineId, machines, rateType, deliveryAvailable, deliveryFee]);
+
+  // Live conflict checker
+  useEffect(() => {
+    if (!startDate || !endDate || !machineId) {
+      setOverlapError(null);
+      setConflictingBooking(null);
+      return;
+    }
+
+    const startTs = new Date(startDate).getTime();
+    const endTs = new Date(endDate).getTime();
+    if (isNaN(startTs) || isNaN(endTs) || endTs <= startTs) return;
+
+    const conflict = existingBookings.find((b) => {
+      if (b.machine_id !== machineId) return false;
+      if (b.status === 'cancelled' || b.status === 'completed') return false;
+
+      const bStart = new Date(b.start_at || b.start_date || '').getTime();
+      const bEnd = new Date(b.end_at || b.end_date || '').getTime();
+
+      return startTs < bEnd && endTs > bStart;
+    });
+
+    if (conflict) {
+      setConflictingBooking(conflict);
+      const conflictStartStr = (conflict.start_at || conflict.start_date || '').slice(0, 10);
+      const conflictEndStr = (conflict.end_at || conflict.end_date || '').slice(0, 10);
+      const conflictClient = conflict.client_name || 'زبون آخر';
+
+      const alertMsg =
+        lang === 'fr'
+          ? `Conflit détecté : Cette machine est déjà réservée du ${conflictStartStr} au ${conflictEndStr} par "${conflictClient}" (Statut: ${conflict.status}).`
+          : `تعارض في الموعد : هذه الآلية محجوزة مسبقاً من ${conflictStartStr} إلى ${conflictEndStr} لصالح "${conflictClient}" (الحالة: ${conflict.status}).`;
+
+      setOverlapError(alertMsg);
+    } else {
+      setConflictingBooking(null);
+      setOverlapError(null);
+    }
+  }, [startDate, endDate, machineId, existingBookings, lang]);
 
   if (!isOpen) return null;
 
   const targetMachine = machines.find((m) => m.id === machineId) || machines[0];
-  const isContractorMode =
-    profile?.role === 'client' ||
-    profile?.role === 'contractor' ||
-    (targetMachine?.owner_id && targetMachine.owner_id !== user?.id);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setOverlapError(null);
 
     const startTs = new Date(startDate).getTime();
     const endTs = new Date(endDate).getTime();
@@ -113,388 +190,421 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
       toast.error(
         lang === 'fr'
           ? 'La date de fin doit être postérieure à la date de début'
-          : 'تاريخ النهاية يجب أن يكون بعد تاريخ البداية'
+          : 'تاريخ نهاية الكراء يجب أن يكون بعد تاريخ البداية'
       );
       return;
     }
 
-    // Client-side & DB Exclusion Check: prevent overlapping active bookings for the same machine
-    const hasOverlap = existingBookings.some((b) => {
-      if (b.machine_id !== machineId) return false;
-      if (b.status === 'cancelled') return false;
+    if (overlapError) {
+      toast.error(overlapError);
+      return;
+    }
 
-      const existingStart = new Date(b.start_at || b.start_date || '').getTime();
-      const existingEnd = new Date(b.end_at || b.end_date || '').getTime();
-
-      return startTs < existingEnd && endTs > existingStart;
-    });
-
-    if (hasOverlap) {
-      const msg = t('bookings.overlap_alert_msg');
-      setOverlapError(msg);
-      toast.error(msg);
+    if (!clientName.trim() || !clientPhone.trim()) {
+      toast.error(lang === 'fr' ? 'Nom et téléphone du client requis' : 'اسم الزبون ورقم الهاتف مطلوبان');
       return;
     }
 
     setIsSubmitting(true);
 
-    const isOwner = targetMachine?.owner_id === user?.id;
-    const resolvedOwnerId = targetMachine?.owner_id || user?.id || 'demo-owner';
-    const resolvedClientId = isOwner ? null : (user?.id || null);
+    const resolvedOwnerId = targetMachine?.owner_id || ownerId || 'owner';
+
+    // Auto-save new client in directory if "new" was selected
+    let clientRefId = selectedClientId !== 'new' ? selectedClientId : undefined;
+    if (selectedClientId === 'new' && ownerId) {
+      try {
+        const clientRes = await clientService.createClient(ownerId, {
+          name: clientName.trim(),
+          phone: clientPhone.trim(),
+          cin_or_ice: cinOrIce.trim(),
+        });
+        if (clientRes.client?.id) {
+          clientRefId = clientRes.client.id;
+        }
+      } catch (err) {
+        console.warn('Auto client save notice:', err);
+      }
+    }
 
     const newBooking: Booking = {
-      id: 'bk_' + Math.random().toString(36).substring(2, 9),
+      id: crypto.randomUUID(),
       machine_id: machineId,
       owner_id: resolvedOwnerId,
-      client_id: resolvedClientId || undefined,
       client_name: clientName.trim(),
       client_phone: clientPhone.trim(),
+      client_ref_id: clientRefId,
       start_at: new Date(startDate).toISOString(),
       end_at: new Date(endDate).toISOString(),
       start_date: new Date(startDate).toISOString(),
       end_date: new Date(endDate).toISOString(),
       total_price: Number(totalPrice),
+      deposit_amount: Number(depositAmount),
+      rate_type: rateType,
       with_operator: withOperator,
+      fuel_included: fuelIncluded,
+      delivery_requested: deliveryAvailable,
+      delivery_fee: Number(deliveryFee),
+      site_address: siteAddress.trim(),
       status: 'pending',
       notes: notes.trim(),
+      paid_amount: 0,
+      balance_due: Number(totalPrice),
+      payment_status: 'unpaid',
       machine: targetMachine,
       created_at: new Date().toISOString(),
     };
 
+    // Save to Supabase with overlap conflict handling
     if (user?.id) {
       try {
-        let payload: any = {
+        const payload: any = {
+          id: newBooking.id,
           machine_id: newBooking.machine_id,
           owner_id: resolvedOwnerId,
-          client_id: resolvedClientId,
+          client_name: newBooking.client_name,
+          client_phone: newBooking.client_phone,
           start_at: newBooking.start_at,
           end_at: newBooking.end_at,
           start_date: newBooking.start_at,
           end_date: newBooking.end_at,
           total_price: newBooking.total_price,
+          deposit_amount: newBooking.deposit_amount,
+          rate_type: newBooking.rate_type,
+          with_operator: newBooking.with_operator,
+          fuel_included: newBooking.fuel_included,
+          delivery_fee: newBooking.delivery_fee,
           status: newBooking.status,
-          notes: `${newBooking.notes ? newBooking.notes + ' | ' : ''}العميل: ${newBooking.client_name} (${newBooking.client_phone})`,
-          with_operator: withOperator,
+          notes: newBooking.notes,
+          created_at: newBooking.created_at,
         };
 
-        // Try insert with adaptive stripping of missing schema columns
-        let insertedId: string | null = null;
-        for (let attempt = 0; attempt < 5; attempt++) {
-          const { data, error } = await supabase
-            .from('bookings')
-            .insert(payload)
-            .select('id')
-            .maybeSingle();
+        const { data, error } = await supabase
+          .from('bookings')
+          .insert(payload)
+          .select()
+          .maybeSingle();
 
-          if (!error && data?.id) {
-            insertedId = data.id;
-            break;
+        if (error) {
+          if (error.message?.includes('BOOKING_CONFLICT')) {
+            setIsSubmitting(false);
+            const conflictMsg =
+              lang === 'fr'
+                ? 'Conflit de calendrier : Une autre réservation active existe déjà sur ces dates !'
+                : 'تعارض في التواريخ : توجد بالفعل عملية كراء أخرى مؤكدة على هذه الآلية في نفس الفترة!';
+            setOverlapError(conflictMsg);
+            toast.error(conflictMsg);
+            return;
           }
-
-          if (error) {
-            const msg = error.message || '';
-            const missingColMatch = msg.match(/Could not find the '([^']+)' column/i);
-            if (missingColMatch && missingColMatch[1]) {
-              const col = missingColMatch[1];
-              delete payload[col];
-              continue;
-            }
-            if (msg.includes('start_date') || msg.includes('start_at')) {
-              if (payload.start_at) {
-                delete payload.start_at;
-                delete payload.end_at;
-              } else {
-                delete payload.start_date;
-                delete payload.end_date;
-              }
-              continue;
-            }
-            if (msg.includes('total_price')) {
-              delete payload.total_price;
-              payload.total_amount = newBooking.total_price;
-              continue;
-            }
-            if (msg.includes('total_amount')) {
-              delete payload.total_amount;
-              continue;
-            }
-            if (msg.includes('client_name') || msg.includes('client_phone')) {
-              delete payload.client_name;
-              delete payload.client_phone;
-              continue;
-            }
-            // Other error - stop retrying
-            break;
-          }
-        }
-
-        if (insertedId) {
-          newBooking.id = insertedId;
-        }
-
-        // Notify machine owner via chat if possible
-        if (targetMachine?.owner_id && user.id !== targetMachine.owner_id) {
-          try {
-            const { data: conv } = await supabase
-              .from('conversations')
-              .select('id')
-              .or(
-                `and(participant_a.eq.${user.id},participant_b.eq.${targetMachine.owner_id}),and(participant_a.eq.${targetMachine.owner_id},participant_b.eq.${user.id})`
-              )
-              .maybeSingle();
-
-            let convId = conv?.id;
-            if (!convId) {
-              const { data: newConv } = await supabase
-                .from('conversations')
-                .insert({
-                  participant_a: user.id,
-                  participant_b: targetMachine.owner_id,
-                })
-                .select('id')
-                .maybeSingle();
-              convId = newConv?.id;
-            }
-
-            if (convId) {
-              await supabase.from('messages').insert({
-                conversation_id: convId,
-                sender_id: user.id,
-                content: `🚜 طلب حجز جديد للآلية (${targetMachine.brand} ${targetMachine.model}):\n- من: ${new Date(startDate).toLocaleDateString('fr-MA')}\n- إلى: ${new Date(endDate).toLocaleDateString('fr-MA')}\n- المبلغ التقديري: ${Number(totalPrice).toLocaleString('fr-FR')} درهم\n- الزبون: ${clientName} (${clientPhone})\n- ملاحظات الورش: ${notes || 'لا توجد'}`,
-              });
-            }
-          } catch (chatErr) {
-            console.warn('Could not post booking alert to chat:', chatErr);
-          }
+          console.warn('DB booking insert notice:', error.message);
+        } else if (data) {
+          newBooking.id = data.id;
         }
       } catch (err: any) {
-        setIsSubmitting(false);
-        const errKey = mapDatabaseError(err);
-        toast.error(t(errKey));
-        return;
+        if (err.message?.includes('BOOKING_CONFLICT')) {
+          setIsSubmitting(false);
+          toast.error(
+            lang === 'fr'
+              ? 'Conflit de réservation sur cette machine'
+              : 'تعارض في التواريخ : الآلية محجوزة مسبقاً'
+          );
+          return;
+        }
       }
     }
 
-    setIsSubmitting(false);
+    // Save locally & emit events
     bookingStore.saveBooking(newBooking);
-    onBookingCreated(newBooking);
+    setIsSubmitting(false);
+
     toast.success(
       lang === 'fr'
-        ? 'Demande de réservation envoyée avec succès'
-        : 'تم إرسال وتأكيد طلب الحجز بنجاح'
+        ? 'Réservation enregistrée avec succès !'
+        : 'تم تسجيل وتثبيت حجز الآلية بنجاح!'
     );
+
+    onBookingCreated(newBooking);
     onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/80 backdrop-blur-md overflow-y-auto">
-      <div className="relative bg-white border border-steel-200 rounded-3xl max-w-lg w-full shadow-2xl my-auto overflow-hidden text-start">
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/75 backdrop-blur-xs text-start overflow-y-auto"
+    >
+      <div className="bg-white border border-steel-200 rounded-3xl max-w-xl w-full shadow-2xl my-6 overflow-hidden animate-scale-in">
         {/* Header */}
         <div className="bg-ink p-5 text-white flex items-center justify-between border-b-2 border-primary">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-primary text-ink flex items-center justify-center font-black">
-              {isContractorMode ? <HardHat className="w-5 h-5" /> : <CalendarCheck className="w-5 h-5" />}
+              <CalendarCheck className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-base font-black text-white">
-                {isContractorMode
-                  ? lang === 'fr'
-                    ? 'Réserver cette machine pour votre chantier'
-                    : 'طلب حجز الآلية لمشروعك / ورشك'
-                  : t('bookings.create_manual_booking')}
+              <h3 className="font-black text-sm">
+                {lang === 'fr' ? 'Nouvelle réservation de matériel' : 'تسجيل حجز وعقد كراء جديد'}
               </h3>
-              <span className="text-[11px] text-steel-400">
-                {isContractorMode
-                  ? lang === 'fr'
-                    ? 'Envoyez votre demande de location directement au propriétaire'
-                    : 'إرسال طلب استئجار الآلية مع فحص التعارض الزمني'
-                  : lang === 'fr'
-                  ? 'Planifiez une mission avec vérification de disponibilité'
-                  : 'جدولة كراء آلية مع التحقق التلقائي من تعارض المواعيد'}
-              </span>
+              <p className="text-[11px] text-steel-400">
+                {lang === 'fr'
+                  ? 'Protection anti-conflit de calendrier et calcul automatique'
+                  : 'مع حماية تلقائية ضد تداخل المواعيد وحساب التكلفة'}
+              </p>
             </div>
           </div>
-
           <button
             type="button"
             onClick={onClose}
-            className="w-8 h-8 rounded-lg bg-steel-800 text-steel-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
-            aria-label={t('common.close')}
+            className="w-8 h-8 rounded-lg bg-steel-800 text-steel-400 hover:text-white flex items-center justify-center cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
-          {/* Overlap Error Warning Banner */}
+        <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[82vh] overflow-y-auto text-xs">
+          {/* Overlap Conflict Banner Alert */}
           {overlapError && (
-            <div className="p-3.5 rounded-2xl bg-danger/10 border border-danger/40 text-danger flex items-start gap-2.5">
-              <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
-              <div>
-                <span className="text-xs font-black block">
-                  {t('bookings.overlap_alert_title')}
-                </span>
-                <p className="text-[11px] mt-0.5 leading-snug">
-                  {overlapError}
-                </p>
+            <div className="p-4 rounded-2xl bg-red-50 border-2 border-red-300 text-red-900 space-y-1 animate-pulse">
+              <div className="flex items-center gap-2 font-black">
+                <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                <span>{lang === 'fr' ? 'Alerte conflit de planning !' : 'تحذير : تعارض في جدول المواعيد!'}</span>
               </div>
+              <p className="text-[11px] leading-relaxed">{overlapError}</p>
             </div>
           )}
 
-          {/* Machine Info / Selection */}
+          {/* Machine Selection */}
           <div>
-            <label className="text-xs font-bold text-steel-700 block mb-1.5">
-              {t('bookings.select_machine')}
+            <label className="text-xs font-bold text-steel-700 block mb-1.5 flex items-center gap-1.5">
+              <Truck className="w-3.5 h-3.5 text-primary-dark" />
+              <span>{lang === 'fr' ? 'Sélectionner l\'engin *' : 'اختر الآلية من أسطولك *'}</span>
             </label>
-            {machines.length === 1 ? (
-              <div className="p-3 bg-steel-50 rounded-xl border border-steel-200 flex items-center justify-between">
-                <div>
-                  <span className="text-xs font-black text-ink block">
-                    {machines[0].title_ar || machines[0].title_fr} ({machines[0].brand} {machines[0].model})
-                  </span>
-                  <span className="text-[11px] text-steel-500 font-bold">
-                    {Number(machines[0].daily_rate || 2000).toLocaleString('fr-FR')} MAD / {lang === 'fr' ? 'jour' : 'يوم'}
-                  </span>
-                </div>
-                <Truck className="w-5 h-5 text-primary" />
-              </div>
-            ) : (
-              <select
-                value={machineId}
-                onChange={(e) => setMachineId(e.target.value)}
-                className="w-full px-3 py-2.5 text-xs font-bold bg-white border border-steel-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary min-h-[44px]"
+            <select
+              value={machineId}
+              onChange={(e) => setMachineId(e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-xl border border-steel-300 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-primary bg-surface"
+            >
+              {machines.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.title_ar} - {m.brand} {m.model} ({m.daily_rate || m.rate_daily || 2000} MAD/j)
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Client Selection (Directory / Inline New) */}
+          <div className="p-3.5 rounded-2xl bg-steel-50 border border-steel-200 space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-steel-700 flex items-center gap-1.5">
+                <User className="w-3.5 h-3.5 text-primary-dark" />
+                <span>{lang === 'fr' ? 'Client ou Entreprise *' : 'الزبون أو المقاولة المستأجرة *'}</span>
+              </label>
+
+              {clientsList.length > 0 && (
+                <select
+                  value={selectedClientId}
+                  onChange={(e) => handleClientSelectChange(e.target.value)}
+                  className="px-2 py-1 text-[11px] rounded-lg border border-steel-300 bg-white font-bold"
+                >
+                  <option value="new">{lang === 'fr' ? '+ Nouveau client' : '+ زبون جديد'}</option>
+                  {clientsList.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.phone})
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Input
+                label={lang === 'fr' ? 'Nom du client / Raison sociale' : 'اسم الزبون / الشركة'}
+                placeholder="Ex. Société BTP Travaux"
+                value={clientName}
+                onChange={(e) => setClientName(e.target.value)}
                 required
-              >
-                {machines.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.title_ar || m.title_fr} ({m.brand} {m.model}) - {Number(m.daily_rate || 2000).toLocaleString('fr-FR')} MAD/j
-                  </option>
-                ))}
-              </select>
-            )}
+              />
+
+              <Input
+                label={lang === 'fr' ? 'Téléphone WhatsApp' : 'رقم الهاتف والواتساب'}
+                placeholder="+2126XXXXXXXX"
+                value={clientPhone}
+                onChange={(e) => setClientPhone(e.target.value)}
+                required
+                dir="ltr"
+              />
+            </div>
           </div>
 
-          {/* Client Details */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Input
-              label={isContractorMode ? (lang === 'fr' ? 'Nom de votre entreprise' : 'اسم المقاولة أو الزبون') : t('bookings.client_name_label')}
-              placeholder="ex. Société BTP Tanger"
-              value={clientName}
-              onChange={(e) => setClientName(e.target.value)}
-              required
-            />
-            <Input
-              label={t('bookings.client_phone_label')}
-              placeholder="+212 6 XX XX XX XX"
-              value={clientPhone}
-              onChange={(e) => setClientPhone(e.target.value)}
-              dir="ltr"
-              required
-            />
-          </div>
-
-          {/* Dates & Times */}
+          {/* Dates & Timeframe */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-bold text-steel-700 block mb-1">
-                {t('bookings.start_date_label')}
+              <label className="text-xs font-bold text-steel-700 block mb-1.5 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-primary-dark" />
+                <span>{lang === 'fr' ? 'Date & Heure de début *' : 'تاريخ وتوقيت البداية *'}</span>
               </label>
-              <input
+              <Input
                 type="datetime-local"
                 value={startDate}
-                onChange={(e) => {
-                  setStartDate(e.target.value);
-                  setOverlapError(null);
-                }}
-                className="w-full px-3 py-2 text-xs border border-steel-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary min-h-[44px]"
+                onChange={(e) => setStartDate(e.target.value)}
                 required
+                dir="ltr"
               />
             </div>
 
             <div>
-              <label className="text-xs font-bold text-steel-700 block mb-1">
-                {t('bookings.end_date_label')}
+              <label className="text-xs font-bold text-steel-700 block mb-1.5 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-primary-dark" />
+                <span>{lang === 'fr' ? 'Date & Heure de fin *' : 'تاريخ وتوقيت الانتهاء *'}</span>
               </label>
-              <input
+              <Input
                 type="datetime-local"
                 value={endDate}
-                onChange={(e) => {
-                  setEndDate(e.target.value);
-                  setOverlapError(null);
-                }}
-                className="w-full px-3 py-2 text-xs border border-steel-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary min-h-[44px]"
+                onChange={(e) => setEndDate(e.target.value)}
                 required
+                dir="ltr"
               />
             </div>
           </div>
 
-          {/* Total Price */}
-          <div>
-            <Input
-              type="number"
-              label={t('bookings.total_price_label') + ' (MAD)'}
-              value={totalPrice}
-              onChange={(e) => setTotalPrice(Number(e.target.value))}
-              required
-            />
-            <span className="text-[10px] text-steel-500 font-bold mt-1 block">
-              {lang === 'fr'
-                ? `Calculé automatiquement selon le tarif journalier (${Number(targetMachine?.daily_rate || 2000).toLocaleString('fr-FR')} MAD/j)`
-                : `محسوب تلقائياً حسب التسعيرة اليومية للآلية (${Number(targetMachine?.daily_rate || 2000).toLocaleString('fr-FR')} د.م/يوم)`}
-            </span>
+          {/* Pricing & Deposit */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="text-xs font-bold text-steel-700 block mb-1.5">
+                {lang === 'fr' ? 'Mode de tarification' : 'طريقة التسعير'}
+              </label>
+              <select
+                value={rateType}
+                onChange={(e) => setRateType(e.target.value as any)}
+                className="w-full px-3 py-2.5 rounded-xl border border-steel-300 font-bold focus:outline-none focus:ring-2 focus:ring-primary bg-surface"
+              >
+                <option value="daily">{lang === 'fr' ? 'Par jour (يومي)' : 'باليوم'}</option>
+                <option value="hourly">{lang === 'fr' ? 'Par heure (بالساعة)' : 'بالساعة'}</option>
+                <option value="weekly">{lang === 'fr' ? 'Par semaine (أسبوعي)' : 'بالأسبوع'}</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-steel-700 block mb-1.5">
+                {lang === 'fr' ? 'Total location (MAD) *' : 'إجمالي مبلغ الكراء (درهم) *'}
+              </label>
+              <Input
+                type="number"
+                min="0"
+                value={totalPrice}
+                onChange={(e) => setTotalPrice(Number(e.target.value))}
+                required
+                dir="ltr"
+                className="font-mono font-black"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-steel-700 block mb-1.5">
+                {lang === 'fr' ? 'Dépôt de garantie (MAD)' : 'مبلغ الضمانة المستردة'}
+              </label>
+              <Input
+                type="number"
+                min="0"
+                value={depositAmount}
+                onChange={(e) => setDepositAmount(Number(e.target.value))}
+                dir="ltr"
+                className="font-mono"
+              />
+            </div>
           </div>
 
-          {/* Operator Toggle */}
-          <label className="flex items-center justify-between p-3 rounded-xl border border-steel-200 bg-surface cursor-pointer">
-            <span className="text-xs font-bold text-ink">
-              {lang === 'fr' ? 'Chauffeur inclus avec l\'engin' : 'توفير سائق معتمد مع الآلية'}
-            </span>
-            <input
-              type="checkbox"
-              checked={withOperator}
-              onChange={(e) => setWithOperator(e.target.checked)}
-              className="w-5 h-5 accent-primary cursor-pointer"
-            />
-          </label>
+          {/* Operational Options Toggles */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+            <label className="p-3 rounded-xl border border-steel-200 bg-steel-50 flex items-center justify-between cursor-pointer">
+              <span className="font-bold text-xs text-ink">
+                {lang === 'fr' ? 'Avec chauffeur' : 'مع سائق معتمد'}
+              </span>
+              <input
+                type="checkbox"
+                checked={withOperator}
+                onChange={(e) => setWithOperator(e.target.checked)}
+                className="w-4 h-4 text-primary rounded"
+              />
+            </label>
+
+            <label className="p-3 rounded-xl border border-steel-200 bg-steel-50 flex items-center justify-between cursor-pointer">
+              <span className="font-bold text-xs text-ink">
+                {lang === 'fr' ? 'Carburant inclus' : 'الوقود والديزل مشمول'}
+              </span>
+              <input
+                type="checkbox"
+                checked={fuelIncluded}
+                onChange={(e) => setFuelIncluded(e.target.checked)}
+                className="w-4 h-4 text-primary rounded"
+              />
+            </label>
+
+            <label className="p-3 rounded-xl border border-steel-200 bg-steel-50 flex items-center justify-between cursor-pointer">
+              <span className="font-bold text-xs text-ink">
+                {lang === 'fr' ? 'Transport porte-char' : 'التوصيل / بورت شار'}
+              </span>
+              <input
+                type="checkbox"
+                checked={deliveryAvailable}
+                onChange={(e) => setDeliveryAvailable(e.target.checked)}
+                className="w-4 h-4 text-primary rounded"
+              />
+            </label>
+          </div>
+
+          {deliveryAvailable && (
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label={lang === 'fr' ? 'Frais de transport (MAD)' : 'تكلفة النقل والتوصيل (درهم)'}
+                type="number"
+                value={deliveryFee}
+                onChange={(e) => setDeliveryFee(Number(e.target.value))}
+                dir="ltr"
+              />
+              <Input
+                label={lang === 'fr' ? 'Adresse ou zone du chantier' : 'موقع ورش العمل'}
+                placeholder="Ex. Tit Mellil, Casablanca"
+                value={siteAddress}
+                onChange={(e) => setSiteAddress(e.target.value)}
+              />
+            </div>
+          )}
 
           {/* Notes */}
           <div>
-            <label className="text-xs font-bold text-steel-700 block mb-1">
-              {t('bookings.notes_label')}
+            <label className="text-xs font-bold text-steel-700 block mb-1.5">
+              {lang === 'fr' ? 'Notes et conditions particulières' : 'ملاحظات وتفاصيل إضافية:'}
             </label>
             <textarea
               rows={2}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder={
-                isContractorMode
-                  ? lang === 'fr'
-                    ? 'Ex: Chantier à Bouskoura, livraison souhaitée avant 08h00...'
-                    : 'مثال: موقع الورش ببوسكورة، التسليم قبل الساعة 08:00 صباحاً...'
-                  : 'ex. Chantier à Sidi Maârouf...'
-              }
-              className="w-full px-3 py-2 text-xs border border-steel-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary"
+              placeholder={lang === 'fr' ? 'Ex. Heures de travail 8h/j, repos le dimanche...' : 'مثال: ساعات العمل 8 ساعات يومياً، الراحة يوم الأحد...'}
+              className="w-full px-3.5 py-2 text-xs border border-steel-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary"
             />
           </div>
 
-          {/* Submit */}
-          <div className="pt-2">
+          {/* Actions */}
+          <div className="flex items-center justify-end gap-3 pt-3 border-t border-steel-100">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onClose}
+              className="text-xs font-bold"
+            >
+              {lang === 'fr' ? 'Annuler' : 'إلغاء'}
+            </Button>
+
             <Button
               type="submit"
               variant="primary"
-              size="lg"
-              className="w-full justify-center font-black min-h-[48px]"
+              size="sm"
               isLoading={isSubmitting}
-              leftIcon={<Check className="w-4 h-4" />}
+              disabled={Boolean(overlapError)}
+              className="font-black text-xs px-6 shadow-md"
             >
-              {isContractorMode
-                ? lang === 'fr'
-                  ? 'Confirmer et envoyer la demande'
-                  : 'تأكيد وإرسال طلب الحجز'
-                : lang === 'fr'
-                ? 'Enregistrer la réservation'
-                : 'تأكيد وحفظ الحجز'}
+              {lang === 'fr' ? 'Confirmer la réservation' : 'تأكيد وحفظ الحجز'}
             </Button>
           </div>
         </form>

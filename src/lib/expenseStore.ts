@@ -232,4 +232,18 @@ export const expenseStore = {
       (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
     );
   },
+
+  async addExpense(expense: MachineExpense): Promise<void> {
+    return this.saveExpense(expense);
+  },
+
+  getExpenses(ownerId?: string, machineId?: string): MachineExpense[] {
+    const list = this.getCachedExpenses();
+    if (!ownerId && !machineId) return list;
+    return list.filter((e) => {
+      const matchOwner = !ownerId || e.owner_id === ownerId || e.owner_id === 'default';
+      const matchMachine = !machineId || machineId === 'all' || e.machine_id === machineId || e.machine_id === 'default';
+      return matchOwner && matchMachine;
+    });
+  },
 };

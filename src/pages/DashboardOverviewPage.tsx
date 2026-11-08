@@ -1,18 +1,18 @@
 // ============================================================================
-// JADIJCB: Owner Dashboard Home (Desktop Split View / Mobile Stacked)
-// Fully Powered by TanStack Query & Supabase Real Database Reads
+// JADIJCB: "اليوم" (Today) Operational Hub for Equipment Owners (/owner)
+// Overdue Returns, Due Today/Tomorrow, Unpaid Dues, Idle Machines in 7 Days (WhatsApp),
+// New Leads, First-Run Activation Checklist, and PWA Install Prompt
 // ============================================================================
 
-import React, { useState, useMemo, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
 import {
   Truck,
   TrendingUp,
   PlusCircle,
   MessageSquare,
-  Layers,
   AlertCircle,
+  AlertTriangle,
   RotateCcw,
   Bell,
   Check,
@@ -22,315 +22,332 @@ import {
   ShieldCheck,
   Zap,
   User,
+  Clock,
+  ArrowRight,
+  ArrowLeft,
+  Share2,
+  DollarSign,
+  Download,
+  Users,
+  Building2,
+  FileText,
+  CheckCircle2,
+  Send,
+  ExternalLink,
 } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
+import { Badge } from '../components/ui/Badge';
 import { Skeleton } from '../components/ui/Skeleton';
+import { toast } from '../components/ui/Toast';
 import { useLanguage } from '../hooks/useLanguage';
 import { useAuth } from '../hooks/useAuth';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { RevenueChart, RevenuePoint } from '../components/dashboard/RevenueChart';
-import { UpcomingReturnsList } from '../components/dashboard/UpcomingReturnsList';
 import { StorefrontLiveCard } from '../components/dashboard/StorefrontLiveCard';
 import { MachineStepperModal } from '../components/machines/MachineStepperModal';
-import { PaymentProofModal } from '../components/dashboard/PaymentProofModal';
 import { ProfileSettingsModal } from '../components/profile/ProfileSettingsModal';
-import { platformSettingsStore, PlatformSettings } from '../lib/platformSettings';
-import { Machine, Booking } from '../types/database';
+import { CreateBookingModal } from '../components/bookings/CreateBookingModal';
+import { Machine, Booking, Lead } from '../types/database';
 import { bookingStore } from '../lib/bookingStore';
 import { machineStore } from '../lib/machineStore';
-import { toast } from '../components/ui/Toast';
+import { paymentService } from '../lib/paymentService';
+import { leadService } from '../lib/leadService';
+import { businessService } from '../lib/businessService';
+import { documentService } from '../lib/documentService';
+import { recordUserActivityThrottled, usePwaInstall } from '../lib/pwaHelper';
 
 export const DashboardOverviewPage: React.FC = () => {
-  const { t, lang } = useLanguage();
+  const { t, lang, isRTL } = useLanguage();
   const navigate = useNavigate();
   const { profile, user } = useAuth();
+  const { isInstallable, promptInstall } = usePwaInstall();
 
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
+  const [isAddMachineModalOpen, setIsAddMachineModalOpen] = useState(false);
+  const [isCreateBookingModalOpen, setIsCreateBookingModalOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
-  const [platformSettings, setPlatformSettings] = useState<PlatformSettings>(() => platformSettingsStore.getSettings());
 
-  React.useEffect(() => {
-    const handleUpdate = () => {
-      setPlatformSettings(platformSettingsStore.getSettings());
-    };
-    window.addEventListener('jadijcb_settings_updated', handleUpdate);
-    window.addEventListener('storage', handleUpdate);
-    platformSettingsStore.pullFromRemote().then(setPlatformSettings);
-    return () => {
-      window.removeEventListener('jadijcb_settings_updated', handleUpdate);
-      window.removeEventListener('storage', handleUpdate);
-    };
-  }, []);
+  const [machines, setMachines] = useState<Machine[]>([]);
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [docsCount, setDocsCount] = useState<number>(0);
+  const [hasBusinessProfile, setHasBusinessProfile] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
   const userId = user?.id || profile?.id;
 
-  // Auto-redirect contractors to their dedicated /entreprise portal
-  React.useEffect(() => {
+  // Throttled heartbeat activity ping
+  useEffect(() => {
+    if (userId) recordUserActivityThrottled(userId);
+  }, [userId]);
+
+  // Contractor redirect
+  useEffect(() => {
     if (profile?.role === 'client' || profile?.role === 'contractor') {
       navigate('/entreprise', { replace: true });
     }
   }, [profile, navigate]);
 
-  // 1. TanStack Query: Machines for this owner
-  const {
-    data: machines = [],
-    isLoading: isLoadingMachines,
-    isError: isMachinesError,
-    refetch: refetchMachines,
-  } = useQuery<Machine[]>({
-    queryKey: ['owner_machines', userId],
-    queryFn: async () => {
-      let mapped: Machine[] = [];
-      if (isSupabaseConfigured && userId) {
-        try {
-          const { data, error } = await supabase
-            .from('machines')
-            .select('*')
-            .eq('owner_id', userId)
-            .order('created_at', { ascending: false });
+  // Load live data
+  const loadDashboardData = useCallback(async () => {
+    if (!userId) {
+      setIsLoading(false);
+      return;
+    }
 
-          if (!error && data) {
-            mapped = data.map((m: any) => ({
-              id: m.id,
-              owner_id: m.owner_id,
-              title_ar: m.title_ar,
-              title_fr: m.title_fr,
-              description_ar: m.description_ar,
-              description_fr: m.description_fr,
-              category: m.category,
-              category_id: m.category,
-              brand: m.brand,
-              model: m.model,
-              year: m.year,
-              listing_mode: m.listing_mode,
-              condition: m.condition || 'good',
-              city: m.city,
-              city_id: m.city,
-              lat: m.lat,
-              lng: m.lng,
-              location_lat: m.lat,
-              location_lng: m.lng,
-              rate_hourly: Number(m.hourly_rate) || 0,
-              rate_daily: Number(m.daily_rate) || 0,
-              rate_weekly: Number(m.weekly_rate) || 0,
-              hourly_rate: Number(m.hourly_rate) || 0,
-              daily_rate: Number(m.daily_rate) || 0,
-              weekly_rate: Number(m.weekly_rate) || 0,
-              sale_price: Number(m.sale_price) || 0,
-              currency: 'MAD',
-              with_operator: Boolean(m.with_operator),
-              fuel_included: Boolean(m.fuel_included),
-              delivery_available: Boolean(m.delivery_available),
-              status: m.is_published ? 'available' : 'inactive',
-              is_published: m.is_published,
-              images: m.images || [],
-              specs: m.specs || {},
-              views_count: m.views_count || 0,
-              rating_avg: m.rating_avg || 0,
-              reviews_count: m.reviews_count || 0,
-              created_at: m.created_at,
-              updated_at: m.created_at,
-            }));
-          }
-        } catch (e) {
-          console.warn('Dashboard machines query error:', e);
+    try {
+      // 1. Machines
+      let mList: Machine[] = [];
+      if (isSupabaseConfigured) {
+        const { data: mData } = await supabase
+          .from('machines')
+          .select('*')
+          .eq('owner_id', userId);
+        if (mData) {
+          mList = mData.map((m: any) => ({
+            id: m.id,
+            owner_id: m.owner_id,
+            title_ar: m.title_ar,
+            title_fr: m.title_fr,
+            brand: m.brand,
+            model: m.model,
+            daily_rate: Number(m.daily_rate) || 2000,
+            status: m.is_published ? 'available' : 'inactive',
+            images: m.images || [],
+          } as Machine));
         }
       }
+      const realMachines = machineStore.mergeMachines(mList, userId);
+      setMachines(realMachines);
 
-      return machineStore.mergeMachines(mapped, userId);
-    },
-    enabled: Boolean(userId),
-  });
-
-  // 2. TanStack Query: Bookings for this owner
-  const {
-    data: bookings = [],
-    isLoading: isLoadingBookings,
-    isError: isBookingsError,
-    refetch: refetchBookings,
-  } = useQuery<Booking[]>({
-    queryKey: ['owner_bookings', userId],
-    queryFn: async () => {
-      let mapped: Booking[] = [];
-      if (isSupabaseConfigured && userId) {
-        try {
-          const { data, error } = await supabase
-            .from('bookings')
-            .select('*, machine:machines(*)')
-            .eq('owner_id', userId)
-            .order('created_at', { ascending: false });
-
-          if (data) {
-            mapped = data.map((b: any) => ({
-              id: b.id,
-              machine_id: b.machine_id,
-              owner_id: b.owner_id,
-              client_id: b.client_id,
-              client_name: b.client_name,
-              client_phone: b.client_phone,
-              start_at: b.start_at,
-              end_at: b.end_at,
-              start_date: b.start_at,
-              end_date: b.end_at,
-              total_price: Number(b.total_price) || 0,
-              status: b.status,
-              notes: b.notes,
-              created_at: b.created_at,
-              machine: b.machine || b.machines,
-              with_operator: Boolean(b.with_operator ?? true),
-            }));
-          }
-        } catch (e) {
-          console.warn('Dashboard bookings query warning:', e);
+      // 2. Bookings
+      let bList: Booking[] = [];
+      if (isSupabaseConfigured) {
+        const { data: bData } = await supabase
+          .from('bookings')
+          .select('*, machines(*)')
+          .eq('owner_id', userId);
+        if (bData) {
+          bList = bData.map((b: any) => ({
+            id: b.id,
+            machine_id: b.machine_id,
+            owner_id: b.owner_id,
+            client_name: b.client_name,
+            client_phone: b.client_phone,
+            start_at: b.start_at || b.start_date,
+            end_at: b.end_at || b.end_date,
+            total_price: Number(b.total_price) || 0,
+            deposit_amount: Number(b.deposit_amount) || 0,
+            status: b.status,
+            with_operator: Boolean(b.with_operator ?? true),
+            created_at: b.created_at,
+            machine: b.machines,
+          }));
         }
       }
+      const localCachedBookings = bookingStore.getCachedBookings().filter(
+        (b) => b.owner_id === userId || !b.owner_id
+      );
+      const bMap = new Map<string, Booking>();
+      for (const b of localCachedBookings) bMap.set(b.id, b);
+      for (const b of bList) bMap.set(b.id, b);
+      setBookings(Array.from(bMap.values()));
 
-      // Merge with bookingStore local cache
-      const machineIds = machines.map((m) => m.id);
-      return bookingStore.mergeOwnerBookings(mapped, userId || '', machineIds);
-    },
-    enabled: Boolean(userId),
-  });
+      // 3. Leads
+      const loadedLeads = await leadService.getLeadsForOwner(userId);
+      setLeads(loadedLeads);
 
-  // 3. TanStack Query: Unread messages (messages where sender != me and read_at is null in user's conversations)
-  const {
-    data: unreadCount = 0,
-    isLoading: isLoadingUnread,
-  } = useQuery<number>({
-    queryKey: ['owner_unread_messages', userId],
-    queryFn: async () => {
-      if (!isSupabaseConfigured || !userId) return 0;
-      // Step A: get conversation IDs where user is participant
-      const { data: convs, error: convError } = await supabase
-        .from('conversations')
-        .select('id')
-        .or(`participant_a.eq.${userId},participant_b.eq.${userId}`);
+      // 4. Documents count & activation
+      const docs = await documentService.getDocumentsForOwner(userId);
+      setDocsCount(docs.length);
 
-      if (convError || !convs || convs.length === 0) return 0;
+      // 5. Business profile check
+      const bp = await businessService.getProfile(userId);
+      setHasBusinessProfile(Boolean(bp.ice || bp.company_name));
+    } catch (err) {
+      console.warn('Dashboard load notice:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [userId]);
 
-      const convIds = convs.map((c: any) => c.id);
-      const { count, error: countError } = await supabase
-        .from('messages')
-        .select('*', { count: 'exact', head: true })
-        .in('conversation_id', convIds)
-        .neq('sender_id', userId)
-        .is('read_at', null);
+  useEffect(() => {
+    loadDashboardData();
 
-      if (countError) return 0;
-      return count || 0;
-    },
-    enabled: Boolean(userId),
-  });
+    const handleUpdate = () => loadDashboardData();
+    window.addEventListener('jadijcb_machines_updated', handleUpdate);
+    window.addEventListener('jadijcb_booking_event', handleUpdate);
+    window.addEventListener('jadijcb_leads_updated', handleUpdate);
+    window.addEventListener('jadijcb_documents_updated', handleUpdate);
+    window.addEventListener('jadijcb_business_profile_updated', handleUpdate);
 
-  // Computed metrics
-  const activeBookings = useMemo(() => {
-    return bookings.filter(
-      (b) => b.status === 'active' || b.status === 'confirmed'
-    );
+    return () => {
+      window.removeEventListener('jadijcb_machines_updated', handleUpdate);
+      window.removeEventListener('jadijcb_booking_event', handleUpdate);
+      window.removeEventListener('jadijcb_leads_updated', handleUpdate);
+      window.removeEventListener('jadijcb_documents_updated', handleUpdate);
+      window.removeEventListener('jadijcb_business_profile_updated', handleUpdate);
+    };
+  }, [loadDashboardData]);
+
+  // Operational metrics for "اليوم"
+  const now = new Date();
+  const todayStr = now.toISOString().slice(0, 10);
+  const tomorrow = new Date(now.getTime() + 24 * 3600 * 1000);
+  const tomorrowStr = tomorrow.toISOString().slice(0, 10);
+  const sevenDaysLater = new Date(now.getTime() + 7 * 24 * 3600 * 1000);
+
+  // 1. Overdue Returns
+  const overdueBookings = useMemo(() => {
+    return bookings.filter((b) => {
+      if (b.status !== 'active') return false;
+      const end = new Date(b.end_at || b.end_date || '').getTime();
+      return end < now.getTime();
+    });
+  }, [bookings, now]);
+
+  // 2. Returns Due Today & Tomorrow
+  const dueSoonBookings = useMemo(() => {
+    return bookings.filter((b) => {
+      if (b.status !== 'active') return false;
+      const endStr = (b.end_at || b.end_date || '').slice(0, 10);
+      return endStr === todayStr || endStr === tomorrowStr;
+    });
+  }, [bookings, todayStr, tomorrowStr]);
+
+  // 3. Total Unpaid Balances
+  const totalUnpaidDues = useMemo(() => {
+    return bookings
+      .filter((b) => b.status !== 'cancelled')
+      .reduce((sum, b) => {
+        const stats = paymentService.computeBookingPaymentStats(b, []);
+        return sum + stats.balanceDue;
+      }, 0);
   }, [bookings]);
 
-  const publishedCount = useMemo(() => {
-    return machines.filter((m) => m.is_published !== false).length;
-  }, [machines]);
+  // 4. Idle Machines in next 7 days
+  const idleMachines = useMemo(() => {
+    return machines.filter((m) => {
+      // Find if machine has any pending or active booking spanning between now and 7 days
+      const hasBooking = bookings.some((b) => {
+        if (b.machine_id !== m.id) return false;
+        if (b.status === 'cancelled' || b.status === 'completed') return false;
+        const bStart = new Date(b.start_at || b.start_date || '').getTime();
+        const bEnd = new Date(b.end_at || b.end_date || '').getTime();
+        return bStart < sevenDaysLater.getTime() && bEnd > now.getTime();
+      });
+      return !hasBooking;
+    });
+  }, [machines, bookings, now, sevenDaysLater]);
 
-  // Monthly revenue for the last 6 months (sum total_price of active/completed bookings)
-  const { currentMonthRevenue, monthlyRevenuePoints } = useMemo(() => {
-    const now = new Date();
+  // 5. Uncontacted new leads
+  const uncontactedLeads = useMemo(() => {
+    return leads.filter((l) => !l.is_contacted);
+  }, [leads]);
+
+  // First-run activation checklist calculation (5-minute path to value)
+  const activationSteps = useMemo(() => {
+    const step1 = hasBusinessProfile;
+    const step2 = machines.length > 0;
+    const step3 = bookings.length > 0;
+    const step4 = docsCount > 0;
+
+    const completedCount = [step1, step2, step3, step4].filter(Boolean).length;
+    const percent = completedCount * 25;
+    const isFullyActivated = Boolean(profile?.activation_at || completedCount === 4);
+
+    return {
+      step1,
+      step2,
+      step3,
+      step4,
+      completedCount,
+      percent,
+      isFullyActivated,
+    };
+  }, [hasBusinessProfile, machines.length, bookings.length, docsCount, profile?.activation_at]);
+
+  // Revenue chart data
+  const revenuePoints: RevenuePoint[] = useMemo(() => {
     const monthsAr = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليوز', 'غشت', 'شتنبر', 'أكتوبر', 'نوفمبر', 'دجنبر'];
     const monthsFr = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sept', 'Oct', 'Nov', 'Déc'];
 
-    const points: RevenuePoint[] = [];
-
+    const pts: RevenuePoint[] = [];
     for (let i = 5; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const year = d.getFullYear();
-      const monthIdx = d.getMonth();
+      const y = d.getFullYear();
+      const mIdx = d.getMonth();
 
-      // Find bookings in this month that are completed or active
       const relevant = bookings.filter((b) => {
         if (b.status !== 'completed' && b.status !== 'active') return false;
-        const bDate = new Date(b.created_at || b.start_at || Date.now());
-        return bDate.getFullYear() === year && bDate.getMonth() === monthIdx;
+        const bDate = new Date(b.start_at || b.created_at || Date.now());
+        return bDate.getFullYear() === y && bDate.getMonth() === mIdx;
       });
 
       const revenue = relevant.reduce((sum, b) => sum + (Number(b.total_price) || 0), 0);
 
-      points.push({
-        month: monthsAr[monthIdx],
-        monthFr: monthsFr[monthIdx],
+      pts.push({
+        month: monthsAr[mIdx],
+        monthFr: monthsFr[mIdx],
         revenue,
         rentalsCount: relevant.length,
       });
     }
+    return pts;
+  }, [bookings, now]);
 
-    const currentRevenue = points[points.length - 1]?.revenue || 0;
-
-    return {
-      currentMonthRevenue: currentRevenue,
-      monthlyRevenuePoints: points,
-    };
-  }, [bookings]);
-
-  const companyName = profile?.company_name || profile?.full_name || (lang === 'fr' ? 'Entreprise BTP' : 'مقاولة الأشغال');
-  const ownerName = profile?.full_name || profile?.phone || (lang === 'fr' ? 'Partenaire' : 'الشريك');
-
-  useEffect(() => {
-    const handleUpdate = () => {
-      refetchMachines();
-      refetchBookings();
-    };
-    window.addEventListener('jadijcb_machines_updated', handleUpdate);
-    window.addEventListener('jadijcb_booking_event', handleUpdate);
-    return () => {
-      window.removeEventListener('jadijcb_machines_updated', handleUpdate);
-      window.removeEventListener('jadijcb_booking_event', handleUpdate);
-    };
-  }, [refetchMachines, refetchBookings]);
-
-  const handleMachineCreated = () => {
-    refetchMachines();
-  };
-
-  const pendingBookings = useMemo(() => bookings.filter((b) => b.status === 'pending'), [bookings]);
-
-  const handleAcceptBooking = async (id: string) => {
-    bookingStore.updateBookingStatus(id, 'active');
-    try {
-      await supabase.from('bookings').update({ status: 'active' }).eq('id', id);
-    } catch (e) {
-      console.warn('DB status update error:', e);
-    }
-    refetchBookings();
-    toast.success(lang === 'fr' ? 'Réservation acceptée et planifiée !' : 'تم قبول وتأكيد الحجز بنجاح!');
-  };
-
-  const isGlobalLoading = isLoadingMachines || isLoadingBookings;
+  const companyName = profile?.company_name || 'مقاولة كراء الآليات';
+  const ownerName = profile?.full_name || 'المالك المعتمد';
 
   return (
     <div className="space-y-6 text-start">
-      {/* Top Welcome Industrial Banner */}
+      {/* Top Welcome Banner with Identity & Actions */}
       <div className="bg-ink text-white p-6 sm:p-7 rounded-3xl border border-steel-800 shadow-elevated relative overflow-hidden">
-        <div className="absolute top-0 end-0 w-80 h-full bg-gradient-to-s from-primary/10 via-yellow-500/5 to-transparent pointer-events-none" />
+        <div className="absolute top-0 end-0 w-80 h-full bg-gradient-to-s from-primary/15 via-yellow-500/5 to-transparent pointer-events-none" />
 
         <div className="relative z-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2 mb-1.5">
-              <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+            <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
               <span className="text-xs text-primary font-black uppercase tracking-wider">
                 {companyName}
               </span>
+              {activationSteps.isFullyActivated ? (
+                <span className="px-2 py-0.5 rounded-full bg-primary/20 text-primary border border-primary/40 text-[10px] font-black flex items-center gap-1">
+                  <ShieldCheck className="w-3 h-3" />
+                  <span>{lang === 'fr' ? 'Compte Activé' : 'حساب مهني مفعّل'}</span>
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/30 text-[10px] font-bold">
+                  {lang === 'fr' ? 'Configuration en cours' : 'قيد الإعداد الأولي'}
+                </span>
+              )}
             </div>
+
             <h1 className="text-xl sm:text-2xl font-black text-white">
-              {t('dashboard.welcome')}، {ownerName}
+              {lang === 'fr' ? `Bonjour, ${ownerName}` : `أهلاً بك، ${ownerName}`}
             </h1>
             <p className="text-xs text-steel-400 mt-1 max-w-xl">
-              {t('dashboard.overview_title')}
+              {lang === 'fr'
+                ? 'Tableau de bord opérationnel "Aujourd\'hui" : Retours d\'engins, impayés, leads et disponibilité.'
+                : 'شاشة العمليات اليومية: متابعة الإرجاعات، تحصيل الديون، طلبات الزبائن، والآليات الشاغرة.'}
             </p>
           </div>
 
-          <div className="flex items-center gap-3 w-full sm:w-auto flex-wrap">
+          <div className="flex items-center gap-2.5 w-full sm:w-auto flex-wrap">
+            {isInstallable && (
+              <Button
+                type="button"
+                variant="outline"
+                size="md"
+                onClick={promptInstall}
+                leftIcon={<Download className="w-4 h-4 text-primary" />}
+                className="w-full sm:w-auto font-bold text-xs text-white border-steel-700 hover:bg-steel-800 min-h-[44px]"
+              >
+                {lang === 'fr' ? 'Installer l\'App' : 'تثبيت التطبيق PWA'}
+              </Button>
+            )}
+
             <Button
               type="button"
               variant="outline"
@@ -345,340 +362,483 @@ export const DashboardOverviewPage: React.FC = () => {
             <Button
               variant="primary"
               size="md"
-              onClick={() => setIsAddModalOpen(true)}
+              onClick={() => setIsAddMachineModalOpen(true)}
               leftIcon={<PlusCircle className="w-4 h-4" />}
               className="w-full sm:w-auto font-black shadow-md min-h-[44px]"
             >
-              {t('dashboard.quick_add_machine')}
+              {lang === 'fr' ? '+ Ajouter un engin' : '+ إضافة آلية'}
             </Button>
           </div>
         </div>
       </div>
 
-      {/* PRO Lead Magnet & Subscription Value Card */}
-      <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-r from-amber-500/15 via-primary/10 to-transparent border-2 border-primary/40 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="p-1 rounded-lg bg-primary text-ink font-black">
-              <Sparkles className="w-4 h-4" />
-            </span>
-            <span className="text-xs font-black uppercase tracking-wider text-ink">
-              خطة المالك الاحترافية (JADIJCB PRO)
-            </span>
-            <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">
-              مدة تجريبية {platformSettings.trial_duration_hours} ساعة مجاناً
-            </span>
-          </div>
-          <h2 className="text-base font-black text-ink">
-            عرض غير محدود لأسطولك واستقبال مباشر لطلبات المقاولات في مدينتك
-          </h2>
-          <p className="text-xs text-steel-600 max-w-2xl leading-relaxed">
-            💡 <strong>العائد الأكبر في السوق المغربي:</strong> عملية كراء واحدة لآلية واحدة بمبلغ 2,200 درهم تغطي اشتراكك لأكثر من 10 أشهر كاملة! عمولة 0% وتواصل مباشر مع مديري الأوراش.
-          </p>
-        </div>
-
-        <div className="flex flex-row md:flex-col items-center md:items-end justify-between w-full md:w-auto gap-3 shrink-0">
-          <div className="text-start md:text-end font-mono">
-            <span className="text-2xl font-black text-ink">{platformSettings.monthly_price_mad}</span>
-            <span className="text-xs font-bold text-steel-500 ms-1">د.م / شهر</span>
-          </div>
-          <Button
-            type="button"
-            variant="primary"
-            size="sm"
-            onClick={() => setIsUpgradeModalOpen(true)}
-            className="font-black text-xs shadow-md whitespace-nowrap"
-            leftIcon={<ShieldCheck className="w-4 h-4" />}
-          >
-            تفعيل الاشتراك وإرسال الوصل
-          </Button>
-        </div>
-      </div>
-
-      {/* Urgent Pending Rental Bookings Alert Banner */}
-      {pendingBookings.length > 0 && (
-        <Card className="p-5 bg-gradient-to-r from-amber-500/15 to-amber-500/5 border-2 border-primary rounded-2xl space-y-3 shadow-md">
-          <div className="flex items-center justify-between gap-2">
+      {/* First-Run Activation Progress Checklist (Shown prominently until fully active) */}
+      {!activationSteps.isFullyActivated && (
+        <Card className="p-5 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-white border-2 border-primary/50 shadow-soft rounded-3xl space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-primary text-ink flex items-center justify-center font-black shrink-0">
-                <Bell className="w-5 h-5 animate-bounce" />
+              <div className="w-9 h-9 rounded-xl bg-primary text-ink flex items-center justify-center font-black">
+                <Zap className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="font-extrabold text-sm text-ink">
+                <h3 className="font-black text-sm text-ink">
                   {lang === 'fr'
-                    ? `Vous avez ${pendingBookings.length} nouvelle(s) demande(s) de réservation en attente !`
-                    : `لديك ${pendingBookings.length} طلب كراء جديد بانتظار التأكيد والموافقة!`}
+                    ? 'Activez votre compte loueur professionnel en 5 minutes'
+                    : 'فعّل حسابك المهني في 5 دقائق لتوليد أول عقد كراء'}
                 </h3>
-                <span className="text-xs text-steel-600">
+                <p className="text-[11px] text-steel-600">
                   {lang === 'fr'
-                    ? 'Validez les demandes pour planifier vos engins ou contactez les clients.'
-                    : 'قم بمراجعة طلبات المقاولين الواردة والتأكيد أو الاتصال المباشر بالزبون.'}
-                </span>
-              </div>
-            </div>
-
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => navigate('/owner/bookings?status=pending')}
-              className="text-xs font-bold shrink-0 bg-white"
-            >
-              {lang === 'fr' ? 'Gérer les réservations →' : 'إدارة الحجوزات ←'}
-            </Button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2 border-t border-primary/20">
-            {pendingBookings.map((pb) => (
-              <div
-                key={pb.id}
-                className="p-3.5 bg-white rounded-xl border border-steel-200 shadow-sm flex flex-col justify-between gap-2"
-              >
-                <div>
-                  <div className="flex items-center justify-between">
-                    <span className="font-extrabold text-xs text-ink">
-                      {pb.machine?.title_ar || pb.machine?.title_fr || 'آلية JCB'}
-                    </span>
-                    <span className="font-black text-xs text-primary-dark font-mono">
-                      {pb.total_price.toLocaleString('fr-FR')} MAD
-                    </span>
-                  </div>
-                  <div className="text-xs text-steel-600 mt-1 flex items-center gap-2">
-                    <span className="font-bold text-steel-800">{pb.client_name || 'زبون مقاولة'}</span>
-                    {pb.client_phone && (
-                      <span dir="ltr" className="font-mono text-steel-500">
-                        ({pb.client_phone})
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-[11px] text-steel-500 font-mono mt-0.5" dir="ltr">
-                    {pb.start_at?.slice(0, 10)} → {pb.end_at?.slice(0, 10)}
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-steel-100">
-                  <Button
-                    type="button"
-                    variant="primary"
-                    size="sm"
-                    onClick={() => handleAcceptBooking(pb.id)}
-                    className="text-xs font-black"
-                    leftIcon={<Check className="w-3.5 h-3.5" />}
-                  >
-                    {lang === 'fr' ? 'Confirmer' : 'تأكيد الحجز'}
-                  </Button>
-                  {pb.client_id && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => navigate(`/owner/messages?target=${pb.client_id}&machine=${pb.machine_id}`)}
-                      className="text-xs font-bold text-steel-700"
-                      leftIcon={<MessageSquare className="w-3.5 h-3.5 text-primary" />}
-                    >
-                      {lang === 'fr' ? 'Chatter' : 'محادثة'}
-                    </Button>
-                  )}
-                  {pb.client_phone && (
-                    <a
-                      href={`tel:${pb.client_phone}`}
-                      className="px-2.5 py-1.5 rounded-xl border border-steel-200 bg-white hover:bg-steel-50 text-xs font-bold text-steel-700 flex items-center gap-1.5 transition-colors"
-                    >
-                      <Phone className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>{lang === 'fr' ? 'Appeler' : 'اتصال'}</span>
-                    </a>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
-
-      {/* Error state if data fetch fails */}
-      {(isMachinesError || isBookingsError) && (
-        <div className="p-4 rounded-2xl bg-red-50 border border-red-200 text-danger flex items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>
-              {lang === 'fr'
-                ? 'Erreur lors du chargement des indicateurs. Veuillez réessayer.'
-                : 'حدث خطأ أثناء تحميل المؤشرات. يرجى إعادة المحاولة.'}
-            </span>
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              refetchMachines();
-              refetchBookings();
-            }}
-            leftIcon={<RotateCcw className="w-3.5 h-3.5" />}
-          >
-            {lang === 'fr' ? 'Réessayer' : 'إعادة المحاولة'}
-          </Button>
-        </div>
-      )}
-
-      {/* KPI Cards Row (4 Cards) */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        {/* KPI 1: Monthly Revenue */}
-        <Card className="p-4 sm:p-5 bg-white border border-steel-200">
-          <div className="flex items-center justify-between text-steel-500 mb-2">
-            <span className="text-xs font-bold">{t('dashboard.stat_monthly_revenue')}</span>
-            <div className="p-2 rounded-xl bg-amber-50 text-primary-dark">
-              <TrendingUp className="w-4 h-4" />
-            </div>
-          </div>
-          {isGlobalLoading ? (
-            <Skeleton className="h-8 w-24 my-1" />
-          ) : (
-            <div className="text-xl sm:text-2xl font-black text-ink font-mono latin-nums">
-              {currentMonthRevenue.toLocaleString('fr-FR')}{' '}
-              <span className="text-xs font-bold text-steel-500">{t('common.mad')}</span>
-            </div>
-          )}
-          <span className="text-[10px] text-emerald-600 font-bold mt-1 block">
-            {lang === 'fr' ? 'Missions actives et clôturées' : 'عقود الكراء النشطة والمكتملة'}
-          </span>
-        </Card>
-
-        {/* KPI 2: Active Rentals */}
-        <Card className="p-4 sm:p-5 bg-white border border-steel-200">
-          <div className="flex items-center justify-between text-steel-500 mb-2">
-            <span className="text-xs font-bold">{t('dashboard.stat_active_rentals')}</span>
-            <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600">
-              <Truck className="w-4 h-4" />
-            </div>
-          </div>
-          {isGlobalLoading ? (
-            <Skeleton className="h-8 w-12 my-1" />
-          ) : (
-            <div className="text-xl sm:text-2xl font-black text-ink font-mono latin-nums">
-              {activeBookings.length}
-            </div>
-          )}
-          <span className="text-[10px] text-emerald-600 font-bold mt-1 block">
-            {lang === 'fr' ? 'En rotation active sur chantier' : 'تعمل حالياً في الأوراش'}
-          </span>
-        </Card>
-
-        {/* KPI 3: Machines Listed */}
-        <Card className="p-4 sm:p-5 bg-white border border-steel-200">
-          <div className="flex items-center justify-between text-steel-500 mb-2">
-            <span className="text-xs font-bold">{t('dashboard.stat_fleet_size')}</span>
-            <div className="p-2 rounded-xl bg-steel-100 text-steel-700">
-              <Layers className="w-4 h-4" />
-            </div>
-          </div>
-          {isGlobalLoading ? (
-            <Skeleton className="h-8 w-12 my-1" />
-          ) : (
-            <div className="text-xl sm:text-2xl font-black text-ink font-mono latin-nums">
-              {publishedCount}
-            </div>
-          )}
-          <span className="text-[10px] text-steel-500 font-bold mt-1 block">
-            {publishedCount} {lang === 'fr' ? 'visibles sur la marketplace' : 'معروضة للعموم'}
-          </span>
-        </Card>
-
-        {/* KPI 4: Unread Messages */}
-        <Card className="p-4 sm:p-5 bg-white border border-steel-200">
-          <div className="flex items-center justify-between text-steel-500 mb-2">
-            <span className="text-xs font-bold">{t('dashboard.stat_unread_messages')}</span>
-            <div className="p-2 rounded-xl bg-blue-50 text-blue-600">
-              <MessageSquare className="w-4 h-4" />
-            </div>
-          </div>
-          {isLoadingUnread ? (
-            <Skeleton className="h-8 w-12 my-1" />
-          ) : (
-            <div className="text-xl sm:text-2xl font-black text-ink font-mono latin-nums">
-              {unreadCount}
-            </div>
-          )}
-          <span className="text-[10px] text-blue-600 font-bold mt-1 block">
-            {lang === 'fr' ? 'Messages non lus' : 'رسائل غير مقروءة'}
-          </span>
-        </Card>
-      </div>
-
-      {/* Main Split Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left Column (8 cols on desktop) */}
-        <div className="lg:col-span-8 space-y-6">
-          {/* 6-Month Revenue Line Chart with Real Dynamic Data */}
-          <RevenueChart data={monthlyRevenuePoints} />
-
-          {/* Upcoming Returns List with Live Ticking Countdown Timers */}
-          <UpcomingReturnsList bookings={activeBookings} />
-
-          {/* Messages Quick Access */}
-          <div className="p-5 bg-white border border-steel-200 rounded-2xl shadow-soft space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-extrabold text-ink">
-                  {t('dashboard.recent_inquiries_title')}
-                </h3>
-                <p className="text-[11px] text-steel-500">
-                  {lang === 'fr'
-                    ? 'Contacts directs de conducteurs de travaux et chefs de chantier'
-                    : 'اتصالات مباشرة من مسؤولي المشاريع ومديري الأوراش'}
+                    ? 'Complétez les 4 étapes pour commencer à facturer et protéger vos chantiers'
+                    : 'أكمل الخطوات الـ 4 لتأمين تعاملاتك وبدء استخلاص مداخيل أسطولك بأمان'}
                 </p>
               </div>
-
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => navigate('/owner/messages')}
-                className="text-xs font-bold text-steel-600"
-              >
-                {lang === 'fr' ? 'Voir tous' : 'عرض الكل'}
-              </Button>
             </div>
 
-            <div className="p-4 rounded-xl border border-dashed border-steel-200 bg-surface text-center">
-              <p className="text-xs text-steel-500 mb-3">
-                {lang === 'fr'
-                  ? 'Gérez vos conversations en direct avec les clients et loueurs partenaires.'
-                  : 'تابع محادثاتك الفورية مع المقاولين وملاك الآليات الشركاء.'}
-              </p>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => navigate('/owner/messages')}
-                leftIcon={<MessageSquare className="w-3.5 h-3.5" />}
-              >
-                {t('nav.messages')}
-              </Button>
+            <div className="flex items-center gap-2">
+              <span className="font-mono font-black text-sm text-ink">
+                {activationSteps.percent}%
+              </span>
+              <div className="w-24 h-2 rounded-full bg-steel-200 overflow-hidden">
+                <div
+                  className="h-full bg-primary transition-all duration-500"
+                  style={{ width: `${activationSteps.percent}%` }}
+                />
+              </div>
             </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
+            {/* Step 1: Business Settings */}
+            <Link
+              to="/owner/settings/business"
+              className={`p-3 rounded-2xl border transition-all flex items-center justify-between ${
+                activationSteps.step1
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                  : 'bg-white border-steel-200 hover:border-primary text-steel-700'
+              }`}
+            >
+              <div className="flex items-center gap-2 text-xs">
+                {activationSteps.step1 ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                ) : (
+                  <Building2 className="w-4 h-4 text-primary-dark shrink-0" />
+                )}
+                <span className="font-bold">
+                  {lang === 'fr' ? '1. Infos ICE & RIB' : '1. بيانات المقاولة والـ RIB'}
+                </span>
+              </div>
+              <ArrowRight className="w-3.5 h-3.5 text-steel-400" />
+            </Link>
+
+            {/* Step 2: First Machine */}
+            <button
+              type="button"
+              onClick={() => setIsAddMachineModalOpen(true)}
+              className={`p-3 rounded-2xl border transition-all flex items-center justify-between cursor-pointer text-start ${
+                activationSteps.step2
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                  : 'bg-white border-steel-200 hover:border-primary text-steel-700'
+              }`}
+            >
+              <div className="flex items-center gap-2 text-xs">
+                {activationSteps.step2 ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                ) : (
+                  <Truck className="w-4 h-4 text-primary-dark shrink-0" />
+                )}
+                <span className="font-bold">
+                  {lang === 'fr' ? '2. Premier engin' : '2. إضافة أول آلية'}
+                </span>
+              </div>
+              <ArrowRight className="w-3.5 h-3.5 text-steel-400" />
+            </button>
+
+            {/* Step 3: First Booking */}
+            <button
+              type="button"
+              onClick={() => setIsCreateBookingModalOpen(true)}
+              className={`p-3 rounded-2xl border transition-all flex items-center justify-between cursor-pointer text-start ${
+                activationSteps.step3
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                  : 'bg-white border-steel-200 hover:border-primary text-steel-700'
+              }`}
+            >
+              <div className="flex items-center gap-2 text-xs">
+                {activationSteps.step3 ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                ) : (
+                  <CalendarCheck className="w-4 h-4 text-primary-dark shrink-0" />
+                )}
+                <span className="font-bold">
+                  {lang === 'fr' ? '3. Première location' : '3. تسجيل أول حجز'}
+                </span>
+              </div>
+              <ArrowRight className="w-3.5 h-3.5 text-steel-400" />
+            </button>
+
+            {/* Step 4: First Contract */}
+            <Link
+              to="/owner/bookings"
+              className={`p-3 rounded-2xl border transition-all flex items-center justify-between ${
+                activationSteps.step4
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                  : 'bg-white border-steel-200 hover:border-primary text-steel-700'
+              }`}
+            >
+              <div className="flex items-center gap-2 text-xs">
+                {activationSteps.step4 ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                ) : (
+                  <FileText className="w-4 h-4 text-primary-dark shrink-0" />
+                )}
+                <span className="font-bold">
+                  {lang === 'fr' ? '4. Générer le contrat' : '4. إصدار أول عقد'}
+                </span>
+              </div>
+              <ArrowRight className="w-3.5 h-3.5 text-steel-400" />
+            </Link>
+          </div>
+        </Card>
+      )}
+
+      {/* "اليوم" Daily Operational Cards Grid (4 Cards with deep-links) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Card 1: Overdue Returns (Urgent Action) */}
+        <div
+          onClick={() => navigate('/owner/bookings?tab=active')}
+          className={`p-5 rounded-2xl border transition-all cursor-pointer shadow-xs flex flex-col justify-between ${
+            overdueBookings.length > 0
+              ? 'bg-red-50 border-red-300 ring-1 ring-red-300'
+              : 'bg-white border-steel-200 hover:border-steel-300'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-steel-600">
+              {lang === 'fr' ? 'Retours en retard' : 'إرجاعات متأخرة عن الموعد'}
+            </span>
+            <div
+              className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                overdueBookings.length > 0
+                  ? 'bg-red-600 text-white animate-bounce'
+                  : 'bg-steel-100 text-steel-500'
+              }`}
+            >
+              <AlertTriangle className="w-5 h-5" />
+            </div>
+          </div>
+
+          <div className="pt-3">
+            <span
+              className={`text-2xl font-black font-mono block ${
+                overdueBookings.length > 0 ? 'text-red-700' : 'text-ink'
+              }`}
+            >
+              {overdueBookings.length}
+            </span>
+            <span className="text-[11px] text-steel-500 mt-0.5 block">
+              {overdueBookings.length > 0
+                ? lang === 'fr'
+                  ? 'À contacter d\'urgence pour clôture ou prolongation'
+                  : 'يتطلب التواصل العاجل للتمديد أو الاستلام'
+                : lang === 'fr'
+                ? 'Aucun retard constaté'
+                : 'لا توجد آليات متأخرة حالياً'}
+            </span>
           </div>
         </div>
 
-        {/* Right Column (4 cols on desktop): Live Storefront Preview */}
-        <div className="lg:col-span-4 sticky top-20">
-          <StorefrontLiveCard publishedCount={publishedCount} />
+        {/* Card 2: Returns Due Today & Tomorrow */}
+        <div
+          onClick={() => navigate('/owner/bookings?tab=active')}
+          className="p-5 rounded-2xl border border-steel-200 bg-white hover:border-steel-300 transition-all cursor-pointer shadow-xs flex flex-col justify-between"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-steel-600">
+              {lang === 'fr' ? 'Retours aujourd\'hui & demain' : 'إرجاعات اليوم والغد'}
+            </span>
+            <div className="w-9 h-9 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center">
+              <Clock className="w-5 h-5" />
+            </div>
+          </div>
+
+          <div className="pt-3">
+            <span className="text-2xl font-black font-mono text-ink block">
+              {dueSoonBookings.length}
+            </span>
+            <span className="text-[11px] text-steel-500 mt-0.5 block">
+              {dueSoonBookings.length > 0
+                ? lang === 'fr'
+                  ? 'Engins prévus au retour sur site'
+                  : 'آليات متوقع وصولها أو تمديدها'
+                : lang === 'fr'
+                ? 'Aucun retour programmé'
+                : 'لا توجد نهايات كراء اليوم أو غداً'}
+            </span>
+          </div>
+        </div>
+
+        {/* Card 3: Unpaid Dues Total */}
+        <div
+          onClick={() => navigate('/owner/bookings?tab=dues')}
+          className="p-5 rounded-2xl border border-steel-200 bg-white hover:border-steel-300 transition-all cursor-pointer shadow-xs flex flex-col justify-between"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-steel-600">
+              {lang === 'fr' ? 'Dettes & Dûs à recouvrer' : 'إجمالي الديون المعلقة'}
+            </span>
+            <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center">
+              <DollarSign className="w-5 h-5" />
+            </div>
+          </div>
+
+          <div className="pt-3">
+            <span
+              className={`text-2xl font-black font-mono block ${
+                totalUnpaidDues > 0 ? 'text-red-600' : 'text-emerald-600'
+              }`}
+            >
+              {totalUnpaidDues.toLocaleString('fr-FR')} MAD
+            </span>
+            <span className="text-[11px] text-steel-500 mt-0.5 block">
+              {totalUnpaidDues > 0
+                ? lang === 'fr'
+                  ? 'Cliquez pour envoyer des rappels WhatsApp'
+                  : 'انقر لإرسال تذكير أداء بالواتساب'
+                : lang === 'fr'
+                ? 'Tous les loyers sont réglés'
+                : 'كافة الحسابات مسددة بالكامل'}
+            </span>
+          </div>
+        </div>
+
+        {/* Card 4: New Leads Captured */}
+        <div
+          onClick={() => navigate('/owner/storefront')}
+          className="p-5 rounded-2xl border border-steel-200 bg-white hover:border-steel-300 transition-all cursor-pointer shadow-xs flex flex-col justify-between"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-steel-600">
+              {lang === 'fr' ? 'Nouveaux leads reçus' : 'طلبات عروض أسعار جديدة'}
+            </span>
+            <div className="w-9 h-9 rounded-xl bg-primary/20 text-ink flex items-center justify-center">
+              <Zap className="w-5 h-5" />
+            </div>
+          </div>
+
+          <div className="pt-3">
+            <span className="text-2xl font-black font-mono text-ink block">
+              {uncontactedLeads.length}
+            </span>
+            <span className="text-[11px] text-steel-500 mt-0.5 block">
+              {uncontactedLeads.length > 0
+                ? lang === 'fr'
+                  ? 'Clients en attente de rappel'
+                  : 'زبائن ينتظرون اتصالكم لتأكيد الكراء'
+                : lang === 'fr'
+                ? 'Aucun lead en attente'
+                : 'لا توجد طلبات جديدة معلقة'}
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* Stepper Modal */}
+      {/* Main Split: Left = Idle Machines WhatsApp Generator + Leads, Right = Storefront Live & Mini Chart */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Left Column (7 Cols) */}
+        <div className="lg:col-span-7 space-y-6">
+          {/* Machines Idle in Next 7 Days (One-Tap WhatsApp Share) */}
+          <Card className="p-5 bg-white border border-steel-200 shadow-soft rounded-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-steel-100">
+              <div className="flex items-center gap-2">
+                <Truck className="w-4 h-4 text-primary-dark" />
+                <h3 className="font-black text-sm text-ink">
+                  {lang === 'fr'
+                    ? 'Engins disponibles dans les 7 prochains jours'
+                    : 'آليات شاغرة خلال الـ 7 أيام القادمة (تسويق فوري بالواتساب)'}
+                </h3>
+              </div>
+              <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 text-[10px] font-bold">
+                {idleMachines.length} {lang === 'fr' ? 'disponibles' : 'شاغرة'}
+              </span>
+            </div>
+
+            <p className="text-xs text-steel-500">
+              {lang === 'fr'
+                ? 'Ces engins n\'ont aucune réservation planifiée cette semaine. Partagez-les en un clic sur WhatsApp pour les mettre en location immédiatement.'
+                : 'هذه الآليات لا ترتبط بأي حجز هذا الأسبوع. شاركها بنقرة واحدة عبر الواتساب في مجموعات المقاولين لتأجيرها فوراً.'}
+            </p>
+
+            {idleMachines.length === 0 ? (
+              <div className="p-6 text-center rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 font-bold">
+                🎉 {lang === 'fr' ? 'Bravo ! Tout votre parc d\'engins est loué et opérationnel.' : 'ممتاز! كامل أسطول آلياتك يعمل حالياً في الأوراش دون أي توقف.'}
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {idleMachines.map((m) => {
+                  const storefrontSlug = localStorage.getItem('jadijcb_owner_storefront_slug') || 'store';
+                  const publicMachineUrl = `https://jadijcb.ma/s/${storefrontSlug}`;
+                  const rateStr = (m.daily_rate || 2000).toLocaleString('fr-FR');
+
+                  const waText =
+                    lang === 'fr'
+                      ? `Bonjour,\n\nNotre engin *${m.title_ar} (${m.brand} ${m.model})* est immédiatement disponible pour location sur vos chantiers.\n\n• Tarif : ${rateStr} MAD/jour\n• Disponibilité : Immédiate\n• Voir notre vitrine : ${publicMachineUrl}\n\nContactez-nous pour réserver.`
+                      : `السلام عليكم ورحمة الله،\n\nتتوفر لدينا آلية *${m.title_ar} (${m.brand} ${m.model})* جاهزة للكراء الفوري لخدمة أوراشكم.\n\n• السعر اليومي: ${rateStr} درهم/يوم\n• الجاهزية: فورية مع سائق معتمد\n• رابط متجرنا العام: ${publicMachineUrl}\n\nللحجز والاستفسار يرجى التواصل معنا مباشرة.`;
+
+                  const waUrl = `https://wa.me/?text=${encodeURIComponent(waText)}`;
+
+                  return (
+                    <div
+                      key={m.id}
+                      className="p-3.5 rounded-2xl border border-steel-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-steel-50/50 hover:bg-white transition-all text-xs"
+                    >
+                      <div className="flex items-center gap-3">
+                        <img
+                          src={m.images?.[0] || 'https://images.unsplash.com/photo-1579829366248-204fe8413f31?w=200&q=80'}
+                          alt={m.title_ar}
+                          className="w-12 h-12 rounded-xl object-cover shrink-0"
+                        />
+                        <div>
+                          <span className="font-black text-sm text-ink block">
+                            {m.title_ar}
+                          </span>
+                          <span className="text-[11px] text-steel-500">
+                            {m.brand} {m.model} · <strong className="font-mono text-ink">{rateStr} MAD/j</strong>
+                          </span>
+                        </div>
+                      </div>
+
+                      <a
+                        href={waUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-2 transition-colors shadow-xs shrink-0"
+                      >
+                        <MessageSquare className="w-4 h-4" />
+                        <span>{lang === 'fr' ? 'Partager sur WhatsApp' : 'مشاركة فورية بالواتساب'}</span>
+                      </a>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Card>
+
+          {/* 6-Month Revenue & Bookings Trend */}
+          <Card className="p-5 bg-white border border-steel-200 shadow-soft rounded-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-steel-100">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="w-4 h-4 text-primary-dark" />
+                <h3 className="font-black text-sm text-ink">
+                  {lang === 'fr' ? 'Évolution des revenus (6 derniers mois)' : 'تطور مداخيل الأسطول (آخر 6 أشهر)'}
+                </h3>
+              </div>
+              <Link
+                to="/owner/analytics"
+                className="text-xs font-bold text-primary-dark hover:underline flex items-center gap-1"
+              >
+                <span>{lang === 'fr' ? 'Détails financiers' : 'التفاصيل المالية'}</span>
+                {isRTL ? <ArrowLeft className="w-3.5 h-3.5" /> : <ArrowRight className="w-3.5 h-3.5" />}
+              </Link>
+            </div>
+
+            <RevenueChart data={revenuePoints} />
+          </Card>
+        </div>
+
+        {/* Right Column (5 Cols): Live Storefront Card & Quote Leads Inbox */}
+        <div className="lg:col-span-5 space-y-6 sticky top-20">
+          {/* Public Storefront Preview & QR Card */}
+          <StorefrontLiveCard publishedCount={machines.length} />
+
+          {/* New Leads Received from Storefront */}
+          <Card className="p-5 bg-white border border-steel-200 shadow-soft rounded-2xl space-y-3">
+            <div className="flex items-center justify-between pb-3 border-b border-steel-100">
+              <div className="flex items-center gap-2">
+                <Zap className="w-4 h-4 text-primary-dark" />
+                <h3 className="font-black text-sm text-ink">
+                  {lang === 'fr' ? 'Demandes de devis du متجر' : 'طلبات الكراء الواردة من المتجر'}
+                </h3>
+              </div>
+              <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-900 text-[10px] font-bold">
+                {leads.length} {lang === 'fr' ? 'leads' : 'طلبات'}
+              </span>
+            </div>
+
+            {leads.length === 0 ? (
+              <div className="p-6 text-center rounded-xl bg-steel-50 border border-steel-200 text-[11px] text-steel-500">
+                {lang === 'fr'
+                  ? 'Aucune demande reçue pour le moment. Partagez votre lien de vitrine pour recevoir des demandes directes.'
+                  : 'لم تتلقَ أي طلبات حتى الآن. انشر رابط متجرك في أوراش المقاولين لتلقي طلبات عروض أسعار مباشرة.'}
+              </div>
+            ) : (
+              <div className="space-y-2.5 max-h-80 overflow-y-auto">
+                {leads.slice(0, 4).map((l) => (
+                  <div
+                    key={l.id}
+                    className="p-3 rounded-xl border border-steel-200 bg-steel-50/50 space-y-2 text-xs"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-black text-ink">{l.client_name}</span>
+                      <span className="text-[10px] text-steel-400 font-mono" dir="ltr">
+                        {l.created_at?.slice(0, 10)}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-[11px] text-steel-600">
+                      <span className="font-mono font-bold" dir="ltr">{l.client_phone}</span>
+                      {l.city && <span>· {l.city}</span>}
+                    </div>
+
+                    {l.notes && (
+                      <p className="text-[11px] text-steel-500 italic bg-white p-2 rounded-lg border border-steel-100">
+                        "{l.notes}"
+                      </p>
+                    )}
+
+                    <div className="flex items-center gap-2 pt-1 border-t border-steel-200/60">
+                      <a
+                        href={`https://wa.me/${l.client_phone.replace(/\D/g, '')}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex-1 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] flex items-center justify-center gap-1"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5" />
+                        <span>WhatsApp</span>
+                      </a>
+                      <a
+                        href={`tel:${l.client_phone}`}
+                        className="py-1.5 px-3 rounded-lg border border-steel-300 text-ink hover:bg-steel-50 font-bold text-[11px] flex items-center justify-center gap-1"
+                      >
+                        <Phone className="w-3.5 h-3.5" />
+                        <span>{lang === 'fr' ? 'Appel' : 'اتصال'}</span>
+                      </a>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </div>
+      </div>
+
+      {/* Modals */}
       <MachineStepperModal
-        isOpen={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
-        onSave={handleMachineCreated}
+        isOpen={isAddMachineModalOpen}
+        onClose={() => setIsAddMachineModalOpen(false)}
+        onSave={async () => {
+          await loadDashboardData();
+          setIsAddMachineModalOpen(false);
+        }}
       />
 
-      {/* Upgrade / Payment Proof Modal */}
-      <PaymentProofModal
-        isOpen={isUpgradeModalOpen}
-        onClose={() => setIsUpgradeModalOpen(false)}
+      <CreateBookingModal
+        isOpen={isCreateBookingModalOpen}
+        onClose={() => setIsCreateBookingModalOpen(false)}
+        machines={machines}
+        existingBookings={bookings}
+        onBookingCreated={() => loadDashboardData()}
       />
 
-      {/* Profile Settings Modal */}
       <ProfileSettingsModal
         isOpen={isProfileModalOpen}
         onClose={() => setIsProfileModalOpen(false)}

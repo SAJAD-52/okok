@@ -21,6 +21,9 @@ import { BookingsPage } from './pages/BookingsPage';
 import { StorefrontPage } from './pages/StorefrontPage';
 import { MessagesPage } from './pages/MessagesPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
+import { BusinessSettingsPage } from './pages/BusinessSettingsPage';
+import { ClientsPage } from './pages/ClientsPage';
+import { DocumentViewPage } from './pages/DocumentViewPage';
 import { AdminPage } from './pages/AdminPage';
 import { AdminLoginPage } from './pages/AdminLoginPage';
 import { ContractorDashboardPage } from './pages/ContractorDashboardPage';
@@ -50,6 +53,16 @@ export const App: React.FC = () => {
             <Route path="/marketplace" element={<MarketplacePage />} />
             <Route path="/marketplace/:id" element={<MachineDetailPage />} />
             <Route path="/s/:slug" element={<PublicStorefrontPage />} />
+
+            {/* Standalone Printable Document View */}
+            <Route
+              path="/owner/documents/:id"
+              element={
+                <ProtectedRoute>
+                  <DocumentViewPage />
+                </ProtectedRoute>
+              }
+            />
 
             {/* Protected Onboarding Route */}
             <Route
@@ -84,8 +97,10 @@ export const App: React.FC = () => {
               <Route index element={<DashboardOverviewPage />} />
               <Route path="machines" element={<MachinesPage />} />
               <Route path="bookings" element={<BookingsPage />} />
+              <Route path="clients" element={<ClientsPage />} />
               <Route path="analytics" element={<AnalyticsPage />} />
               <Route path="storefront" element={<StorefrontPage />} />
+              <Route path="settings/business" element={<BusinessSettingsPage />} />
               <Route path="messages" element={<MessagesPage />} />
             </Route>
 
@@ -93,8 +108,10 @@ export const App: React.FC = () => {
             <Route path="/app" element={<Navigate to="/owner" replace />} />
             <Route path="/app/machines" element={<Navigate to="/owner/machines" replace />} />
             <Route path="/app/bookings" element={<Navigate to="/owner/bookings" replace />} />
+            <Route path="/app/clients" element={<Navigate to="/owner/clients" replace />} />
             <Route path="/app/analytics" element={<Navigate to="/owner/analytics" replace />} />
             <Route path="/app/storefront" element={<Navigate to="/owner/storefront" replace />} />
+            <Route path="/app/settings/business" element={<Navigate to="/owner/settings/business" replace />} />
             <Route path="/app/messages" element={<Navigate to="/owner/messages" replace />} />
 
             {/* Protected Contractor / Entreprise Portal Routes */}

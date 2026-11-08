@@ -34,6 +34,8 @@ import {
   Clock,
   Layers,
   Fuel,
+  QrCode,
+  FileText,
 } from 'lucide-react';
 import { PublicHeader } from '../components/layout/PublicHeader';
 import { Footer } from '../components/layout/Footer';
@@ -43,6 +45,8 @@ import { Badge } from '../components/ui/Badge';
 import { Skeleton } from '../components/ui/Skeleton';
 import { MachineCard } from '../components/marketplace/MachineCard';
 import { CreateBookingModal } from '../components/bookings/CreateBookingModal';
+import { RequestQuoteModal } from '../components/storefront/RequestQuoteModal';
+import { QrCodeModal } from '../components/storefront/QrCodeModal';
 import { useLanguage } from '../hooks/useLanguage';
 import { useAuth } from '../hooks/useAuth';
 import { Machine, Booking } from '../types/database';
@@ -78,6 +82,11 @@ export const PublicStorefrontPage: React.FC = () => {
   // Booking Modal State
   const [selectedMachineForBooking, setSelectedMachineForBooking] = useState<Machine | null>(null);
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
+
+  // Quote & QR Modals
+  const [isQuoteModalOpen, setIsQuoteModalOpen] = useState(false);
+  const [quoteMachine, setQuoteMachine] = useState<Machine | undefined>(undefined);
+  const [isQrModalOpen, setIsQrModalOpen] = useState(false);
 
   // Active map machine selection
   const [selectedMapMachine, setSelectedMapMachine] = useState<Machine | null>(null);
@@ -268,6 +277,22 @@ export const PublicStorefrontPage: React.FC = () => {
 
   const fullStoreUrl = window.location.href;
 
+  // SEO Dynamic Meta Tags
+  useEffect(() => {
+    if (company.name) {
+      document.title = `${company.name} | أسطول كراء الآليات والمعدات - JADIJCB Maroc`;
+      const metaDesc = document.querySelector('meta[name="description"]');
+      if (metaDesc) {
+        metaDesc.setAttribute('content', company.about_ar || company.about_fr);
+      }
+      const ogTitle = document.querySelector('meta[property="og:title"]');
+      if (ogTitle) ogTitle.setAttribute('content', `${company.name} - متجر كراء الآليات`);
+      const ogImg = document.querySelector('meta[property="og:image"]');
+      const firstMachinePhoto = machines[0]?.images?.[0] || company.banner;
+      if (ogImg && firstMachinePhoto) ogImg.setAttribute('content', firstMachinePhoto);
+    }
+  }, [company.name, company.banner, company.about_ar, company.about_fr, machines]);
+
   const handleCopyLink = () => {
     navigator.clipboard.writeText(fullStoreUrl);
     setIsLinkCopied(true);
@@ -283,6 +308,18 @@ export const PublicStorefrontPage: React.FC = () => {
       text = `السلام عليكم، نود الاستفسار وحجز الآلية (${customMachine.brand} ${customMachine.model} - ${customMachine.title_ar}) المعروضة في متجركم على JADIJCB.`;
     }
     return `https://wa.me/${rawNumber}?text=${encodeURIComponent(text)}`;
+  };
+
+  // Per-machine WhatsApp template share for contractors & clients
+  const getMachineWhatsAppShareUrl = (m: Machine) => {
+    const text = `🚜 آليّة معروضة للكراء في متجر ${company.name} على منصة JADIJCB:\n\n• الموديل: ${m.brand} ${m.model} (${m.title_ar || m.title_fr})\n• الموقع: ${m.city}\n• السعر: ${m.rate_daily || 0} درهم/اليوم\n• الرابط المباشر:\n${window.location.origin}/marketplace/${m.id}`;
+    return `https://wa.me/?text=${encodeURIComponent(text)}`;
+  };
+
+  // Open Quote Modal
+  const handleOpenQuote = (m?: Machine) => {
+    setQuoteMachine(m);
+    setIsQuoteModalOpen(true);
   };
 
   // Direct internal chat handler
@@ -391,17 +428,24 @@ export const PublicStorefrontPage: React.FC = () => {
             alt={company.name}
             className="w-full h-full object-cover opacity-75"
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-ink via-ink/40 to-transparent" />
+          {/* Floating Share Link & QR Code on Banner */}
+          <div className="absolute top-4 end-4 z-20 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsQrModalOpen(true)}
+              className="px-3 py-1.5 rounded-full bg-white/90 backdrop-blur-md text-ink text-xs font-bold border border-steel-200 shadow-md hover:bg-white flex items-center gap-1.5 transition-all cursor-pointer"
+            >
+              <QrCode className="w-3.5 h-3.5 text-steel-700" />
+              <span>{lang === 'fr' ? 'Code QR' : 'رمز QR'}</span>
+            </button>
 
-          {/* Floating Share Link Button on Banner */}
-          <div className="absolute top-4 end-4 z-20">
             <button
               type="button"
               onClick={handleCopyLink}
               className="px-3 py-1.5 rounded-full bg-white/90 backdrop-blur-md text-ink text-xs font-bold border border-steel-200 shadow-md hover:bg-white flex items-center gap-1.5 transition-all cursor-pointer"
             >
               {isLinkCopied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Share2 className="w-3.5 h-3.5 text-steel-700" />}
-              <span>{isLinkCopied ? (lang === 'fr' ? 'Copié !' : 'تم النسخ!') : (lang === 'fr' ? 'Partager le magasin' : 'مشاركة رابط المتجر')}</span>
+              <span>{isLinkCopied ? (lang === 'fr' ? 'Copié !' : 'تم النسخ!') : (lang === 'fr' ? 'Partager' : 'مشاركة الرابط')}</span>
             </button>
           </div>
         </div>
@@ -470,8 +514,18 @@ export const PublicStorefrontPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Direct Actions Strip for Contractors (WhatsApp + Call + Chat) */}
+              {/* Direct Actions Strip for Contractors (Quote + WhatsApp + Call + Chat) */}
               <div className="flex flex-wrap sm:flex-nowrap items-center gap-2.5 w-full lg:w-auto shrink-0 pt-2 lg:pt-0 border-t lg:border-t-0 border-steel-100">
+                {/* 0. Request Quote Action */}
+                <button
+                  type="button"
+                  onClick={() => handleOpenQuote()}
+                  className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 bg-primary hover:bg-primary-hover text-ink font-black py-2.5 px-4 rounded-xl text-xs sm:text-sm shadow-md transition-all cursor-pointer min-h-[44px]"
+                >
+                  <FileText className="w-4 h-4" />
+                  <span>{lang === 'fr' ? 'Devis Rapide' : 'طلب عرض أسعار (Devis)'}</span>
+                </button>
+
                 {/* 1. WhatsApp Action */}
                 <a
                   href={getWhatsAppLink()}
@@ -1025,6 +1079,26 @@ export const PublicStorefrontPage: React.FC = () => {
           }}
         />
       )}
+
+      {/* Request Quote Modal (Writes to leads table) */}
+      <RequestQuoteModal
+        isOpen={isQuoteModalOpen}
+        onClose={() => {
+          setIsQuoteModalOpen(false);
+          setQuoteMachine(undefined);
+        }}
+        ownerId={company.ownerId}
+        ownerName={company.name}
+        machine={quoteMachine}
+      />
+
+      {/* QR Code Modal for Public Storefront */}
+      <QrCodeModal
+        isOpen={isQrModalOpen}
+        onClose={() => setIsQrModalOpen(false)}
+        storeUrl={fullStoreUrl}
+        companyName={company.name}
+      />
 
       <Footer />
     </div>

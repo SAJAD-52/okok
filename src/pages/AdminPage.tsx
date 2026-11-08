@@ -49,12 +49,12 @@ import { toast } from '../components/ui/Toast';
 import { useLanguage } from '../hooks/useLanguage';
 import { useAuth, SUPER_ADMIN_EMAIL } from '../hooks/useAuth';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { adminService, AdminAccountDetail, PlatformActivityLog } from '../lib/adminService';
+import { adminService, AdminAccountDetail, PlatformOverviewMetrics } from '../lib/adminService';
 import { bookingStore } from '../lib/bookingStore';
 import { platformSettingsStore, PlatformSettings } from '../lib/platformSettings';
 import { PaymentRecord, PaymentStatus, Machine, Booking, UserRole } from '../types/database';
 
-type AdminTab = 'accounts' | 'machines' | 'bookings' | 'payments' | 'activity' | 'settings';
+type AdminTab = 'accounts' | 'machines' | 'bookings' | 'payments' | 'settings';
 
 export const AdminPage: React.FC = () => {
   const { t, lang, isRTL } = useLanguage();
@@ -63,11 +63,12 @@ export const AdminPage: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<AdminTab>('accounts');
 
-  // Accounts state
+  // Accounts state & KPIs
   const [accounts, setAccounts] = useState<AdminAccountDetail[]>([]);
+  const [metrics, setMetrics] = useState<PlatformOverviewMetrics | null>(null);
   const [searchAccountQuery, setSearchAccountQuery] = useState('');
   const [filterRole, setFilterRole] = useState<'all' | UserRole>('all');
-  const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'trial' | 'suspended' | 'never_activated' | 'inactive_7d'>('all');
   const [selectedUserDetail, setSelectedUserDetail] = useState<AdminAccountDetail | null>(null);
 
   // Machinery fleet state
@@ -82,9 +83,6 @@ export const AdminPage: React.FC = () => {
   const [selectedProofUrl, setSelectedProofUrl] = useState<string | null>(null);
   const [durationMonths, setDurationMonths] = useState<number>(1);
   const [processingId, setProcessingId] = useState<string | null>(null);
-
-  // Activity stream state
-  const [activities, setActivities] = useState<PlatformActivityLog[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   // Platform dynamic payment & subscription settings
@@ -115,9 +113,13 @@ export const AdminPage: React.FC = () => {
   const loadPlatformData = async () => {
     setIsLoading(true);
     try {
-      // 1. Load accounts
-      const userList = await adminService.getAllAccounts();
+      // 1. Load accounts & platform overview KPIs
+      const [userList, ovMetrics] = await Promise.all([
+        adminService.getAllAccounts(),
+        adminService.getOverviewMetrics(),
+      ]);
       setAccounts(userList);
+      setMetrics(ovMetrics);
 
       // 2. Load all machines across Morocco
       let machinesList: Machine[] = [];
@@ -204,9 +206,6 @@ export const AdminPage: React.FC = () => {
           );
         }
       }
-
-      // 5. Load activity stream
-      setActivities(adminService.getActivityLogs());
     } catch (e) {
       console.warn('Super Admin load error:', e);
     } finally {
@@ -232,11 +231,24 @@ export const AdminPage: React.FC = () => {
 
       const matchesRole = filterRole === 'all' || acc.role === filterRole;
 
-      const matchesStatus =
-        filterStatus === 'all' ||
-        (filterStatus === 'suspended' && acc.is_suspended) ||
-        (filterStatus === 'active' && acc.subscription_status === 'active' && !acc.is_suspended) ||
-        (filterStatus === 'trial' && acc.subscription_status === 'trial' && !acc.is_suspended);
+      let matchesStatus = true;
+      if (filterStatus === 'suspended') {
+        matchesStatus = Boolean(acc.is_suspended);
+      } else if (filterStatus === 'active') {
+        matchesStatus = acc.subscription_status === 'active' && !acc.is_suspended;
+      } else if (filterStatus === 'trial') {
+        matchesStatus = acc.subscription_status === 'trial' && !acc.is_suspended;
+      } else if (filterStatus === 'never_activated') {
+        matchesStatus = !acc.activation_at;
+      } else if (filterStatus === 'inactive_7d') {
+        if (!acc.last_active_at) {
+          matchesStatus = true;
+        } else {
+          const lastActiveDate = new Date(acc.last_active_at).getTime();
+          const sevenDaysAgo = Date.now() - 7 * 24 * 3600 * 1000;
+          matchesStatus = isNaN(lastActiveDate) || lastActiveDate < sevenDaysAgo;
+        }
+      }
 
       return matchesSearch && matchesRole && matchesStatus;
     });
@@ -407,52 +419,67 @@ export const AdminPage: React.FC = () => {
       </div>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full flex-1 text-start">
-        {/* Top 4 Macro Platform KPIs */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <Card className="p-4 sm:p-5 bg-white border border-steel-200 shadow-soft">
-            <div className="flex items-center justify-between text-steel-500 mb-2">
-              <span className="text-xs font-bold">إجمالي الحسابات المسجلة</span>
-              <div className="p-2 rounded-xl bg-blue-50 text-blue-600">
+        {/* Top 5 Macro Platform Real KPIs */}
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3.5 mb-8">
+          <Card className="p-4 bg-white border border-steel-200 shadow-soft">
+            <div className="flex items-center justify-between text-steel-500 mb-1.5">
+              <span className="text-xs font-bold">إجمالي الحسابات</span>
+              <div className="p-1.5 rounded-xl bg-blue-50 text-blue-600">
                 <Users className="w-4 h-4" />
               </div>
             </div>
-            <div className="text-2xl font-black text-ink font-mono">{accounts.length}</div>
-            <span className="text-[10px] text-blue-600 font-bold block mt-1">ملاك آليات + مقاولات بناء</span>
+            <div className="text-2xl font-black text-ink font-mono">{metrics?.total_accounts ?? accounts.length}</div>
+            <span className="text-[10px] text-blue-600 font-bold block mt-0.5">ملاك آليات + مقاولات</span>
           </Card>
 
-          <Card className="p-4 sm:p-5 bg-white border border-steel-200 shadow-soft">
-            <div className="flex items-center justify-between text-steel-500 mb-2">
-              <span className="text-xs font-bold">الآليات المعروضة بالمغرب</span>
-              <div className="p-2 rounded-xl bg-amber-50 text-primary-dark">
-                <Truck className="w-4 h-4" />
+          <Card className="p-4 bg-white border border-steel-200 shadow-soft">
+            <div className="flex items-center justify-between text-steel-500 mb-1.5">
+              <span className="text-xs font-bold">نسبة التفعيل (Activation)</span>
+              <div className="p-1.5 rounded-xl bg-emerald-50 text-emerald-600">
+                <Sparkles className="w-4 h-4" />
               </div>
             </div>
-            <div className="text-2xl font-black text-ink font-mono">{allMachines.length}</div>
-            <span className="text-[10px] text-amber-600 font-bold block mt-1">جرافات، رافعات، شاحنات</span>
-          </Card>
-
-          <Card className="p-4 sm:p-5 bg-white border border-steel-200 shadow-soft">
-            <div className="flex items-center justify-between text-steel-500 mb-2">
-              <span className="text-xs font-bold">عقود الكراء والعمليات</span>
-              <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600">
-                <CalendarCheck className="w-4 h-4" />
-              </div>
+            <div className="text-2xl font-black text-emerald-600 font-mono">
+              {metrics?.activation_rate_pct ?? 0}%
             </div>
-            <div className="text-2xl font-black text-emerald-600 font-mono">{allBookings.length}</div>
-            <span className="text-[10px] text-emerald-600 font-bold block mt-1">عقود نشطة ومكتملة بالأوراش</span>
+            <span className="text-[10px] text-emerald-600 font-bold block mt-0.5">
+              {metrics?.activated_accounts ?? 0} مالك حقق أول قيمة
+            </span>
           </Card>
 
-          <Card className="p-4 sm:p-5 bg-white border border-steel-200 shadow-soft">
-            <div className="flex items-center justify-between text-steel-500 mb-2">
-              <span className="text-xs font-bold">التحويلات بانتظار الاعتماد</span>
-              <div className="p-2 rounded-xl bg-rose-50 text-rose-600">
+          <Card className="p-4 bg-white border border-steel-200 shadow-soft">
+            <div className="flex items-center justify-between text-steel-500 mb-1.5">
+              <span className="text-xs font-bold">وثائق أُصدرت هذا الأسبوع</span>
+              <div className="p-1.5 rounded-xl bg-purple-50 text-purple-600">
                 <FileCheck className="w-4 h-4" />
               </div>
             </div>
-            <div className="text-2xl font-black text-rose-600 font-mono">
-              {payments.filter((p) => p.status === 'pending').length}
+            <div className="text-2xl font-black text-purple-700 font-mono">{metrics?.docs_this_week ?? 0}</div>
+            <span className="text-[10px] text-purple-600 font-bold block mt-0.5">عقود وفواتير ووصولات رسمية</span>
+          </Card>
+
+          <Card className="p-4 bg-white border border-steel-200 shadow-soft">
+            <div className="flex items-center justify-between text-steel-500 mb-1.5">
+              <span className="text-xs font-bold">حجوزات هذا الأسبوع</span>
+              <div className="p-1.5 rounded-xl bg-amber-50 text-amber-600">
+                <CalendarCheck className="w-4 h-4" />
+              </div>
             </div>
-            <span className="text-[10px] text-rose-600 font-bold block mt-1">وصولات وفاكاش وتحويلات RIB</span>
+            <div className="text-2xl font-black text-amber-600 font-mono">{metrics?.bookings_this_week ?? 0}</div>
+            <span className="text-[10px] text-amber-600 font-bold block mt-0.5">
+              حجم: {(metrics?.total_volume_mad ?? 0).toLocaleString('fr-FR')} MAD
+            </span>
+          </Card>
+
+          <Card className="p-4 bg-white border border-steel-200 shadow-soft col-span-2 lg:col-span-1">
+            <div className="flex items-center justify-between text-steel-500 mb-1.5">
+              <span className="text-xs font-bold">الآليات بالأسطول</span>
+              <div className="p-1.5 rounded-xl bg-ink text-primary">
+                <Truck className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="text-2xl font-black text-ink font-mono">{metrics?.total_machines ?? allMachines.length}</div>
+            <span className="text-[10px] text-steel-500 font-bold block mt-0.5">معروضة للكراء الميداني</span>
           </Card>
         </div>
 
@@ -464,7 +491,6 @@ export const AdminPage: React.FC = () => {
             { id: 'bookings', labelAr: '📋 عقود الكراء والعمليات بالأوراش', labelFr: 'Réservations Chantiers', icon: <CalendarCheck className="w-4 h-4" /> },
             { id: 'payments', labelAr: '💳 تدقيق التحويلات والوصولات البنكية', labelFr: 'Validation des Paiements', icon: <CreditCard className="w-4 h-4" /> },
             { id: 'settings', labelAr: '⚙️ إعدادات الدفع والاشتراك (RIB/CIN)', labelFr: 'Paramètres RIB & Tarif', icon: <CreditCard className="w-4 h-4" /> },
-            { id: 'activity', labelAr: '⚡ سجل الأنشطة المباشر للجميع', labelFr: 'Journal d\'Activité', icon: <Activity className="w-4 h-4" /> },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -487,47 +513,100 @@ export const AdminPage: React.FC = () => {
           <div className="space-y-4">
             {/* Search & Filters */}
             <Card className="p-4 bg-white border border-steel-200 shadow-soft">
-              <div className="flex flex-col md:flex-row gap-3 items-center justify-between">
+              <div className="flex flex-col gap-3">
                 {/* Search */}
-                <div className="relative flex-1 w-full">
+                <div className="relative w-full">
                   <input
                     type="text"
                     placeholder="ابحث بالاسم، رقم الهاتف (06/07)، اسم المقاولة، المدينة، أو رقم الـ ICE..."
                     value={searchAccountQuery}
                     onChange={(e) => setSearchAccountQuery(e.target.value)}
-                    className="w-full ps-10 pe-4 py-2.5 rounded-xl border border-steel-300 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-primary bg-surface"
+                    className="w-full ps-10 pe-4 py-2.5 rounded-xl border border-steel-300 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-primary bg-surface min-h-[44px]"
                   />
-                  <Search className="w-4 h-4 text-steel-400 absolute start-3.5 top-3" />
+                  <Search className="w-4 h-4 text-steel-400 absolute start-3.5 top-3.5" />
                 </div>
 
-                {/* Role Filter */}
-                <div className="flex items-center gap-1.5 w-full md:w-auto">
+                {/* Filter Chips Bar */}
+                <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-steel-100">
                   <button
                     type="button"
-                    onClick={() => setFilterRole('all')}
-                    className={`px-3 py-2 rounded-xl text-xs font-bold transition-all ${
-                      filterRole === 'all' ? 'bg-ink text-white' : 'bg-steel-100 text-steel-600'
+                    onClick={() => {
+                      setFilterRole('all');
+                      setFilterStatus('all');
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      filterRole === 'all' && filterStatus === 'all'
+                        ? 'bg-ink text-white shadow-xs'
+                        : 'bg-steel-100 text-steel-700 hover:bg-steel-200'
                     }`}
                   >
                     الكل ({accounts.length})
                   </button>
+
                   <button
                     type="button"
-                    onClick={() => setFilterRole('owner')}
-                    className={`px-3 py-2 rounded-xl text-xs font-bold transition-all ${
-                      filterRole === 'owner' ? 'bg-amber-500 text-ink' : 'bg-steel-100 text-steel-600'
+                    onClick={() => {
+                      setFilterRole('owner');
+                      setFilterStatus('all');
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      filterRole === 'owner' && filterStatus === 'all'
+                        ? 'bg-amber-500 text-ink shadow-xs'
+                        : 'bg-steel-100 text-steel-700 hover:bg-steel-200'
                     }`}
                   >
-                    ملاك الآليات
+                    🚜 ملاك الآليات ({accounts.filter((a) => a.role === 'owner').length})
                   </button>
+
                   <button
                     type="button"
-                    onClick={() => setFilterRole('client')}
-                    className={`px-3 py-2 rounded-xl text-xs font-bold transition-all ${
-                      filterRole === 'client' ? 'bg-blue-600 text-white' : 'bg-steel-100 text-steel-600'
+                    onClick={() => {
+                      setFilterRole('client');
+                      setFilterStatus('all');
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      filterRole === 'client' && filterStatus === 'all'
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'bg-steel-100 text-steel-700 hover:bg-steel-200'
                     }`}
                   >
-                    المقاولات
+                    🏢 المقاولات ({accounts.filter((a) => a.role === 'client' || a.role === 'contractor').length})
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFilterRole('all');
+                      setFilterStatus('never_activated');
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      filterStatus === 'never_activated'
+                        ? 'bg-rose-600 text-white shadow-xs'
+                        : 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100'
+                    }`}
+                  >
+                    ⚠️ لم يتم التفعيل (Never Activated) ({accounts.filter((a) => !a.activation_at).length})
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFilterRole('all');
+                      setFilterStatus('inactive_7d');
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      filterStatus === 'inactive_7d'
+                        ? 'bg-steel-800 text-white shadow-xs'
+                        : 'bg-steel-100 text-steel-700 hover:bg-steel-200'
+                    }`}
+                  >
+                    💤 غير نشط 7+ أيام ({
+                      accounts.filter((a) => {
+                        if (!a.last_active_at) return true;
+                        const date = new Date(a.last_active_at).getTime();
+                        return isNaN(date) || date < Date.now() - 7 * 24 * 3600 * 1000;
+                      }).length
+                    })
                   </button>
                 </div>
               </div>
@@ -549,7 +628,7 @@ export const AdminPage: React.FC = () => {
                         {acc.role === 'owner' ? '🚜' : '🏢'}
                       </div>
 
-                      <div className="space-y-1">
+                      <div className="space-y-1.5">
                         <div className="flex flex-wrap items-center gap-2">
                           <h3 className="font-black text-sm text-ink">{acc.full_name}</h3>
                           <Badge
@@ -561,16 +640,27 @@ export const AdminPage: React.FC = () => {
                           </Badge>
                           {acc.is_suspended ? (
                             <Badge variant="danger" size="sm" className="font-bold">
-                              ⛔ مجمد / معلق
+                              ⛔ مجمد
                             </Badge>
                           ) : acc.subscription_status === 'active' ? (
                             <Badge variant="success" size="sm" className="font-bold">
-                              👑 اشتراك VIP نشط
+                              👑 اشتراك VIP
                             </Badge>
                           ) : (
                             <Badge variant="warning" size="sm" className="font-bold">
                               ⏳ تجربة 72H
                             </Badge>
+                          )}
+
+                          {/* Activation Status Badge */}
+                          {acc.activation_at ? (
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold border border-emerald-300">
+                              ✓ مفعل (أول قيمة)
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 text-[10px] font-bold border border-amber-300">
+                              ⚠️ لم يكتمل التفعيل
+                            </span>
                           )}
                         </div>
 
@@ -598,15 +688,17 @@ export const AdminPage: React.FC = () => {
                           )}
                         </div>
 
-                        {/* What is this account doing right now? */}
-                        <div className="flex items-center gap-3 pt-1 text-[11px] text-steel-500 font-bold">
-                          <span>الآليات المسجلة: <strong className="text-ink font-mono">{acc.machines_count}</strong></span>
+                        {/* Real Database Metrics per Account */}
+                        <div className="flex flex-wrap items-center gap-3 pt-1 text-[11px] text-steel-500 font-bold">
+                          <span>الآليات: <strong className="text-ink font-mono">{acc.machines_count}</strong></span>
                           <span>·</span>
-                          <span>العمليات والحجوزات: <strong className="text-ink font-mono">{acc.bookings_count}</strong></span>
+                          <span>الحجوزات: <strong className="text-ink font-mono">{acc.bookings_count}</strong></span>
                           <span>·</span>
-                          <span>حجم المعاملات: <strong className="text-emerald-700 font-mono">{acc.total_volume_mad.toLocaleString('fr-FR')} MAD</strong></span>
+                          <span>الوثائق الصادرة: <strong className="text-purple-700 font-mono">{acc.documents_count}</strong></span>
                           <span>·</span>
-                          <span>آخر نشاط: <strong className="text-steel-700">{acc.last_active_at || 'نشط'}</strong></span>
+                          <span>إجمالي الفوترة: <strong className="text-emerald-700 font-mono">{acc.total_volume_mad.toLocaleString('fr-FR')} MAD</strong></span>
+                          <span>·</span>
+                          <span>آخر نشاط: <strong className="text-steel-700">{acc.last_active_at ? acc.last_active_at.slice(0, 16).replace('T', ' ') : 'لم ينشط بعد'}</strong></span>
                         </div>
                       </div>
                     </div>

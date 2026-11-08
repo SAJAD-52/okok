@@ -20,6 +20,9 @@ import {
   TrendingUp,
   X,
   User,
+  Users,
+  Briefcase,
+  MoreHorizontal,
 } from 'lucide-react';
 import { Logo } from '../ui/Logo';
 import { LanguageSwitcher } from '../ui/LanguageSwitcher';
@@ -44,6 +47,7 @@ export const DashboardLayout: React.FC = () => {
 
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
   const [pendingBookingsCount, setPendingBookingsCount] = useState<number>(0);
   const [pendingBookingsList, setPendingBookingsList] = useState<Booking[]>([]);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
@@ -195,13 +199,8 @@ export const DashboardLayout: React.FC = () => {
     {
       to: '/owner',
       exact: true,
-      label: t('nav.dashboard'),
+      label: lang === 'fr' ? 'Aujourd\'hui' : 'اليوم',
       icon: <LayoutDashboard className="w-5 h-5" />,
-    },
-    {
-      to: '/owner/machines',
-      label: t('nav.machines'),
-      icon: <Truck className="w-5 h-5" />,
     },
     {
       to: '/owner/bookings',
@@ -210,20 +209,35 @@ export const DashboardLayout: React.FC = () => {
       badge: pendingBookingsCount,
     },
     {
+      to: '/owner/machines',
+      label: t('nav.machines'),
+      icon: <Truck className="w-5 h-5" />,
+    },
+    {
+      to: '/owner/clients',
+      label: lang === 'fr' ? 'Clients' : 'الزبائن',
+      icon: <Users className="w-5 h-5" />,
+    },
+    {
       to: '/owner/analytics',
-      label: lang === 'fr' ? 'Finances & Rentabilité' : 'الإحصائيات والأرباح',
+      label: lang === 'fr' ? 'Finances & Rentabilité' : 'المالية والأرباح',
       icon: <TrendingUp className="w-5 h-5" />,
+    },
+    {
+      to: '/owner/storefront',
+      label: t('nav.storefront'),
+      icon: <Building2 className="w-5 h-5" />,
+    },
+    {
+      to: '/owner/settings/business',
+      label: lang === 'fr' ? 'Profil Entreprise' : 'إعدادات المقاولة',
+      icon: <Briefcase className="w-5 h-5" />,
     },
     {
       to: '/owner/messages',
       label: t('nav.messages'),
       icon: <MessageSquare className="w-5 h-5" />,
       badge: unreadMessagesCount,
-    },
-    {
-      to: '/owner/storefront',
-      label: t('nav.storefront'),
-      icon: <Building2 className="w-5 h-5" />,
     },
   ];
 
@@ -567,41 +581,315 @@ export const DashboardLayout: React.FC = () => {
         </main>
       </div>
 
-      {/* Mobile Bottom Tab Bar (Fixed, 44px+ touch targets, thumb-friendly) */}
+      {/* Mobile Bottom Tab Bar (Fixed, 44px+ touch targets, max 5 items: اليوم / الحجوزات / الآليات / الزبائن / المزيد) */}
       <nav
         aria-label="Mobile Navigation"
         className="md:hidden fixed bottom-0 start-0 end-0 bg-white border-t border-steel-200 shadow-elevated z-40 px-2 py-1 flex items-center justify-around"
       >
-        {navigationItems.map((item) => {
-          const isItemActive = item.exact
-            ? location.pathname === item.to
-            : location.pathname.startsWith(item.to);
+        {isContractor ? (
+          contractorNavigationItems.map((item) => {
+            const isItemActive = item.exact
+              ? location.pathname === item.to
+              : location.pathname.startsWith(item.to);
 
-          return (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={`flex flex-col items-center justify-center flex-1 py-1.5 min-h-[50px] transition-colors relative ${
-                isItemActive ? 'text-ink font-bold' : 'text-steel-400 hover:text-steel-700'
-              }`}
-            >
-              <div
-                className={`p-1 rounded-xl transition-all relative ${
-                  isItemActive ? 'bg-primary text-ink' : ''
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={`flex flex-col items-center justify-center flex-1 py-1.5 min-h-[50px] transition-colors relative ${
+                  isItemActive ? 'text-ink font-bold' : 'text-steel-400 hover:text-steel-700'
                 }`}
               >
-                {item.icon}
-                {item.badge && item.badge > 0 && (
-                  <span className="absolute -top-1 -end-1 w-2.5 h-2.5 rounded-full bg-primary ring-2 ring-white" />
-                )}
-              </div>
-              <span className="text-[10px] mt-0.5 tracking-tight truncate max-w-[64px]">
-                {item.label}
-              </span>
+                <div
+                  className={`p-1 rounded-xl transition-all relative ${
+                    isItemActive ? 'bg-primary text-ink' : ''
+                  }`}
+                >
+                  {item.icon}
+                  {item.badge && item.badge > 0 && (
+                    <span className="absolute -top-1 -end-1 w-2.5 h-2.5 rounded-full bg-primary ring-2 ring-white" />
+                  )}
+                </div>
+                <span className="text-[10px] mt-0.5 tracking-tight truncate max-w-[64px]">
+                  {item.label}
+                </span>
+              </NavLink>
+            );
+          })
+        ) : (
+          <>
+            {/* 1. اليوم (Today) */}
+            <NavLink
+              to="/owner"
+              end
+              className={({ isActive }) =>
+                `flex flex-col items-center justify-center flex-1 py-1.5 min-h-[50px] transition-colors relative ${
+                  isActive ? 'text-ink font-bold' : 'text-steel-400 hover:text-steel-700'
+                }`
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  <div className={`p-1 rounded-xl transition-all ${isActive ? 'bg-primary text-ink' : ''}`}>
+                    <LayoutDashboard className="w-5 h-5" />
+                  </div>
+                  <span className="text-[10px] mt-0.5 tracking-tight truncate">
+                    {lang === 'fr' ? 'Aujourd\'hui' : 'اليوم'}
+                  </span>
+                </>
+              )}
             </NavLink>
-          );
-        })}
+
+            {/* 2. الحجوزات (Bookings) */}
+            <NavLink
+              to="/owner/bookings"
+              className={({ isActive }) =>
+                `flex flex-col items-center justify-center flex-1 py-1.5 min-h-[50px] transition-colors relative ${
+                  isActive ? 'text-ink font-bold' : 'text-steel-400 hover:text-steel-700'
+                }`
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  <div className={`p-1 rounded-xl transition-all relative ${isActive ? 'bg-primary text-ink' : ''}`}>
+                    <CalendarCheck className="w-5 h-5" />
+                    {pendingBookingsCount > 0 && (
+                      <span className="absolute -top-1 -end-1 w-2.5 h-2.5 rounded-full bg-primary ring-2 ring-white" />
+                    )}
+                  </div>
+                  <span className="text-[10px] mt-0.5 tracking-tight truncate">
+                    {t('nav.bookings')}
+                  </span>
+                </>
+              )}
+            </NavLink>
+
+            {/* 3. الآليات (Machines) */}
+            <NavLink
+              to="/owner/machines"
+              className={({ isActive }) =>
+                `flex flex-col items-center justify-center flex-1 py-1.5 min-h-[50px] transition-colors relative ${
+                  isActive ? 'text-ink font-bold' : 'text-steel-400 hover:text-steel-700'
+                }`
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  <div className={`p-1 rounded-xl transition-all ${isActive ? 'bg-primary text-ink' : ''}`}>
+                    <Truck className="w-5 h-5" />
+                  </div>
+                  <span className="text-[10px] mt-0.5 tracking-tight truncate">
+                    {t('nav.machines')}
+                  </span>
+                </>
+              )}
+            </NavLink>
+
+            {/* 4. الزبائن (Clients) */}
+            <NavLink
+              to="/owner/clients"
+              className={({ isActive }) =>
+                `flex flex-col items-center justify-center flex-1 py-1.5 min-h-[50px] transition-colors relative ${
+                  isActive ? 'text-ink font-bold' : 'text-steel-400 hover:text-steel-700'
+                }`
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  <div className={`p-1 rounded-xl transition-all ${isActive ? 'bg-primary text-ink' : ''}`}>
+                    <Users className="w-5 h-5" />
+                  </div>
+                  <span className="text-[10px] mt-0.5 tracking-tight truncate">
+                    {lang === 'fr' ? 'Clients' : 'الزبائن'}
+                  </span>
+                </>
+              )}
+            </NavLink>
+
+            {/* 5. المزيد (More) */}
+            {(() => {
+              const isMoreActive =
+                location.pathname.startsWith('/owner/analytics') ||
+                location.pathname.startsWith('/owner/storefront') ||
+                location.pathname.startsWith('/owner/settings/business') ||
+                location.pathname.startsWith('/owner/messages') ||
+                location.pathname.startsWith('/admin');
+
+              return (
+                <button
+                  type="button"
+                  onClick={() => setIsMoreMenuOpen(true)}
+                  className={`flex flex-col items-center justify-center flex-1 py-1.5 min-h-[50px] transition-colors relative cursor-pointer ${
+                    isMoreActive ? 'text-ink font-bold' : 'text-steel-400 hover:text-steel-700'
+                  }`}
+                >
+                  <div className={`p-1 rounded-xl transition-all relative ${isMoreActive ? 'bg-primary text-ink' : ''}`}>
+                    <MoreHorizontal className="w-5 h-5" />
+                    {unreadMessagesCount > 0 && (
+                      <span className="absolute -top-1 -end-1 w-2.5 h-2.5 rounded-full bg-primary ring-2 ring-white" />
+                    )}
+                  </div>
+                  <span className="text-[10px] mt-0.5 tracking-tight truncate">
+                    {lang === 'fr' ? 'Plus' : 'المزيد'}
+                  </span>
+                </button>
+              );
+            })()}
+          </>
+        )}
       </nav>
+
+      {/* Mobile "المزيد" (More) Bottom Sheet Drawer */}
+      {isMoreMenuOpen && (
+        <div className="md:hidden fixed inset-0 z-50 flex flex-col justify-end">
+          <div
+            className="fixed inset-0 bg-ink/60 backdrop-blur-xs transition-opacity"
+            onClick={() => setIsMoreMenuOpen(false)}
+          />
+          <div className="relative bg-white rounded-t-3xl border-t border-steel-200 shadow-2xl p-5 space-y-4 max-h-[85vh] overflow-y-auto z-10 text-start animate-in slide-in-from-bottom duration-200">
+            <div className="flex items-center justify-between pb-3 border-b border-steel-100">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-xl bg-primary text-ink flex items-center justify-center font-black">
+                  <MoreHorizontal className="w-4 h-4" />
+                </div>
+                <h3 className="text-sm font-black text-ink">
+                  {lang === 'fr' ? 'Menu & Outils Entreprise' : 'المزيد من أدوات المقاولة'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsMoreMenuOpen(false)}
+                className="p-1 rounded-full text-steel-400 hover:text-ink cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-1.5">
+              {/* Financial Economics */}
+              <NavLink
+                to="/owner/analytics"
+                onClick={() => setIsMoreMenuOpen(false)}
+                className={({ isActive }) =>
+                  `flex items-center justify-between p-3 rounded-2xl text-xs font-bold transition-colors ${
+                    isActive ? 'bg-primary text-ink font-black' : 'bg-surface hover:bg-steel-100 text-steel-700'
+                  }`
+                }
+              >
+                <div className="flex items-center gap-3">
+                  <TrendingUp className="w-5 h-5 text-primary-dark" />
+                  <span>{lang === 'fr' ? 'Finances & Rentabilité' : 'المالية والأرباح والصيانة'}</span>
+                </div>
+                <ChevronLeft className="w-4 h-4 rtl:rotate-0 ltr:rotate-180 text-steel-400" />
+              </NavLink>
+
+              {/* Public Storefront */}
+              <NavLink
+                to="/owner/storefront"
+                onClick={() => setIsMoreMenuOpen(false)}
+                className={({ isActive }) =>
+                  `flex items-center justify-between p-3 rounded-2xl text-xs font-bold transition-colors ${
+                    isActive ? 'bg-primary text-ink font-black' : 'bg-surface hover:bg-steel-100 text-steel-700'
+                  }`
+                }
+              >
+                <div className="flex items-center gap-3">
+                  <Building2 className="w-5 h-5 text-primary-dark" />
+                  <span>{t('nav.storefront')}</span>
+                </div>
+                <ChevronLeft className="w-4 h-4 rtl:rotate-0 ltr:rotate-180 text-steel-400" />
+              </NavLink>
+
+              {/* Business Profile Settings */}
+              <NavLink
+                to="/owner/settings/business"
+                onClick={() => setIsMoreMenuOpen(false)}
+                className={({ isActive }) =>
+                  `flex items-center justify-between p-3 rounded-2xl text-xs font-bold transition-colors ${
+                    isActive ? 'bg-primary text-ink font-black' : 'bg-surface hover:bg-steel-100 text-steel-700'
+                  }`
+                }
+              >
+                <div className="flex items-center gap-3">
+                  <Briefcase className="w-5 h-5 text-primary-dark" />
+                  <div>
+                    <span className="block">{lang === 'fr' ? 'Profil Entreprise & Facturation' : 'إعدادات المقاولة والعقود والـ RIB'}</span>
+                    <span className="text-[10px] text-steel-400 font-normal block">ICE, RC, IF, TVA 20%, Cachet</span>
+                  </div>
+                </div>
+                <ChevronLeft className="w-4 h-4 rtl:rotate-0 ltr:rotate-180 text-steel-400" />
+              </NavLink>
+
+              {/* Messages */}
+              <NavLink
+                to="/owner/messages"
+                onClick={() => setIsMoreMenuOpen(false)}
+                className={({ isActive }) =>
+                  `flex items-center justify-between p-3 rounded-2xl text-xs font-bold transition-colors ${
+                    isActive ? 'bg-primary text-ink font-black' : 'bg-surface hover:bg-steel-100 text-steel-700'
+                  }`
+                }
+              >
+                <div className="flex items-center gap-3">
+                  <MessageSquare className="w-5 h-5 text-primary-dark" />
+                  <span>{t('nav.messages')}</span>
+                </div>
+                {unreadMessagesCount > 0 ? (
+                  <span className="px-2 py-0.5 rounded-full bg-primary text-ink text-[10px] font-black">
+                    {unreadMessagesCount}
+                  </span>
+                ) : (
+                  <ChevronLeft className="w-4 h-4 rtl:rotate-0 ltr:rotate-180 text-steel-400" />
+                )}
+              </NavLink>
+
+              {/* Personal Info Profile Modal */}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMoreMenuOpen(false);
+                  setIsProfileModalOpen(true);
+                }}
+                className="w-full flex items-center justify-between p-3 rounded-2xl text-xs font-bold bg-surface hover:bg-steel-100 text-steel-700 transition-colors text-start cursor-pointer"
+              >
+                <div className="flex items-center gap-3">
+                  <User className="w-5 h-5 text-primary-dark" />
+                  <span>{lang === 'fr' ? 'Modifier mes informations' : 'تعديل معلوماتي الشخصية'}</span>
+                </div>
+                <ChevronLeft className="w-4 h-4 rtl:rotate-0 ltr:rotate-180 text-steel-400" />
+              </button>
+
+              {/* Admin Console Link (if admin) */}
+              {(profile?.role === 'admin' || isSuperAdmin) && (
+                <NavLink
+                  to="/admin"
+                  onClick={() => setIsMoreMenuOpen(false)}
+                  className="flex items-center justify-between p-3 rounded-2xl text-xs font-bold bg-amber-50 border border-amber-200 text-ink hover:bg-amber-100 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <ShieldCheck className="w-5 h-5 text-amber-600" />
+                    <span>{t('nav.admin')}</span>
+                  </div>
+                  <ChevronLeft className="w-4 h-4 rtl:rotate-0 ltr:rotate-180 text-steel-400" />
+                </NavLink>
+              )}
+
+              {/* Logout Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMoreMenuOpen(false);
+                  handleLogout();
+                }}
+                className="w-full flex items-center gap-3 p-3 rounded-2xl text-xs font-bold text-danger hover:bg-rose-50 transition-colors text-start cursor-pointer pt-3 border-t border-steel-100"
+              >
+                <LogOut className="w-5 h-5" />
+                <span>{t('nav.logout')}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Soft Lock Modal Overlay (Non-dismissible when shouldShowLock is true) */}
       <SoftLockModal isLocked={shouldShowLock} />

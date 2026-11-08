@@ -34,6 +34,8 @@ export interface UserProfile {
   subscription_ends_at?: string;
   preferred_lang?: 'ar' | 'fr';
   onboarding_completed?: boolean;
+  last_active_at?: string;
+  activation_at?: string;
   created_at: string;
 }
 
@@ -142,6 +144,13 @@ export interface Booking {
   unit_price?: number;
   total_price: number;
   deposit_amount?: number;
+  rate_type?: 'hourly' | 'daily' | 'weekly';
+  fuel_included?: boolean;
+  delivery_fee?: number;
+  client_ref_id?: string;
+  paid_amount?: number;
+  balance_due?: number;
+  payment_status?: 'unpaid' | 'partial' | 'paid';
   with_operator: boolean;
   delivery_requested?: boolean;
   site_city_id?: string;
@@ -249,6 +258,86 @@ export interface MachineExpense {
   receipt_number?: string;
   vendor_name?: string;
   downtime_hours?: number; // ساعات توقف الآلية
+  hours_or_km?: number;
+  next_due_date?: string;
+  expense_type?: 'maintenance' | 'expense';
+  created_at: string;
+  machine?: Partial<Machine>;
+}
+
+export interface BusinessProfile {
+  id?: string;
+  owner_id: string;
+  company_name: string;
+  logo_url?: string;
+  stamp_signature_url?: string;
+  ice?: string;
+  rc?: string;
+  identifiant_fiscal?: string;
+  taxe_professionnelle?: string;
+  address?: string;
+  phone?: string;
+  rib?: string;
+  vat_enabled: boolean;
+  default_terms_ar?: string;
+  default_terms_fr?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface Client {
+  id: string;
+  owner_id: string;
+  name: string;
+  phone: string;
+  cin_or_ice?: string;
+  city?: string;
+  notes?: string;
+  total_billed?: number;
+  unpaid_balance?: number;
+  rentals_count?: number;
+  created_at: string;
+  updated_at?: string;
+}
+
+export type PaymentMethodType = 'cash' | 'rib' | 'wafacash' | 'cheque';
+
+export interface BookingPayment {
+  id: string;
+  booking_id: string;
+  owner_id: string;
+  amount: number;
+  method: PaymentMethodType;
+  payment_date: string;
+  note?: string;
+  created_at: string;
+}
+
+export type DocumentType = 'contract' | 'invoice' | 'receipt';
+
+export interface DocumentRecord {
+  id: string;
+  owner_id: string;
+  booking_id: string;
+  type: DocumentType;
+  number: string;
+  issued_at: string;
+  data: Record<string, any>;
+  created_at: string;
+}
+
+export interface Lead {
+  id: string;
+  owner_id: string;
+  machine_id?: string;
+  client_name: string;
+  client_phone: string;
+  city?: string;
+  rental_duration?: string;
+  start_date?: string;
+  notes?: string;
+  is_contacted: boolean;
+  contacted_at?: string;
   created_at: string;
   machine?: Partial<Machine>;
 }

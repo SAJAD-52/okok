@@ -1,0 +1,24 @@
+{
+  "name": "JADIJCB Maroc - أسطول وتأجير الآليات",
+  "short_name": "JADIJCB",
+  "description": "منصة تأجير وإدارة أساطيل معدات وآليات الأشغال العمومية بالمغرب",
+  "start_url": "/owner",
+  "display": "standalone",
+  "background_color": "#0F172A",
+  "theme_color": "#FFB400",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/assets/aistudio/image_da2fc2de.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/assets/aistudio/image_da2fc2de.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

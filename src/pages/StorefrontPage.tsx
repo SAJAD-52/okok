@@ -19,6 +19,10 @@ import {
   Sparkles,
   Link as LinkIcon,
   CheckCircle2,
+  QrCode,
+  Inbox,
+  UserCheck,
+  Calendar,
 } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -35,6 +39,9 @@ import {
   LOCAL_ACTIVE_SLUG_KEY,
 } from '../lib/storefrontService';
 import { machineStore } from '../lib/machineStore';
+import { leadService } from '../lib/leadService';
+import { Lead } from '../types/database';
+import { QrCodeModal } from '../components/storefront/QrCodeModal';
 
 export const StorefrontPage: React.FC = () => {
   const { t, lang, isRTL } = useLanguage();
@@ -72,10 +79,42 @@ export const StorefrontPage: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [previewMachines, setPreviewMachines] = useState<any[]>([]);
 
+  // Leads inbox state & QR code modal
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [isLoadingLeads, setIsLoadingLeads] = useState<boolean>(false);
+  const [isQrModalOpen, setIsQrModalOpen] = useState<boolean>(false);
+
+  const loadLeads = async () => {
+    const ownerId = user?.id || profile?.id;
+    if (!ownerId) return;
+    setIsLoadingLeads(true);
+    try {
+      const list = await leadService.getOwnerLeads(ownerId);
+      setLeads(list);
+    } catch (e) {
+      console.warn('Leads load notice:', e);
+    } finally {
+      setIsLoadingLeads(false);
+    }
+  };
+
+  const handleToggleLead = async (leadId: string) => {
+    const updated = await leadService.toggleLeadContacted(leadId);
+    if (updated) {
+      setLeads((prev) => prev.map((l) => (l.id === leadId ? updated : l)));
+      toast.success(
+        updated.is_contacted
+          ? (lang === 'fr' ? 'Marqué comme contacté' : 'تم تحديد الطلب كـ تم التواصل بنجاح')
+          : (lang === 'fr' ? 'Remis en attente' : 'تمت إعادة الطلب إلى قيد المتابعة')
+      );
+    }
+  };
+
   // 1. Fetch or initialize storefront with unique non-repeating slug
   useEffect(() => {
     async function loadStorefront() {
       if (!user?.id && !profile) return;
+      loadLeads();
 
       let loadedSlug = '';
 
@@ -212,6 +251,17 @@ export const StorefrontPage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setIsQrModalOpen(true)}
+            leftIcon={<QrCode className="w-3.5 h-3.5" />}
+            className="text-xs font-bold"
+          >
+            {lang === 'fr' ? 'Code QR' : 'رمز QR'}
+          </Button>
+
           <Button
             type="button"
             variant="outline"
@@ -606,6 +656,171 @@ export const StorefrontPage: React.FC = () => {
           </Card>
         </div>
       </div>
+
+      {/* Leads Inbox Section (طلبات عروض الأسعار الواردة من المتجر) */}
+      <Card className="p-6 bg-white border border-steel-200 shadow-soft space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-steel-100">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-amber-50 text-primary-dark flex items-center justify-center font-black">
+              <Inbox className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-sm sm:text-base font-black text-ink">
+                {lang === 'fr' ? 'Demandes de devis reçues (Leads)' : 'طلبات عروض الأسعار الواردة (Leads)'}
+              </h2>
+              <p className="text-[11px] text-steel-500">
+                {lang === 'fr'
+                  ? 'Toutes les demandes envoyées par les entreprises depuis votre vitrine publique'
+                  : 'جميع طلبات عروض الأسعار الواردة من مقاولات البناء عبر متجرك الإلكتروني'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="px-2.5 py-1 rounded-full bg-steel-100 text-steel-700 text-xs font-bold">
+              {leads.length} {lang === 'fr' ? 'demande(s)' : 'طلب'}
+            </span>
+            {leads.filter((l) => !l.is_contacted).length > 0 && (
+              <span className="px-2.5 py-1 rounded-full bg-amber-100 text-amber-900 text-xs font-black animate-pulse">
+                {leads.filter((l) => !l.is_contacted).length} {lang === 'fr' ? 'en attente' : 'بانتظار التواصل'}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {leads.length === 0 ? (
+          <div className="py-12 text-center text-steel-400 space-y-2">
+            <Inbox className="w-10 h-10 mx-auto text-steel-300" />
+            <p className="text-xs font-bold text-steel-600">
+              {lang === 'fr' ? 'Aucune demande de devis pour le moment' : 'لا توجد طلبات عروض أسعار جديدة حالياً'}
+            </p>
+            <p className="text-[11px] text-steel-400 max-w-sm mx-auto">
+              {lang === 'fr'
+                ? 'Partagez votre lien de vitrine sur WhatsApp ou les réseaux pour recevoir des demandes directes de chantiers.'
+                : 'شارك رابط متجرك أو رمز QR مع المقاولين وعبر مجموعات الواتساب لتلقي طلبات كراء مباشرة.'}
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {leads.map((lead) => {
+              const cleanPhone = lead.client_phone.replace(/\D/g, '');
+              const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(
+                `السلام عليكم سي ${lead.client_name}، نحن شركة ${companyName}. تلقينا طلبكم لعرض أسعار كراء الآليات عبر متجرنا على JADIJCB ويسعدنا خدمتكم.`
+              )}`;
+
+              return (
+                <div
+                  key={lead.id}
+                  className={`p-4 rounded-2xl border transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 ${
+                    lead.is_contacted
+                      ? 'bg-steel-50/70 border-steel-200 opacity-80'
+                      : 'bg-amber-50/40 border-amber-200/90 shadow-xs'
+                  }`}
+                >
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-black text-sm text-ink">{lead.client_name}</span>
+                      <span className="font-mono text-steel-600 font-bold" dir="ltr">
+                        {lead.client_phone}
+                      </span>
+                      {lead.city && (
+                        <span className="flex items-center gap-1 text-steel-500 text-[11px]">
+                          <MapPin className="w-3 h-3 text-primary-dark" />
+                          {lead.city}
+                        </span>
+                      )}
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          lead.is_contacted
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                            : 'bg-amber-100 text-amber-900 border border-amber-300'
+                        }`}
+                      >
+                        {lead.is_contacted
+                          ? (lang === 'fr' ? '✓ Contacté' : '✓ تم التواصل')
+                          : (lang === 'fr' ? '⏳ En attente' : '⏳ قيد الانتظار')}
+                      </span>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-steel-600 text-[11px]">
+                      {lead.machine && (
+                        <span>
+                          الآلية المطلوبة: <strong className="text-ink">{lead.machine.title_ar || lead.machine.title_fr}</strong>
+                        </span>
+                      )}
+                      {lead.rental_duration && (
+                        <span>
+                          المدة المتوقعة: <strong className="text-ink">{lead.rental_duration}</strong>
+                        </span>
+                      )}
+                      {lead.start_date && (
+                        <span>
+                          تاريخ البداية: <strong className="text-ink font-mono">{lead.start_date}</strong>
+                        </span>
+                      )}
+                      <span className="text-steel-400 font-mono text-[10px]">
+                        {lead.created_at?.slice(0, 16).replace('T', ' ')}
+                      </span>
+                    </div>
+
+                    {lead.notes && (
+                      <p className="text-steel-600 bg-white/70 p-2 rounded-xl border border-steel-200/60 text-[11px] leading-relaxed">
+                        &ldquo;{lead.notes}&rdquo;
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <a
+                      href={`tel:${lead.client_phone}`}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-ink text-white font-bold text-xs hover:bg-steel-800 transition-colors shadow-xs"
+                    >
+                      <Phone className="w-3.5 h-3.5 text-primary" />
+                      <span>{lang === 'fr' ? 'Appeler' : 'اتصال'}</span>
+                    </a>
+
+                    <a
+                      href={waUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-colors shadow-xs"
+                    >
+                      <MessageCircle className="w-3.5 h-3.5" />
+                      <span>WhatsApp</span>
+                    </a>
+
+                    <button
+                      type="button"
+                      onClick={() => handleToggleLead(lead.id)}
+                      className={`inline-flex items-center gap-1 px-3 py-2 rounded-xl border text-xs font-bold transition-colors cursor-pointer ${
+                        lead.is_contacted
+                          ? 'bg-white border-steel-300 text-steel-700 hover:bg-steel-100'
+                          : 'bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100'
+                      }`}
+                    >
+                      <UserCheck className="w-3.5 h-3.5" />
+                      <span>
+                        {lead.is_contacted
+                          ? (lang === 'fr' ? 'Remettre en attente' : 'إعادة للانتظار')
+                          : (lang === 'fr' ? 'Marquer contacté' : 'تحديد كـ تم التواصل')}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+
+      {/* QR Code Modal for Owner Storefront */}
+      <QrCodeModal
+        isOpen={isQrModalOpen}
+        onClose={() => setIsQrModalOpen(false)}
+        storeUrl={fullPublicUrl}
+        companyName={companyName}
+      />
     </div>
   );
 };

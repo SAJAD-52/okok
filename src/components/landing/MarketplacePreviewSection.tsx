@@ -16,6 +16,7 @@ import { formatPriceMAD } from '../../data/rentalTerms';
 import { useLanguage } from '../../hooks/useLanguage';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { Machine } from '../../types/database';
+import { machineStore } from '../../lib/machineStore';
 
 export const MarketplacePreviewSection: React.FC = () => {
   const { lang, isRTL } = useLanguage();
@@ -26,69 +27,77 @@ export const MarketplacePreviewSection: React.FC = () => {
 
   useEffect(() => {
     async function fetchPreviewMachines() {
-      if (!isSupabaseConfigured) {
-        setIsLoading(false);
-        return;
-      }
+      let mapped: Machine[] = [];
 
-      try {
-        const { data, error } = await supabase
-          .from('machines')
-          .select('*')
-          .eq('is_published', true)
-          .order('created_at', { ascending: false })
-          .limit(6);
+      if (isSupabaseConfigured) {
+        try {
+          const { data, error } = await supabase
+            .from('machines')
+            .select('*')
+            .eq('is_published', true)
+            .order('created_at', { ascending: false })
+            .limit(6);
 
-        if (!error && data && data.length > 0) {
-          const mapped: Machine[] = data.map((m: any) => ({
-            id: m.id,
-            owner_id: m.owner_id,
-            title_ar: m.title_ar,
-            title_fr: m.title_fr,
-            description_ar: m.description_ar,
-            description_fr: m.description_fr,
-            category: m.category,
-            category_id: m.category,
-            brand: m.brand,
-            model: m.model,
-            year: m.year,
-            listing_mode: m.listing_mode,
-            condition: m.condition || 'good',
-            city: m.city,
-            city_id: m.city,
-            lat: m.lat,
-            lng: m.lng,
-            location_lat: m.lat,
-            location_lng: m.lng,
-            rate_hourly: Number(m.hourly_rate) || 0,
-            rate_daily: Number(m.daily_rate) || 0,
-            rate_weekly: Number(m.weekly_rate) || 0,
-            sale_price: Number(m.sale_price) || 0,
-            currency: 'MAD',
-            with_operator: Boolean(m.with_operator),
-            fuel_included: Boolean(m.fuel_included),
-            delivery_available: Boolean(m.delivery_available),
-            status: 'available',
-            images: m.images?.length ? m.images : [
-              'https://images.unsplash.com/photo-1579829366248-204fe8413f31?w=800&q=80',
-            ],
-            specs: m.specs || {},
-            views_count: m.views_count || 0,
-            rating_avg: m.rating_avg || 0,
-            reviews_count: m.reviews_count || 0,
-            created_at: m.created_at,
-            updated_at: m.created_at,
-          }));
-          setMachines(mapped);
+          if (!error && data && data.length > 0) {
+            mapped = data.map((m: any) => ({
+              id: m.id,
+              owner_id: m.owner_id,
+              title_ar: m.title_ar,
+              title_fr: m.title_fr,
+              description_ar: m.description_ar,
+              description_fr: m.description_fr,
+              category: m.category,
+              category_id: m.category,
+              brand: m.brand,
+              model: m.model,
+              year: m.year,
+              listing_mode: m.listing_mode,
+              condition: m.condition || 'good',
+              city: m.city,
+              city_id: m.city,
+              lat: m.lat,
+              lng: m.lng,
+              location_lat: m.lat,
+              location_lng: m.lng,
+              rate_hourly: Number(m.hourly_rate) || 0,
+              rate_daily: Number(m.daily_rate) || 0,
+              rate_weekly: Number(m.weekly_rate) || 0,
+              sale_price: Number(m.sale_price) || 0,
+              currency: 'MAD',
+              with_operator: Boolean(m.with_operator),
+              fuel_included: Boolean(m.fuel_included),
+              delivery_available: Boolean(m.delivery_available),
+              status: 'available',
+              images: m.images?.length ? m.images : [
+                'https://images.unsplash.com/photo-1579829366248-204fe8413f31?w=800&q=80',
+              ],
+              specs: m.specs || {},
+              views_count: m.views_count || 0,
+              rating_avg: m.rating_avg || 0,
+              reviews_count: m.reviews_count || 0,
+              created_at: m.created_at,
+              updated_at: m.created_at,
+            }));
+          }
+        } catch (err) {
+          console.warn('Preview machines load notice:', err);
         }
-      } catch (err) {
-        console.warn('Preview machines load notice:', err);
-      } finally {
-        setIsLoading(false);
       }
+
+      const merged = machineStore.mergeMachines(mapped);
+      setMachines(merged.slice(0, 6));
+      setIsLoading(false);
     }
 
     fetchPreviewMachines();
+
+    const handleUpdate = () => {
+      fetchPreviewMachines();
+    };
+    window.addEventListener('jadijcb_machines_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('jadijcb_machines_updated', handleUpdate);
+    };
   }, []);
 
   return (

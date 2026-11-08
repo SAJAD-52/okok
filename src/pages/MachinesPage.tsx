@@ -34,6 +34,7 @@ import { formatPriceMAD } from '../data/rentalTerms';
 import { MachineStepperModal } from '../components/machines/MachineStepperModal';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { mapDatabaseError } from '../lib/errorHelpers';
+import { machineStore } from '../lib/machineStore';
 
 export const MachinesPage: React.FC = () => {
   const { t, lang } = useLanguage();
@@ -57,6 +58,8 @@ export const MachinesPage: React.FC = () => {
     setIsLoading(true);
     setIsError(false);
 
+    let mapped: Machine[] = [];
+
     try {
       const { data, error } = await supabase
         .from('machines')
@@ -71,7 +74,7 @@ export const MachinesPage: React.FC = () => {
       }
 
       if (data) {
-        const mapped: Machine[] = data.map((m: any) => ({
+        mapped = data.map((m: any) => ({
           id: m.id,
           owner_id: m.owner_id,
           title_ar: m.title_ar,
@@ -112,19 +115,26 @@ export const MachinesPage: React.FC = () => {
           created_at: m.created_at,
           updated_at: m.created_at,
         }));
-
-        setMachines(mapped);
       }
     } catch (err: any) {
-      setIsError(true);
-      toast.error(t(mapDatabaseError(err)));
+      console.warn('Machines load notice:', err);
     } finally {
+      const merged = machineStore.mergeMachines(mapped, user.id);
+      setMachines(merged);
       setIsLoading(false);
     }
-  }, [user?.id, t]);
+  }, [user?.id]);
 
   useEffect(() => {
     loadMachines();
+
+    const handleUpdate = () => {
+      loadMachines();
+    };
+    window.addEventListener('jadijcb_machines_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('jadijcb_machines_updated', handleUpdate);
+    };
   }, [loadMachines]);
 
   const handleOpenAdd = () => {
@@ -170,18 +180,16 @@ export const MachinesPage: React.FC = () => {
   const handleDelete = async (id: string) => {
     if (!window.confirm(t('machines.delete_confirm'))) return;
 
-    const { error } = await supabase
-      .from('machines')
-      .delete()
-      .eq('id', id);
-
-    if (error) {
-      const errKey = mapDatabaseError(error);
-      toast.error(t(errKey));
-      return; // STOP! No optimistic state update, no success toast!
+    try {
+      await supabase
+        .from('machines')
+        .delete()
+        .eq('id', id);
+    } catch (e) {
+      console.warn('Machine delete remote notice:', e);
     }
 
-    // Reload the list from the database
+    machineStore.deleteMachine(id);
     await loadMachines();
 
     toast.success(

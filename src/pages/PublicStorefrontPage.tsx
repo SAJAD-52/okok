@@ -50,180 +50,7 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { formatPriceMAD } from '../data/rentalTerms';
 import { toast } from '../components/ui/Toast';
 import { loadStorefrontBySlug } from '../lib/storefrontService';
-
-// Default rich Moroccan machinery fleet for Atlas Terrassement
-const SEED_STOREFRONT_MACHINES: Machine[] = [
-  {
-    id: 'mach_jcb_3cx_atlas',
-    owner_id: 'usr_owner_casa_01',
-    title_ar: 'جرافة هيدروليكية JCB 3CX Eco مجهزة',
-    title_fr: 'Tractopelle JCB 3CX Eco équipée',
-    description_ar: 'جرافة وتراكتور بيل JCB بحالة ممتازة، مجهزة ببيل خلفي قوي وشاحنة رافعة أمامية 4 في 1، مثالية لأعمال الحفر والردم في الأوراش.',
-    description_fr: 'Tractopelle JCB 3CX Eco en excellent état avec godet 4-en-1 et bras télescopique pour chantiers de terrassement.',
-    category: 'loader',
-    category_id: 'loader',
-    brand: 'JCB',
-    model: '3CX Eco',
-    year: 2023,
-    listing_mode: 'rent',
-    condition: 'excellent',
-    city: 'Casablanca (الدار البيضاء)',
-    city_id: 'casablanca',
-    lat: 33.5333,
-    lng: -7.6333,
-    location_lat: 33.5333,
-    location_lng: -7.6333,
-    rate_hourly: 350,
-    rate_daily: 2200,
-    rate_weekly: 13000,
-    hourly_rate: 350,
-    daily_rate: 2200,
-    weekly_rate: 13000,
-    currency: 'MAD',
-    with_operator: true,
-    fuel_included: false,
-    delivery_available: true,
-    status: 'available',
-    is_published: true,
-    images: [
-      'https://images.unsplash.com/photo-1579829366248-204fe8413f31?w=800&q=80',
-      'https://images.unsplash.com/photo-1581094288338-2314dddb7ece?w=800&q=80',
-    ],
-    specs: { operating_weight_ton: 8.5, engine_power_hp: 92, bucket_capacity_m3: 1.0 },
-    views_count: 142,
-    rating_avg: 4.9,
-    reviews_count: 18,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: 'mach_cat_320_atlas',
-    owner_id: 'usr_owner_casa_01',
-    title_ar: 'حفارة مجنزرة ثقيلة Caterpillar 320D2 GC',
-    title_fr: 'Pelleteuse sur chenilles Caterpillar 320D2 GC',
-    description_ar: 'حفارة هيدروليكية 21 طن مزودة بمطرقة هيدروليكية BRH لتكسير الصخور والحفر العميق للمباني والأساسات.',
-    description_fr: 'Pelleteuse 21 tonnes équipée BRH pour terrassement lourd, démolition et fondations profondes.',
-    category: 'excavator',
-    category_id: 'excavator',
-    brand: 'Caterpillar',
-    model: '320D2 GC',
-    year: 2022,
-    listing_mode: 'rent',
-    condition: 'good',
-    city: 'Casablanca - Tit Mellil (تيط مليل)',
-    city_id: 'casablanca',
-    lat: 33.557,
-    lng: -7.489,
-    location_lat: 33.557,
-    location_lng: -7.489,
-    rate_hourly: 500,
-    rate_daily: 3400,
-    rate_weekly: 21000,
-    hourly_rate: 500,
-    daily_rate: 3400,
-    weekly_rate: 21000,
-    currency: 'MAD',
-    with_operator: true,
-    fuel_included: true,
-    delivery_available: true,
-    status: 'available',
-    is_published: true,
-    images: [
-      'https://images.unsplash.com/photo-1581094288338-2314dddb7ece?w=800&q=80',
-      'https://images.unsplash.com/photo-1579829366248-204fe8413f31?w=800&q=80',
-    ],
-    specs: { operating_weight_ton: 21.5, engine_power_hp: 145, bucket_capacity_m3: 1.2 },
-    views_count: 98,
-    rating_avg: 4.8,
-    reviews_count: 14,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: 'mach_volvo_fmx_atlas',
-    owner_id: 'usr_owner_casa_01',
-    title_ar: 'شاحنة قلاب لنقل الركام Volvo FMX 8x4 Benne',
-    title_fr: 'Camion Benne 8x4 Volvo FMX 460',
-    description_ar: 'شاحنة نقل تراب وركام وأسفلت حمولة 22 متر مكعب 8x4 قوية للأوراش الوعرة والطرق السريعة.',
-    description_fr: 'Camion benne 8x4 22m3 pour transport de déblais, remblais et agrégats sur chantiers.',
-    category: 'truck',
-    category_id: 'truck',
-    brand: 'Volvo',
-    model: 'FMX 460',
-    year: 2021,
-    listing_mode: 'rent',
-    condition: 'excellent',
-    city: 'Mohammedia (المحمدية)',
-    city_id: 'mohammedia',
-    lat: 33.686,
-    lng: -7.3829,
-    location_lat: 33.686,
-    location_lng: -7.3829,
-    rate_hourly: 380,
-    rate_daily: 2600,
-    rate_weekly: 16000,
-    hourly_rate: 380,
-    daily_rate: 2600,
-    weekly_rate: 16000,
-    currency: 'MAD',
-    with_operator: true,
-    fuel_included: false,
-    delivery_available: true,
-    status: 'available',
-    is_published: true,
-    images: [
-      'https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?w=800&q=80',
-    ],
-    specs: { operating_weight_ton: 32, engine_power_hp: 460 },
-    views_count: 75,
-    rating_avg: 4.9,
-    reviews_count: 9,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: 'mach_bomag_213_atlas',
-    owner_id: 'usr_owner_casa_01',
-    title_ar: 'مدحلة اهتزازية لدمج التربة Bomag BW 213',
-    title_fr: 'Rouleau Compacteur Monobille Bomag BW 213 D-5',
-    description_ar: 'مدحلة وضغاطة 12 طن لدمج طبقات الردم وتسوية التربة وقواعد الأسفلت للطرق والساحات الصناعية.',
-    description_fr: 'Compacteur vibrant monocylindre 12 tonnes pour compactage de sol et sous-couches routières.',
-    category: 'compactor',
-    category_id: 'compactor',
-    brand: 'Bomag',
-    model: 'BW 213 D-5',
-    year: 2022,
-    listing_mode: 'rent',
-    condition: 'good',
-    city: 'Nouaceur - Bouskoura (النواصر - بوسكورة)',
-    city_id: 'casablanca',
-    lat: 33.3644,
-    lng: -7.5849,
-    location_lat: 33.3644,
-    location_lng: -7.5849,
-    rate_hourly: 280,
-    rate_daily: 1800,
-    rate_weekly: 11000,
-    hourly_rate: 280,
-    daily_rate: 1800,
-    weekly_rate: 11000,
-    currency: 'MAD',
-    with_operator: true,
-    fuel_included: false,
-    delivery_available: true,
-    status: 'available',
-    is_published: true,
-    images: [
-      'https://images.unsplash.com/photo-1508873696983-2df5293cb32b?w=800&q=80',
-    ],
-    specs: { operating_weight_ton: 12.6, engine_power_hp: 130 },
-    views_count: 62,
-    rating_avg: 4.7,
-    reviews_count: 6,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-];
+import { machineStore } from '../lib/machineStore';
 
 export const PublicStorefrontPage: React.FC = () => {
   const { slug } = useParams<{ slug: string }>();
@@ -352,10 +179,8 @@ export const PublicStorefrontPage: React.FC = () => {
         }
       }
 
-      // If owner has no published machines in DB yet, display the default fleet
-      if (liveMachines.length === 0) {
-        liveMachines = [...SEED_STOREFRONT_MACHINES];
-      }
+      // Merge live machines from DB with real owner machines in machineStore
+      liveMachines = machineStore.mergeMachines(liveMachines, sfData.owner_id);
 
       setMachines(liveMachines);
       setSelectedMapMachine(liveMachines[0] || null);
@@ -369,6 +194,14 @@ export const PublicStorefrontPage: React.FC = () => {
 
   useEffect(() => {
     loadStorefront();
+
+    const handleMachineUpdate = () => {
+      loadStorefront();
+    };
+    window.addEventListener('jadijcb_machines_updated', handleMachineUpdate);
+    return () => {
+      window.removeEventListener('jadijcb_machines_updated', handleMachineUpdate);
+    };
   }, [loadStorefront]);
 
   // Filtered Machines based on Search and Filter controls
@@ -412,23 +245,23 @@ export const PublicStorefrontPage: React.FC = () => {
 
   // Company Identity Data
   const company = {
-    name: storefrontData?.profiles?.company_name || 'Atlas Terrassement & Travaux S.A.R.L.',
-    ownerName: storefrontData?.profiles?.full_name || 'كريم بنجلون',
-    ownerId: storefrontData?.profiles?.id || storefrontData?.owner_id || 'usr_owner_casa_01',
-    city: storefrontData?.profiles?.city || 'الدار البيضاء (Casablanca)',
-    ice: storefrontData?.profiles?.ice_number || '001928471000032',
-    rc: storefrontData?.profiles?.rc_number || '349102',
-    phone: storefrontData?.whatsapp || storefrontData?.profiles?.phone || '+212661234567',
-    whatsapp: storefrontData?.whatsapp || storefrontData?.profiles?.phone || '+212661234567',
+    name: storefrontData?.profiles?.company_name || (lang === 'fr' ? 'Entreprise BTP Partenaire' : 'مقاولة الأشغال والآليات المعتمدة'),
+    ownerName: storefrontData?.profiles?.full_name || (lang === 'fr' ? 'Partenaire JADIJCB' : 'شريك معتمد'),
+    ownerId: storefrontData?.profiles?.id || storefrontData?.owner_id || '',
+    city: storefrontData?.profiles?.city || (lang === 'fr' ? 'Casablanca' : 'الدار البيضاء'),
+    ice: storefrontData?.profiles?.ice_number || '',
+    rc: storefrontData?.profiles?.rc_number || '',
+    phone: storefrontData?.whatsapp || storefrontData?.profiles?.phone || '+212600000000',
+    whatsapp: storefrontData?.whatsapp || storefrontData?.profiles?.phone || '+212600000000',
     banner:
       storefrontData?.banner_url ||
       'https://images.unsplash.com/photo-1541888946425-d0fbb186c5f7?w=1600&q=80',
     about_ar:
       storefrontData?.about_ar ||
-      'شركة أطلس للأشغال العمومية والترابية، رائدة في كراء وتأجير آليات الحفر والتسوية الثقيلة مع سائقين معتمدين.',
+      'شركة متخصصة في كراء وتأجير آليات ومعدات الأشغال العمومية والبناء مع سائقين معتمدين وصيانة دورية لضمان استمرارية الأوراش بأعلى جودة.',
     about_fr:
       storefrontData?.about_fr ||
-      'Atlas Terrassement & Travaux Publics S.A.R.L. : Partenaire privilégié des chantiers BTP au Maroc.',
+      'Entreprise spécialisée dans la location d\'engins lourds et matériels de BTP avec opérateurs qualifiés et maintenance sur site.',
     theme_color: storefrontData?.theme_color || '#FFB400',
     avatar: storefrontData?.avatar_url || storefrontData?.profiles?.avatar_url || null,
   };

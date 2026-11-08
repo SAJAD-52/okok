@@ -163,7 +163,7 @@ export const BookingsPage: React.FC = () => {
       console.warn('Bookings load error:', err);
       // Fallback to local cache even on total error
       const cached = bookingStore.getCachedBookings().filter(
-        (b) => b.owner_id === user?.id || !b.owner_id
+        (b) => b.owner_id === user?.id
       );
       setBookings(cached);
     } finally {

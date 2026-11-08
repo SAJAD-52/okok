@@ -23,8 +23,9 @@ import { MarketplaceMap } from '../components/marketplace/MarketplaceMap';
 import { Skeleton } from '../components/ui/Skeleton';
 import { Button } from '../components/ui/Button';
 import { useLanguage } from '../hooks/useLanguage';
-import { Machine } from '../types/database';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { machineStore } from '../lib/machineStore';
+import { Machine } from '../types/database';
 
 const PAGE_SIZE = 12;
 
@@ -49,101 +50,104 @@ export const MarketplacePage: React.FC = () => {
   const deliveryParam = searchParams.get('delivery') === 'true';
   const sortParam = searchParams.get('sort') || 'newest';
 
-  // Load from Supabase with range queries
+  // Load from Supabase with range queries & merge machineStore
   const loadSupabaseMachines = useCallback(async () => {
-    if (!isSupabaseConfigured) {
-      setIsLoading(false);
-      return;
-    }
-
     setIsLoading(true);
     setIsError(false);
 
-    try {
-      let query = supabase
-        .from('machines')
-        .select('*', { count: 'exact' })
-        .eq('is_published', true);
+    let mapped: Machine[] = [];
 
-      if (modeParam && modeParam !== 'all') {
-        query = query.eq('listing_mode', modeParam);
-      }
-      if (categoryParam) {
-        query = query.eq('category', categoryParam);
-      }
-      if (cityParam) {
-        query = query.ilike('city', `%${cityParam}%`);
-      }
+    if (isSupabaseConfigured) {
+      try {
+        let query = supabase
+          .from('machines')
+          .select('*', { count: 'exact' })
+          .eq('is_published', true);
 
-      // Ordering
-      if (sortParam === 'price_asc') {
-        query = query.order('daily_rate', { ascending: true, nullsFirst: false });
-      } else if (sortParam === 'price_desc') {
-        query = query.order('daily_rate', { ascending: false, nullsFirst: false });
-      } else {
-        query = query.order('created_at', { ascending: false });
+        if (modeParam && modeParam !== 'all') {
+          query = query.eq('listing_mode', modeParam);
+        }
+        if (categoryParam) {
+          query = query.eq('category', categoryParam);
+        }
+        if (cityParam) {
+          query = query.ilike('city', `%${cityParam}%`);
+        }
+
+        // Ordering
+        if (sortParam === 'price_asc') {
+          query = query.order('daily_rate', { ascending: true, nullsFirst: false });
+        } else if (sortParam === 'price_desc') {
+          query = query.order('daily_rate', { ascending: false, nullsFirst: false });
+        } else {
+          query = query.order('created_at', { ascending: false });
+        }
+
+        const from = 0;
+        const to = page * PAGE_SIZE - 1;
+        query = query.range(from, to);
+
+        const { data, error } = await query;
+        if (!error && data) {
+          mapped = data.map((m: any) => ({
+            id: m.id,
+            owner_id: m.owner_id,
+            title_ar: m.title_ar,
+            title_fr: m.title_fr,
+            description_ar: m.description_ar,
+            description_fr: m.description_fr,
+            category: m.category,
+            category_id: m.category,
+            brand: m.brand,
+            model: m.model,
+            year: m.year,
+            listing_mode: m.listing_mode,
+            condition: m.condition || 'good',
+            city: m.city,
+            city_id: m.city,
+            lat: m.lat,
+            lng: m.lng,
+            location_lat: m.lat,
+            location_lng: m.lng,
+            rate_hourly: Number(m.hourly_rate) || 0,
+            rate_daily: Number(m.daily_rate) || 0,
+            rate_weekly: Number(m.weekly_rate) || 0,
+            sale_price: Number(m.sale_price) || 0,
+            currency: 'MAD',
+            with_operator: Boolean(m.with_operator),
+            fuel_included: Boolean(m.fuel_included),
+            delivery_available: Boolean(m.delivery_available),
+            status: 'available',
+            images: m.images || [],
+            specs: m.specs || {},
+            views_count: m.views_count || 0,
+            rating_avg: m.rating_avg || 0,
+            reviews_count: m.reviews_count || 0,
+            created_at: m.created_at,
+            updated_at: m.created_at,
+          }));
+        }
+      } catch (err) {
+        console.warn('Marketplace load notice:', err);
       }
-
-      const from = 0;
-      const to = page * PAGE_SIZE - 1;
-      query = query.range(from, to);
-
-      const { data, error } = await query;
-      if (error) {
-        setIsError(true);
-        return;
-      }
-
-      if (data) {
-        const mapped: Machine[] = data.map((m: any) => ({
-          id: m.id,
-          owner_id: m.owner_id,
-          title_ar: m.title_ar,
-          title_fr: m.title_fr,
-          description_ar: m.description_ar,
-          description_fr: m.description_fr,
-          category: m.category,
-          category_id: m.category,
-          brand: m.brand,
-          model: m.model,
-          year: m.year,
-          listing_mode: m.listing_mode,
-          condition: m.condition || 'good',
-          city: m.city,
-          city_id: m.city,
-          lat: m.lat,
-          lng: m.lng,
-          location_lat: m.lat,
-          location_lng: m.lng,
-          rate_hourly: Number(m.hourly_rate) || 0,
-          rate_daily: Number(m.daily_rate) || 0,
-          rate_weekly: Number(m.weekly_rate) || 0,
-          sale_price: Number(m.sale_price) || 0,
-          currency: 'MAD',
-          with_operator: Boolean(m.with_operator),
-          fuel_included: Boolean(m.fuel_included),
-          delivery_available: Boolean(m.delivery_available),
-          status: 'available',
-          images: m.images || [],
-          specs: m.specs || {},
-          views_count: m.views_count || 0,
-          rating_avg: m.rating_avg || 0,
-          reviews_count: m.reviews_count || 0,
-          created_at: m.created_at,
-          updated_at: m.created_at,
-        }));
-
-        setMachines(mapped);
-      }
-    } catch (err) {
-      setIsError(true);
-    } finally {
-      setIsLoading(false);
     }
+
+    // Always merge real machines created by owners
+    const finalMachines = machineStore.mergeMachines(mapped);
+    setMachines(finalMachines);
+    setIsLoading(false);
   }, [modeParam, categoryParam, cityParam, sortParam, page]);
 
   useEffect(() => {
     loadSupabaseMachines();
+
+    const handleUpdate = () => {
+      loadSupabaseMachines();
+    };
+    window.addEventListener('jadijcb_machines_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('jadijcb_machines_updated', handleUpdate);
+    };
   }, [loadSupabaseMachines]);
 
   // Client-side filtering & sorting

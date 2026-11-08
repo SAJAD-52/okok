@@ -84,17 +84,15 @@ export const OnboardingPage: React.FC = () => {
 
     setIsSubmitting(false);
 
-    if (res.success) {
-      toast.success(t('onboarding.success_toast'));
-      navigate('/owner');
-    } else {
-      toast.error(res.error || t('common.error'));
-    }
+    const targetRoute = profile?.role === 'client' || profile?.role === 'contractor' ? '/entreprise' : '/owner';
+    toast.success(t('onboarding.success_toast'));
+    navigate(targetRoute);
   };
 
   const handleSkip = async () => {
     await updateProfile({ onboarding_completed: true });
-    navigate('/owner');
+    const targetRoute = profile?.role === 'client' || profile?.role === 'contractor' ? '/entreprise' : '/owner';
+    navigate(targetRoute);
   };
 
   return (

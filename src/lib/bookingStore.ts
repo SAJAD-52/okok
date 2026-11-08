@@ -9,14 +9,25 @@ import { supabase } from './supabase';
 const CACHE_KEY = 'jadijcb_cached_bookings';
 
 export const bookingStore = {
-  // Get all cached bookings
+  // Get all cached bookings (filtering out any fake/seed items)
   getCachedBookings(): Booking[] {
     try {
       const raw = localStorage.getItem(CACHE_KEY);
       if (!raw) return [];
-      return JSON.parse(raw);
+      const list: Booking[] = JSON.parse(raw);
+      return list.filter((b) => !b.id?.includes('seed') && !b.id?.includes('mock'));
     } catch {
       return [];
+    }
+  },
+
+  // Clear all cached bookings
+  clearAllBookings(): void {
+    try {
+      localStorage.removeItem(CACHE_KEY);
+      window.dispatchEvent(new CustomEvent('jadijcb_booking_event', { detail: { action: 'wiped' } }));
+    } catch (e) {
+      console.warn('Could not clear cached bookings:', e);
     }
   },
 

@@ -33,6 +33,7 @@ import { MapLocationPicker } from './MapLocationPicker';
 import { compressImage } from '../../lib/imageCompressor';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { mapDatabaseError } from '../../lib/errorHelpers';
+import { machineStore } from '../../lib/machineStore';
 
 interface MachineStepperModalProps {
   isOpen: boolean;
@@ -225,9 +226,9 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
       rating_avg: machineToEdit?.rating_avg || 4.9,
       reviews_count: machineToEdit?.reviews_count || 3,
       owner: {
-        full_name: profile?.full_name || 'Karim Benjelloun',
-        company_name: profile?.company_name || 'Atlas Terrassement S.A.R.L.',
-        phone: profile?.phone || '+212661234567',
+        full_name: profile?.full_name || 'مالك آليات معتمد',
+        company_name: profile?.company_name || 'مقاولة تأجير معتمدة',
+        phone: profile?.phone || '+212600000000',
         whatsapp_verified: true,
       },
       created_at: machineToEdit?.created_at || new Date().toISOString(),
@@ -340,6 +341,16 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
         console.warn('Machine remote save warning:', err);
       }
     }
+
+    if (!machineData.id) {
+      machineData.id = `mach_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    }
+    if (user?.id) {
+      machineData.owner_id = user.id;
+    }
+
+    // Save to machineStore for real-time local and cross-portal synchronization
+    machineStore.saveMachine(machineData);
 
     setIsSubmitting(false);
     onSave(machineData);

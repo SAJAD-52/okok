@@ -46,6 +46,7 @@ import { useAuth } from '../hooks/useAuth';
 import { formatPriceMAD } from '../data/rentalTerms';
 import { MachineCard } from '../components/marketplace/MachineCard';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { machineStore } from '../lib/machineStore';
 import { Machine } from '../types/database';
 
 export const MachineDetailPage: React.FC = () => {
@@ -69,9 +70,9 @@ export const MachineDetailPage: React.FC = () => {
   const [selectedDuration, setSelectedDuration] = useState(3);
   const [startDate, setStartDate] = useState('2026-03-10');
 
-  // Load machine from Supabase
+  // Load machine from Supabase with machineStore cache fallback
   const loadMachineData = async () => {
-    if (!isSupabaseConfigured || !id) {
+    if (!id) {
       setIsLoading(false);
       return;
     }
@@ -80,13 +81,30 @@ export const MachineDetailPage: React.FC = () => {
     setIsError(false);
 
     try {
-      const { data, error } = await supabase
-        .from('machines')
-        .select('*, profiles(full_name, company_name, phone, city)')
-        .eq('id', id)
-        .maybeSingle();
+      let data: any = null;
+      if (isSupabaseConfigured) {
+        const res = await supabase
+          .from('machines')
+          .select('*, profiles(full_name, company_name, phone, city)')
+          .eq('id', id)
+          .maybeSingle();
+        data = res.data;
+      }
 
-      if (error || !data) {
+      if (!data) {
+        // Fallback to locally saved/cached machines
+        const localCached = machineStore.getCachedMachines().find((m) => m.id === id);
+        if (localCached) {
+          setMachine(localCached);
+          const others = machineStore
+            .getCachedMachines()
+            .filter((m) => m.id !== id && m.category === localCached.category)
+            .slice(0, 3);
+          setSimilarMachines(others);
+          setIsLoading(false);
+          return;
+        }
+
         setIsError(true);
         return;
       }

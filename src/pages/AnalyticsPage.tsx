@@ -52,6 +52,7 @@ import { useAuth } from '../hooks/useAuth';
 import { Machine, Booking, MachineExpense, ExpenseCategory } from '../types/database';
 import { bookingStore } from '../lib/bookingStore';
 import { expenseStore } from '../lib/expenseStore';
+import { machineStore } from '../lib/machineStore';
 import { supabase } from '../lib/supabase';
 import { AddExpenseModal } from '../components/analytics/AddExpenseModal';
 import { toast } from '../components/ui/Toast';
@@ -103,6 +104,7 @@ export const AnalyticsPage: React.FC = () => {
           } as Machine));
         }
       }
+      ownerMachines = machineStore.mergeMachines(ownerMachines, userId);
       setMachines(ownerMachines);
 
       // 2. Fetch bookings and merge with bookingStore

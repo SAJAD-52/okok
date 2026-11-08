@@ -34,6 +34,7 @@ import {
   saveStorefrontData,
   LOCAL_ACTIVE_SLUG_KEY,
 } from '../lib/storefrontService';
+import { machineStore } from '../lib/machineStore';
 
 export const StorefrontPage: React.FC = () => {
   const { t, lang, isRTL } = useLanguage();
@@ -90,17 +91,20 @@ export const StorefrontPage: React.FC = () => {
           if (sf.theme_color) setThemeColor(sf.theme_color);
         }
 
+        let mList: any[] = [];
         if (isSupabaseConfigured && user?.id) {
           const { data: mData } = await supabase
             .from('machines')
             .select('*')
             .eq('owner_id', user.id)
-            .limit(2);
+            .limit(4);
 
           if (mData && mData.length > 0) {
-            setPreviewMachines(mData);
+            mList = mData;
           }
         }
+        const realMachines = machineStore.mergeMachines(mList, user?.id);
+        setPreviewMachines(realMachines.slice(0, 4));
       } catch (err) {
         console.warn('Storefront load notice:', err);
       }

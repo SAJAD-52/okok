@@ -3,7 +3,7 @@
 // Fully Powered by TanStack Query & Supabase Real Database Reads
 // ============================================================================
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -38,6 +38,7 @@ import { ProfileSettingsModal } from '../components/profile/ProfileSettingsModal
 import { platformSettingsStore, PlatformSettings } from '../lib/platformSettings';
 import { Machine, Booking } from '../types/database';
 import { bookingStore } from '../lib/bookingStore';
+import { machineStore } from '../lib/machineStore';
 import { toast } from '../components/ui/Toast';
 
 export const DashboardOverviewPage: React.FC = () => {
@@ -81,55 +82,64 @@ export const DashboardOverviewPage: React.FC = () => {
   } = useQuery<Machine[]>({
     queryKey: ['owner_machines', userId],
     queryFn: async () => {
-      if (!isSupabaseConfigured || !userId) return [];
-      const { data, error } = await supabase
-        .from('machines')
-        .select('*')
-        .eq('owner_id', userId)
-        .order('created_at', { ascending: false });
+      let mapped: Machine[] = [];
+      if (isSupabaseConfigured && userId) {
+        try {
+          const { data, error } = await supabase
+            .from('machines')
+            .select('*')
+            .eq('owner_id', userId)
+            .order('created_at', { ascending: false });
 
-      if (error) throw error;
-      return (data || []).map((m: any) => ({
-        id: m.id,
-        owner_id: m.owner_id,
-        title_ar: m.title_ar,
-        title_fr: m.title_fr,
-        description_ar: m.description_ar,
-        description_fr: m.description_fr,
-        category: m.category,
-        category_id: m.category,
-        brand: m.brand,
-        model: m.model,
-        year: m.year,
-        listing_mode: m.listing_mode,
-        condition: m.condition || 'good',
-        city: m.city,
-        city_id: m.city,
-        lat: m.lat,
-        lng: m.lng,
-        location_lat: m.lat,
-        location_lng: m.lng,
-        rate_hourly: Number(m.hourly_rate) || 0,
-        rate_daily: Number(m.daily_rate) || 0,
-        rate_weekly: Number(m.weekly_rate) || 0,
-        hourly_rate: Number(m.hourly_rate) || 0,
-        daily_rate: Number(m.daily_rate) || 0,
-        weekly_rate: Number(m.weekly_rate) || 0,
-        sale_price: Number(m.sale_price) || 0,
-        currency: 'MAD',
-        with_operator: Boolean(m.with_operator),
-        fuel_included: Boolean(m.fuel_included),
-        delivery_available: Boolean(m.delivery_available),
-        status: m.is_published ? 'available' : 'inactive',
-        is_published: m.is_published,
-        images: m.images || [],
-        specs: m.specs || {},
-        views_count: m.views_count || 0,
-        rating_avg: m.rating_avg || 0,
-        reviews_count: m.reviews_count || 0,
-        created_at: m.created_at,
-        updated_at: m.created_at,
-      }));
+          if (!error && data) {
+            mapped = data.map((m: any) => ({
+              id: m.id,
+              owner_id: m.owner_id,
+              title_ar: m.title_ar,
+              title_fr: m.title_fr,
+              description_ar: m.description_ar,
+              description_fr: m.description_fr,
+              category: m.category,
+              category_id: m.category,
+              brand: m.brand,
+              model: m.model,
+              year: m.year,
+              listing_mode: m.listing_mode,
+              condition: m.condition || 'good',
+              city: m.city,
+              city_id: m.city,
+              lat: m.lat,
+              lng: m.lng,
+              location_lat: m.lat,
+              location_lng: m.lng,
+              rate_hourly: Number(m.hourly_rate) || 0,
+              rate_daily: Number(m.daily_rate) || 0,
+              rate_weekly: Number(m.weekly_rate) || 0,
+              hourly_rate: Number(m.hourly_rate) || 0,
+              daily_rate: Number(m.daily_rate) || 0,
+              weekly_rate: Number(m.weekly_rate) || 0,
+              sale_price: Number(m.sale_price) || 0,
+              currency: 'MAD',
+              with_operator: Boolean(m.with_operator),
+              fuel_included: Boolean(m.fuel_included),
+              delivery_available: Boolean(m.delivery_available),
+              status: m.is_published ? 'available' : 'inactive',
+              is_published: m.is_published,
+              images: m.images || [],
+              specs: m.specs || {},
+              views_count: m.views_count || 0,
+              rating_avg: m.rating_avg || 0,
+              reviews_count: m.reviews_count || 0,
+              created_at: m.created_at,
+              updated_at: m.created_at,
+            }));
+          }
+        } catch (e) {
+          console.warn('Dashboard machines query error:', e);
+        }
+      }
+
+      return machineStore.mergeMachines(mapped, userId);
     },
     enabled: Boolean(userId),
   });
@@ -263,8 +273,21 @@ export const DashboardOverviewPage: React.FC = () => {
     };
   }, [bookings]);
 
-  const companyName = profile?.company_name || 'Atlas Terrassement & Travaux S.A.R.L.';
-  const ownerName = profile?.full_name || 'كريم بنجلون';
+  const companyName = profile?.company_name || profile?.full_name || (lang === 'fr' ? 'Entreprise BTP' : 'مقاولة الأشغال');
+  const ownerName = profile?.full_name || profile?.phone || (lang === 'fr' ? 'Partenaire' : 'الشريك');
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      refetchMachines();
+      refetchBookings();
+    };
+    window.addEventListener('jadijcb_machines_updated', handleUpdate);
+    window.addEventListener('jadijcb_booking_event', handleUpdate);
+    return () => {
+      window.removeEventListener('jadijcb_machines_updated', handleUpdate);
+      window.removeEventListener('jadijcb_booking_event', handleUpdate);
+    };
+  }, [refetchMachines, refetchBookings]);
 
   const handleMachineCreated = () => {
     refetchMachines();

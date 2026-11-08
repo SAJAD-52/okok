@@ -34,6 +34,7 @@ import { calculateDistanceKm, estimateDeliveryMinutes, formatDistanceKm, formatE
 import { useLanguage } from '../hooks/useLanguage';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabase';
+import { machineStore } from '../lib/machineStore';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Card } from '../components/ui/Card';
@@ -197,15 +198,25 @@ export const SiteRadarMapPage: React.FC = () => {
           updated_at: m.updated_at || m.created_at,
         }));
 
-        setMachines(mapped);
+        const merged = machineStore.mergeMachines(mapped);
+        setMachines(merged);
       } catch (err) {
         console.warn('Failed loading machines:', err);
+        setMachines(machineStore.getCachedMachines());
       } finally {
         setIsLoading(false);
       }
     }
 
     loadMachines();
+
+    const handleUpdate = () => {
+      loadMachines();
+    };
+    window.addEventListener('jadijcb_machines_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('jadijcb_machines_updated', handleUpdate);
+    };
   }, []);
 
   // Compute distance and sort machines from nearest to furthest relative to site location

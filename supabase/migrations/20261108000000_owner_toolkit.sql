@@ -4,9 +4,14 @@
 -- clients, payments, leads, and super admin oversight.
 -- ============================================================================
 
--- 1. Profiles additions: last_active_at & activation_at
+-- 1. Profiles additions: last_active_at, activation_at, onboarding_completed, ice_number, avatar_url, banner_url, storefront_slug
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS last_active_at timestamptz;
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS activation_at timestamptz;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS onboarding_completed boolean DEFAULT true;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS ice_number text DEFAULT '';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS avatar_url text DEFAULT '';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS banner_url text DEFAULT '';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS storefront_slug text DEFAULT '';
 
 -- 2. Business Profiles Table (/app/settings/business)
 CREATE TABLE IF NOT EXISTS public.business_profiles (
@@ -227,5 +232,44 @@ ALTER TABLE public.machine_expenses ADD COLUMN IF NOT EXISTS hours_or_km numeric
 ALTER TABLE public.machine_expenses ADD COLUMN IF NOT EXISTS next_due_date date;
 ALTER TABLE public.machine_expenses ADD COLUMN IF NOT EXISTS expense_type text DEFAULT 'expense';
 
--- 9. Refresh Schema Cache
+-- 9. Real-time Notifications Table
+CREATE TABLE IF NOT EXISTS public.notifications (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  title_ar text NOT NULL DEFAULT '',
+  title_fr text NOT NULL DEFAULT '',
+  body_ar text NOT NULL DEFAULT '',
+  body_fr text NOT NULL DEFAULT '',
+  type text NOT NULL DEFAULT 'booking_request',
+  data jsonb DEFAULT '{}'::jsonb,
+  is_read boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON public.notifications(user_id);
+
+ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+
+DO $$ BEGIN
+  DROP POLICY IF EXISTS "Users can view own notifications" ON public.notifications;
+  CREATE POLICY "Users can view own notifications" ON public.notifications
+    FOR SELECT USING (
+      auth.uid() = user_id
+      OR EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
+    );
+
+  DROP POLICY IF EXISTS "Public and users can insert notifications" ON public.notifications;
+  CREATE POLICY "Public and users can insert notifications" ON public.notifications
+    FOR INSERT WITH CHECK (true);
+
+  DROP POLICY IF EXISTS "Users can update own notifications" ON public.notifications;
+  CREATE POLICY "Users can update own notifications" ON public.notifications
+    FOR UPDATE USING (
+      auth.uid() = user_id
+      OR EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
+    );
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+-- 10. Refresh Schema Cache
 NOTIFY pgrst, 'reload schema';

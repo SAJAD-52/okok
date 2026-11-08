@@ -130,19 +130,20 @@ export const StorefrontPage: React.FC = () => {
           if (sf.theme_color) setThemeColor(sf.theme_color);
         }
 
+        const effectiveOwnerId = user?.id || profile?.id;
         let mList: any[] = [];
-        if (isSupabaseConfigured && user?.id) {
+        if (isSupabaseConfigured && effectiveOwnerId) {
           const { data: mData } = await supabase
             .from('machines')
             .select('*')
-            .eq('owner_id', user.id)
-            .limit(4);
+            .eq('owner_id', effectiveOwnerId)
+            .limit(10);
 
           if (mData && mData.length > 0) {
             mList = mData;
           }
         }
-        const realMachines = machineStore.mergeMachines(mList, user?.id);
+        const realMachines = machineStore.mergeMachines(mList, effectiveOwnerId);
         setPreviewMachines(realMachines.slice(0, 4));
       } catch (err) {
         console.warn('Storefront load notice:', err);
@@ -519,6 +520,10 @@ export const StorefrontPage: React.FC = () => {
                 src={bannerUrl || 'https://images.unsplash.com/photo-1541888946425-d0fbb186c5f7?w=800&q=80'}
                 alt="Bannière"
                 className="w-full h-36 object-cover bg-ink"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).src =
+                    'https://images.unsplash.com/photo-1541888946425-d0fbb186c5f7?w=800&q=80';
+                }}
               />
               <div className="absolute inset-0 bg-gradient-to-t from-ink/90 via-ink/40 to-transparent" />
 
@@ -530,15 +535,22 @@ export const StorefrontPage: React.FC = () => {
                       src={avatarUrl}
                       alt={companyName}
                       className="w-14 h-14 rounded-2xl border-2 border-white object-cover shadow-lg shrink-0 bg-white"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLElement).style.display = 'none';
+                        if (e.currentTarget.nextElementSibling) {
+                          (e.currentTarget.nextElementSibling as HTMLElement).style.display = 'flex';
+                        }
+                      }}
                     />
-                  ) : (
-                    <div
-                      className="w-14 h-14 rounded-2xl border-2 border-white flex items-center justify-center font-black text-ink text-base shadow-lg shrink-0"
-                      style={{ backgroundColor: themeColor }}
-                    >
-                      {companyName.slice(0, 2).toUpperCase()}
-                    </div>
-                  )}
+                  ) : null}
+                  <div
+                    className={`w-14 h-14 rounded-2xl border-2 border-white flex items-center justify-center font-black text-ink text-base shadow-lg shrink-0 ${
+                      avatarUrl ? 'hidden' : 'flex'
+                    }`}
+                    style={{ backgroundColor: themeColor }}
+                  >
+                    {companyName.slice(0, 2).toUpperCase()}
+                  </div>
 
                   <div className="text-white">
                     <h3 className="font-black text-sm truncate max-w-[190px]">

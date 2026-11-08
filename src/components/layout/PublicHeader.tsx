@@ -66,8 +66,20 @@ export const PublicHeader: React.FC = () => {
               size="sm"
               variant="outline"
               onClick={() => navigate(isContractor ? '/entreprise' : '/owner')}
-              className="hidden sm:inline-flex text-xs font-bold"
-              leftIcon={isContractor ? <HardHat className="w-4 h-4 text-primary" /> : <User className="w-4 h-4" />}
+              className="hidden sm:inline-flex text-xs font-bold items-center gap-2"
+              leftIcon={
+                profile?.avatar_url ? (
+                  <img
+                    src={profile.avatar_url}
+                    alt={profile.full_name || 'avatar'}
+                    className="w-5 h-5 rounded-full object-cover border border-primary shrink-0"
+                  />
+                ) : isContractor ? (
+                  <HardHat className="w-4 h-4 text-primary" />
+                ) : (
+                  <User className="w-4 h-4" />
+                )
+              }
             >
               {isContractor
                 ? (profile?.company_name || (lang === 'fr' ? 'Mon Entreprise' : 'حساب المقاولة'))

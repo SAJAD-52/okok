@@ -136,17 +136,19 @@ export const PublicStorefrontPage: React.FC = () => {
       setStorefrontData(sfData);
 
       // Fetch live machines from Supabase
+      // Fetch live machines from Supabase for this owner
       let liveMachines: Machine[] = [];
       if (isSupabaseConfigured && sfData.owner_id) {
         const { data: mData } = await supabase
           .from('machines')
           .select('*')
           .eq('owner_id', sfData.owner_id)
-          .eq('is_published', true)
           .order('created_at', { ascending: false });
 
         if (mData && mData.length > 0) {
-          liveMachines = mData.map((m: any) => ({
+          // Keep published and active machines
+          const visible = mData.filter((m: any) => m.status !== 'inactive' && m.is_published !== false);
+          liveMachines = visible.map((m: any) => ({
             id: m.id,
             owner_id: m.owner_id,
             title_ar: m.title_ar,
@@ -190,6 +192,13 @@ export const PublicStorefrontPage: React.FC = () => {
 
       // Merge live machines from DB with real owner machines in machineStore
       liveMachines = machineStore.mergeMachines(liveMachines, sfData.owner_id);
+
+      // If still empty and current logged in owner is viewing, merge their cached machines
+      if (liveMachines.length === 0 && user?.id) {
+        liveMachines = machineStore.getCachedMachines().filter(
+          (m) => m.owner_id === user.id || m.owner_id === sfData.owner_id
+        );
+      }
 
       setMachines(liveMachines);
       setSelectedMapMachine(liveMachines[0] || null);
@@ -272,7 +281,13 @@ export const PublicStorefrontPage: React.FC = () => {
       storefrontData?.about_fr ||
       'Entreprise spécialisée dans la location d\'engins lourds et matériels de BTP avec opérateurs qualifiés et maintenance sur site.',
     theme_color: storefrontData?.theme_color || '#FFB400',
-    avatar: storefrontData?.avatar_url || storefrontData?.profiles?.avatar_url || null,
+    avatar:
+      storefrontData?.avatar_url ||
+      storefrontData?.profiles?.avatar_url ||
+      (user?.id && (user.id === storefrontData?.owner_id || user.id === storefrontData?.profiles?.id)
+        ? profile?.avatar_url
+        : null) ||
+      null,
   };
 
   const fullStoreUrl = window.location.href;

@@ -171,12 +171,45 @@ export const BookingsPage: React.FC = () => {
     window.addEventListener('jadijcb_payments_updated', handleUpdate);
     window.addEventListener('jadijcb_machines_updated', handleUpdate);
 
+    // Cross-tab storage listener
+    const handleStorage = (e: StorageEvent) => {
+      if (
+        e.key === 'jadijcb_cached_bookings' ||
+        e.key === 'jadijcb_last_booking_event' ||
+        e.key === 'jadijcb_payments'
+      ) {
+        loadData();
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+
+    // Supabase Realtime channel
+    let channel: any = null;
+    if (isSupabaseConfigured && ownerId) {
+      try {
+        channel = supabase
+          .channel('realtime_bookings_page_' + ownerId)
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'bookings', filter: `owner_id=eq.${ownerId}` },
+            () => loadData()
+          )
+          .subscribe();
+      } catch {
+        // Ignore
+      }
+    }
+
     return () => {
       window.removeEventListener('jadijcb_booking_event', handleUpdate);
       window.removeEventListener('jadijcb_payments_updated', handleUpdate);
       window.removeEventListener('jadijcb_machines_updated', handleUpdate);
+      window.removeEventListener('storage', handleStorage);
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
     };
-  }, [loadData]);
+  }, [loadData, ownerId]);
 
   // Status transitions
   const handleUpdateStatus = async (bookingId: string, newStatus: BookingStatus) => {

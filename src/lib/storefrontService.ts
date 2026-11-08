@@ -151,13 +151,72 @@ export async function loadStorefrontBySlug(slug: string): Promise<StorefrontData
     } catch (err) {
       // Graceful fallback
     }
+
+    // 3b. Try searching public.profiles by storefront_slug, id, company_name, or full_name
+    try {
+      const normalizedSlug = slug.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const { data: profs } = await supabase
+        .from('profiles')
+        .select('*')
+        .limit(30);
+
+      if (profs && profs.length > 0) {
+        const matchedProf = profs.find((p: any) => {
+          if (p.id === slug || p.storefront_slug === slug) return true;
+          const pComp = (p.company_name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          const pFull = (p.full_name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          return (
+            (pComp && normalizedSlug.includes(pComp)) ||
+            (pFull && normalizedSlug.includes(pFull)) ||
+            (pComp && pComp.includes(normalizedSlug))
+          );
+        });
+
+        if (matchedProf) {
+          // Also fetch business profile for logo/banner
+          let bProf: any = null;
+          try {
+            const { data: bp } = await supabase
+              .from('business_profiles')
+              .select('*')
+              .eq('owner_id', matchedProf.id)
+              .maybeSingle();
+            bProf = bp;
+          } catch {
+            // Ignore
+          }
+
+          return {
+            owner_id: matchedProf.id,
+            slug,
+            banner_url: bProf?.banner_url || matchedProf.banner_url || '',
+            avatar_url: bProf?.logo_url || matchedProf.avatar_url || '',
+            about_ar: bProf?.default_terms_ar || '',
+            about_fr: bProf?.default_terms_fr || '',
+            whatsapp: matchedProf.phone || bProf?.phone || '',
+            theme_color: '#FFB400',
+            profiles: {
+              id: matchedProf.id,
+              company_name: bProf?.company_name || matchedProf.company_name,
+              full_name: matchedProf.full_name,
+              city: matchedProf.city,
+              phone: matchedProf.phone,
+              ice_number: bProf?.ice || matchedProf.ice_number,
+              avatar_url: bProf?.logo_url || matchedProf.avatar_url,
+            },
+          };
+        }
+      }
+    } catch (err) {
+      console.warn('Profiles storefront fallback notice:', err);
+    }
   }
 
   // 4. Check if current user is owner of this slug
   try {
     const { data: authData } = await supabase.auth.getUser();
     const userMetaSf = authData?.user?.user_metadata?.storefront;
-    if (userMetaSf && userMetaSf.slug === slug) {
+    if (userMetaSf && (userMetaSf.slug === slug || authData?.user?.id)) {
       return userMetaSf;
     }
   } catch {

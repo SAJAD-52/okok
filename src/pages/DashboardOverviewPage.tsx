@@ -44,7 +44,6 @@ import { useLanguage } from '../hooks/useLanguage';
 import { useAuth } from '../hooks/useAuth';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { RevenueChart, RevenuePoint } from '../components/dashboard/RevenueChart';
-import { StorefrontLiveCard } from '../components/dashboard/StorefrontLiveCard';
 import { MachineStepperModal } from '../components/machines/MachineStepperModal';
 import { ProfileSettingsModal } from '../components/profile/ProfileSettingsModal';
 import { CreateBookingModal } from '../components/bookings/CreateBookingModal';
@@ -745,11 +744,8 @@ export const DashboardOverviewPage: React.FC = () => {
           </Card>
         </div>
 
-        {/* Right Column (5 Cols): Live Storefront Card & Quote Leads Inbox */}
+        {/* Right Column (5 Cols): Quote Leads Inbox */}
         <div className="lg:col-span-5 space-y-6 sticky top-20">
-          {/* Public Storefront Preview & QR Card */}
-          <StorefrontLiveCard publishedCount={machines.length} />
-
           {/* New Leads Received from Storefront */}
           <Card className="p-5 bg-white border border-steel-200 shadow-soft rounded-2xl space-y-3">
             <div className="flex items-center justify-between pb-3 border-b border-steel-100">

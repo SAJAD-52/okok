@@ -108,9 +108,11 @@ export const DashboardLayout: React.FC = () => {
     };
   }, [profile?.id]);
 
-  // Sync pending bookings for owner notification badge
+  // Sync pending bookings for owner notification badge with real-time updates
   useEffect(() => {
     if (!profile?.id || isContractor) return;
+
+    let previousCount = -1;
 
     const checkPending = async () => {
       try {
@@ -119,39 +121,52 @@ export const DashboardLayout: React.FC = () => {
         );
         let list = [...cached];
 
-        const { data } = await supabase
-          .from('bookings')
-          .select('*, machines(*)')
-          .eq('owner_id', profile.id)
-          .eq('status', 'pending');
+        if (isSupabaseConfigured) {
+          const { data } = await supabase
+            .from('bookings')
+            .select('*, machines(*)')
+            .eq('owner_id', profile.id)
+            .eq('status', 'pending');
 
-        if (data) {
-          const mapped: Booking[] = data.map((b: any) => ({
-            id: b.id,
-            machine_id: b.machine_id,
-            owner_id: b.owner_id,
-            client_id: b.client_id,
-            client_name: b.client_name,
-            client_phone: b.client_phone,
-            start_at: b.start_at,
-            end_at: b.end_at,
-            total_price: Number(b.total_price) || 0,
-            status: b.status,
-            notes: b.notes,
-            created_at: b.created_at,
-            machine: b.machines,
-            with_operator: Boolean(b.with_operator ?? true),
-          }));
+          if (data) {
+            const mapped: Booking[] = data.map((b: any) => ({
+              id: b.id,
+              machine_id: b.machine_id,
+              owner_id: b.owner_id,
+              client_id: b.client_id,
+              client_name: b.client_name,
+              client_phone: b.client_phone,
+              start_at: b.start_at,
+              end_at: b.end_at,
+              total_price: Number(b.total_price) || 0,
+              status: b.status,
+              notes: b.notes,
+              created_at: b.created_at,
+              machine: b.machines,
+              with_operator: Boolean(b.with_operator ?? true),
+            }));
 
-          for (const m of mapped) {
-            if (!list.some((item) => item.id === m.id)) {
-              list.push(m);
+            for (const m of mapped) {
+              if (!list.some((item) => item.id === m.id)) {
+                list.push(m);
+              }
             }
           }
         }
 
         setPendingBookingsList(list);
-        setPendingBookingsCount(list.length);
+        const count = list.length;
+        setPendingBookingsCount(count);
+
+        // Notify user if a new booking just arrived
+        if (previousCount >= 0 && count > previousCount) {
+          toast.info(
+            lang === 'fr'
+              ? '🚜 Nouvelle demande de location reçue ! Vérifiez vos notifications.'
+              : '🚜 وصلك طلب كراء جديد الآن! اضغط على جرس الإشعارات لتأكيده.'
+          );
+        }
+        previousCount = count;
       } catch {
         const c = bookingStore.getPendingCountForOwner(profile.id);
         setPendingBookingsCount(c);
@@ -160,10 +175,47 @@ export const DashboardLayout: React.FC = () => {
 
     checkPending();
 
+    // 1. In-tab custom event
     const handleEvent = () => checkPending();
     window.addEventListener('jadijcb_booking_event', handleEvent);
-    return () => window.removeEventListener('jadijcb_booking_event', handleEvent);
-  }, [profile?.id, isContractor]);
+
+    // 2. Cross-tab storage event
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'jadijcb_cached_bookings' || e.key === 'jadijcb_last_booking_event') {
+        checkPending();
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+
+    // 3. Supabase Realtime channel subscription
+    let channel: any = null;
+    if (isSupabaseConfigured) {
+      try {
+        channel = supabase
+          .channel('realtime_owner_bookings_' + profile.id)
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'bookings', filter: `owner_id=eq.${profile.id}` },
+            () => checkPending()
+          )
+          .subscribe();
+      } catch {
+        // Ignore
+      }
+    }
+
+    // 4. Fallback interval polling every 8s
+    const timer = setInterval(checkPending, 8000);
+
+    return () => {
+      window.removeEventListener('jadijcb_booking_event', handleEvent);
+      window.removeEventListener('storage', handleStorage);
+      clearInterval(timer);
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, [profile?.id, isContractor, lang]);
 
   const contractorNavigationItems = [
     {
@@ -332,11 +384,19 @@ export const DashboardLayout: React.FC = () => {
         {/* User Status, Subscription Badge & Language */}
         <div className="p-4 border-t border-steel-800 flex flex-col gap-3">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-steel-800 flex items-center justify-center font-bold text-xs text-primary border border-steel-700 uppercase">
-                {displayName.slice(0, 2)}
-              </div>
-              <div className="flex flex-col text-start">
+            <div className="flex items-center gap-2.5 min-w-0">
+              {profile?.avatar_url ? (
+                <img
+                  src={profile.avatar_url}
+                  alt={displayName}
+                  className="w-8 h-8 rounded-lg object-cover border border-primary/70 shrink-0 bg-steel-800"
+                />
+              ) : (
+                <div className="w-8 h-8 rounded-lg bg-steel-800 flex items-center justify-center font-bold text-xs text-primary border border-steel-700 uppercase shrink-0">
+                  {displayName.slice(0, 2)}
+                </div>
+              )}
+              <div className="flex flex-col text-start min-w-0">
                 <span className="text-xs font-bold text-white truncate max-w-[120px]">
                   {displayName}
                 </span>
@@ -449,14 +509,24 @@ export const DashboardLayout: React.FC = () => {
               </NavLink>
             )}
 
-            {/* Profile Settings Quick Button */}
+            {/* Profile Settings Quick Button with Avatar */}
             <button
               type="button"
               onClick={() => setIsProfileModalOpen(true)}
-              className="px-2.5 py-1.5 text-xs font-bold text-steel-700 hover:text-ink hover:bg-steel-100 rounded-xl border border-steel-200 bg-white min-h-[44px] flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+              className="px-2.5 py-1.5 text-xs font-bold text-steel-700 hover:text-ink hover:bg-steel-100 rounded-xl border border-steel-200 bg-white min-h-[44px] flex items-center gap-2 transition-colors cursor-pointer shadow-xs"
               title={lang === 'fr' ? 'Modifier mes informations' : 'تعديل معلوماتي الشخصية'}
             >
-              <User className="w-4 h-4 text-primary-dark" />
+              {profile?.avatar_url ? (
+                <img
+                  src={profile.avatar_url}
+                  alt={displayName}
+                  className="w-5 h-5 rounded-full object-cover border border-primary shrink-0"
+                />
+              ) : (
+                <div className="w-5 h-5 rounded-full bg-steel-100 text-ink text-[10px] font-bold flex items-center justify-center border border-steel-200 shrink-0">
+                  {displayName.slice(0, 2).toUpperCase()}
+                </div>
+              )}
               <span className="hidden sm:inline">{lang === 'fr' ? 'Mon profil' : 'تعديل حسابي'}</span>
             </button>
 

@@ -298,6 +298,29 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
           console.warn('DB booking insert notice:', error.message);
         } else if (data) {
           newBooking.id = data.id;
+
+          // Create notification record for owner
+          if (resolvedOwnerId) {
+            try {
+              await supabase.from('notifications').insert({
+                user_id: resolvedOwnerId,
+                title_ar: 'طلب كراء جديد وارد 🚜',
+                title_fr: 'Nouvelle demande de location reçue 🚜',
+                body_ar: `طلب الزبون ${clientName.trim()} كراء (${targetMachine?.title_ar || targetMachine?.model || 'الآلية'}) بقيمة ${Number(totalPrice).toLocaleString('fr-FR')} د.م.`,
+                body_fr: `Le client ${clientName.trim()} a réservé ${targetMachine?.title_fr || targetMachine?.model || 'engin'} (${Number(totalPrice).toLocaleString('fr-FR')} MAD).`,
+                type: 'booking_request',
+                data: {
+                  booking_id: newBooking.id,
+                  machine_id: newBooking.machine_id,
+                  client_name: newBooking.client_name,
+                  client_phone: newBooking.client_phone,
+                  total_price: newBooking.total_price,
+                },
+              });
+            } catch (notifErr) {
+              console.warn('Could not insert notification:', notifErr);
+            }
+          }
         }
       } catch (err: any) {
         if (err.message?.includes('BOOKING_CONFLICT')) {
@@ -312,14 +335,14 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
       }
     }
 
-    // Save locally & emit events
+    // Save locally & emit events (triggers instant bell notification across tabs)
     bookingStore.saveBooking(newBooking);
     setIsSubmitting(false);
 
     toast.success(
       lang === 'fr'
-        ? 'Réservation enregistrée avec succès !'
-        : 'تم تسجيل وتثبيت حجز الآلية بنجاح!'
+        ? 'Réservation enregistrée avec succès ! Le propriétaire a été notifié.'
+        : 'تم تسجيل وتثبيت حجز الآلية بنجاح! تم إشعار المالك فوراً.'
     );
 
     onBookingCreated(newBooking);

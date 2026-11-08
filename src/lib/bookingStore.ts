@@ -40,8 +40,12 @@ export const bookingStore = {
       filtered.unshift(booking);
       localStorage.setItem(CACHE_KEY, JSON.stringify(filtered));
 
-      // Dispatch event for instant UI reactive update
-      window.dispatchEvent(new CustomEvent('jadijcb_booking_event', { detail: { action: 'created', booking } }));
+      // Dispatch cross-tab storage event
+      const eventPayload = { action: 'created', booking, ts: Date.now() };
+      localStorage.setItem('jadijcb_last_booking_event', JSON.stringify(eventPayload));
+
+      // Dispatch event for instant UI reactive update in current tab
+      window.dispatchEvent(new CustomEvent('jadijcb_booking_event', { detail: eventPayload }));
     } catch (e) {
       console.warn('Could not cache booking locally:', e);
     }
@@ -63,8 +67,11 @@ export const bookingStore = {
       });
       localStorage.setItem(CACHE_KEY, JSON.stringify(updated));
 
+      const eventPayload = { action: 'updated', id, status: newStatus, ts: Date.now() };
+      localStorage.setItem('jadijcb_last_booking_event', JSON.stringify(eventPayload));
+
       // Dispatch event
-      window.dispatchEvent(new CustomEvent('jadijcb_booking_event', { detail: { action: 'updated', id, status: newStatus } }));
+      window.dispatchEvent(new CustomEvent('jadijcb_booking_event', { detail: eventPayload }));
     } catch (e) {
       console.warn('Could not update cached booking:', e);
     }

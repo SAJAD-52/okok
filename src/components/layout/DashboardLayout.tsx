@@ -37,6 +37,7 @@ import { Booking } from '../../types/database';
 import { bookingStore } from '../../lib/bookingStore';
 import { chatStore } from '../../lib/chatStore';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { toast } from '../ui/Toast';
 
 export const DashboardLayout: React.FC = () => {
   const { t, isRTL, lang } = useLanguage();

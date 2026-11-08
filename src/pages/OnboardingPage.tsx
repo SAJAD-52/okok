@@ -62,24 +62,24 @@ export const OnboardingPage: React.FC = () => {
 
     const cityName = MOROCCAN_CITIES.find((c) => c.id === cityId)?.name_ar || cityId;
 
-    const res = await updateProfile({
-      full_name: fullName.trim(),
-      company_name: companyName.trim(),
-      city: cityName,
-      ice_number: iceNumber.trim(),
-      whatsapp_verified: Boolean(whatsappPhone),
-      onboarding_completed: true,
-    });
-
-    // Ensure unique storefront slug is generated for this owner
     try {
+      await updateProfile({
+        full_name: fullName.trim(),
+        company_name: companyName.trim(),
+        city: cityName,
+        ice_number: iceNumber.trim(),
+        whatsapp_verified: Boolean(whatsappPhone),
+        onboarding_completed: true,
+      });
+
+      // Ensure unique storefront slug is generated for this owner
       const existingSlug = localStorage.getItem('jadijcb_owner_storefront_slug');
       if (!existingSlug) {
         const newSlug = generateUniqueStorefrontSlug(companyName.trim() || fullName.trim());
         localStorage.setItem('jadijcb_owner_storefront_slug', newSlug);
       }
-    } catch {
-      // Ignore
+    } catch (err) {
+      console.warn('Onboarding save notice:', err);
     }
 
     setIsSubmitting(false);

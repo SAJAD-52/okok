@@ -29,8 +29,11 @@ import { useAuth } from '../hooks/useAuth';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { generateUniqueStorefrontSlug } from '../lib/storefrontSlug';
 import { ImageUploadField } from '../components/storefront/ImageUploadField';
-
-const LOCAL_STOREFRONT_SLUG_KEY = 'jadijcb_owner_storefront_slug';
+import {
+  loadStorefrontByOwner,
+  saveStorefrontData,
+  LOCAL_ACTIVE_SLUG_KEY,
+} from '../lib/storefrontService';
 
 export const StorefrontPage: React.FC = () => {
   const { t, lang, isRTL } = useLanguage();
@@ -40,7 +43,7 @@ export const StorefrontPage: React.FC = () => {
   // Auto-generated unique slug state
   const [slug, setSlug] = useState<string>(() => {
     try {
-      const stored = localStorage.getItem(LOCAL_STOREFRONT_SLUG_KEY);
+      const stored = localStorage.getItem(LOCAL_ACTIVE_SLUG_KEY);
       if (stored) return stored;
     } catch {
       // Ignore
@@ -75,24 +78,19 @@ export const StorefrontPage: React.FC = () => {
 
       let loadedSlug = '';
 
-      if (isSupabaseConfigured && user?.id) {
-        try {
-          const { data, error } = await supabase
-            .from('storefronts')
-            .select('*')
-            .eq('owner_id', user.id)
-            .maybeSingle();
+      try {
+        const sf = await loadStorefrontByOwner(user?.id || profile?.id || '');
+        if (sf) {
+          if (sf.slug) loadedSlug = sf.slug;
+          if (sf.banner_url) setBannerUrl(sf.banner_url);
+          if (sf.avatar_url) setAvatarUrl(sf.avatar_url);
+          if (sf.about_ar) setAboutAr(sf.about_ar);
+          if (sf.about_fr) setAboutFr(sf.about_fr);
+          if (sf.whatsapp) setWhatsapp(sf.whatsapp);
+          if (sf.theme_color) setThemeColor(sf.theme_color);
+        }
 
-          if (!error && data) {
-            if (data.slug) loadedSlug = data.slug;
-            if (data.banner_url) setBannerUrl(data.banner_url);
-            if (data.avatar_url) setAvatarUrl(data.avatar_url);
-            if (data.about_ar) setAboutAr(data.about_ar);
-            if (data.about_fr) setAboutFr(data.about_fr);
-            if (data.whatsapp) setWhatsapp(data.whatsapp);
-            if (data.theme_color) setThemeColor(data.theme_color);
-          }
-
+        if (isSupabaseConfigured && user?.id) {
           const { data: mData } = await supabase
             .from('machines')
             .select('*')
@@ -102,21 +100,20 @@ export const StorefrontPage: React.FC = () => {
           if (mData && mData.length > 0) {
             setPreviewMachines(mData);
           }
-        } catch (err) {
-          console.warn('Storefront load notice:', err);
         }
+      } catch (err) {
+        console.warn('Storefront load notice:', err);
       }
 
-      // If no slug exists in DB, check local storage or generate a unique non-repeating slug
+      // If no slug exists, generate a unique non-repeating slug
       if (!loadedSlug) {
-        const storedLocalSlug = localStorage.getItem(LOCAL_STOREFRONT_SLUG_KEY);
+        const storedLocalSlug = localStorage.getItem(LOCAL_ACTIVE_SLUG_KEY);
         if (storedLocalSlug) {
           loadedSlug = storedLocalSlug;
         } else {
-          // Generate a guaranteed unique slug using company name or full name + unique suffix
           const baseName = profile?.company_name || profile?.full_name || 'jadijcb-owner';
           loadedSlug = generateUniqueStorefrontSlug(baseName);
-          localStorage.setItem(LOCAL_STOREFRONT_SLUG_KEY, loadedSlug);
+          localStorage.setItem(LOCAL_ACTIVE_SLUG_KEY, loadedSlug);
         }
       }
 
@@ -147,14 +144,16 @@ export const StorefrontPage: React.FC = () => {
     if (e) e.preventDefault();
     setIsSaving(true);
 
+    const ownerId = user?.id || profile?.id;
+    if (!ownerId) {
+      setIsSaving(false);
+      toast.error('يرجى تسجيل الدخول أولاً');
+      return;
+    }
+
     // Ensure we have a valid unique slug
     const finalSlug = slug || generateUniqueStorefrontSlug(profile?.company_name || profile?.full_name);
     setSlug(finalSlug);
-    try {
-      localStorage.setItem(LOCAL_STOREFRONT_SLUG_KEY, finalSlug);
-    } catch {
-      // Ignore
-    }
 
     // Update profile avatar if updated
     if (avatarUrl && avatarUrl !== profile?.avatar_url) {
@@ -165,44 +164,29 @@ export const StorefrontPage: React.FC = () => {
       }
     }
 
-    if (isSupabaseConfigured && user?.id) {
-      try {
-        const payload: any = {
-          owner_id: user.id,
-          slug: finalSlug,
-          banner_url: bannerUrl,
-          avatar_url: avatarUrl,
-          about_ar: aboutAr,
-          about_fr: aboutFr,
-          whatsapp,
-          theme_color: themeColor,
-        };
-
-        const { error } = await supabase.from('storefronts').upsert(payload);
-
-        if (error) {
-          console.warn('Storefront upsert warning, attempting fallback:', error.message);
-          // If avatar_url column is not present in storefronts schema cache, omit it
-          if (error.message?.includes('avatar_url') || error.message?.includes('column')) {
-            delete payload.avatar_url;
-            await supabase.from('storefronts').upsert(payload);
-          } else {
-            toast.error(error.message);
-            setIsSaving(false);
-            return;
-          }
-        }
-      } catch (err: any) {
-        console.warn('Storefront save error:', err);
-      }
-    }
+    // Save with resilient fallback (LocalStorage + Auth Metadata + DB if table exists)
+    const res = await saveStorefrontData({
+      owner_id: ownerId,
+      slug: finalSlug,
+      banner_url: bannerUrl,
+      avatar_url: avatarUrl,
+      about_ar: aboutAr,
+      about_fr: aboutFr,
+      whatsapp,
+      theme_color: themeColor,
+    });
 
     setIsSaving(false);
-    toast.success(
-      lang === 'fr'
-        ? 'Vitrine mise à jour avec succès !'
-        : 'تم حفظ إعدادات وصور المتجر بنجاح!'
-    );
+
+    if (res.success) {
+      toast.success(
+        lang === 'fr'
+          ? 'Vitrine mise à jour avec succès !'
+          : 'تم حفظ إعدادات وصور المتجر بنجاح!'
+      );
+    } else {
+      toast.error(res.error || 'حدث خطأ أثناء الحفظ');
+    }
   };
 
   const companyName = profile?.company_name || 'شركة الأشغال والآليات المعتمدة';

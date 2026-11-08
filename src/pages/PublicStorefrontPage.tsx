@@ -49,6 +49,7 @@ import { Machine, Booking } from '../types/database';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { formatPriceMAD } from '../data/rentalTerms';
 import { toast } from '../components/ui/Toast';
+import { loadStorefrontBySlug } from '../lib/storefrontService';
 
 // Default rich Moroccan machinery fleet for Atlas Terrassement
 const SEED_STOREFRONT_MACHINES: Machine[] = [
@@ -262,15 +263,14 @@ export const PublicStorefrontPage: React.FC = () => {
     try {
       let sfData: any = null;
 
-      if (isSupabaseConfigured && slug) {
-        const { data, error } = await supabase
-          .from('storefronts')
-          .select('*, profiles(*)')
-          .eq('slug', slug)
-          .maybeSingle();
-
-        if (!error && data) {
-          sfData = data;
+      if (slug) {
+        try {
+          const sf = await loadStorefrontBySlug(slug);
+          if (sf) {
+            sfData = sf;
+          }
+        } catch (e) {
+          console.warn('Storefront load notice:', e);
         }
       }
 

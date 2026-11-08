@@ -8,6 +8,7 @@ import { normalizeMoroccanPhone, phoneToSyntheticEmail } from '../lib/authHelper
 import { mapDatabaseError } from '../lib/errorHelpers';
 import { UserProfile, UserRole } from '../types/database';
 import { generateUniqueStorefrontSlug } from '../lib/storefrontSlug';
+import { saveStorefrontData } from '../lib/storefrontService';
 
 interface AuthContextType {
   user: any | null;
@@ -564,18 +565,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Auto-generate unique storefront slug for machinery owners
       if (role === 'owner') {
         const autoSlug = generateUniqueStorefrontSlug(meta?.companyName || meta?.fullName);
-        try {
-          localStorage.setItem('jadijcb_owner_storefront_slug', autoSlug);
-        } catch {
-          // Ignore
-        }
         if (activeUser?.id) {
           try {
-            await supabase.from('storefronts').upsert({
+            await saveStorefrontData({
               owner_id: activeUser.id,
               slug: autoSlug,
               whatsapp: norm.e164,
               theme_color: '#FFB400',
+              banner_url: 'https://images.unsplash.com/photo-1541888946425-d0fbb186c5f7?w=1200&q=80',
+              about_ar: 'شركة متخصصة في كراء آليات ومعدات الأشغال العمومية والبناء مع سائقين معتمدين.',
+              about_fr: 'Entreprise spécialisée dans la location d\'engins de travaux publics au Maroc.',
             });
           } catch (e) {
             console.warn('Auto storefront slug creation notice:', e);

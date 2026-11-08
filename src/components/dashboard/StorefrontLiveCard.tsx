@@ -19,8 +19,11 @@ import { useLanguage } from '../../hooks/useLanguage';
 import { useAuth } from '../../hooks/useAuth';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { generateUniqueStorefrontSlug } from '../../lib/storefrontSlug';
-
-const LOCAL_STOREFRONT_SLUG_KEY = 'jadijcb_owner_storefront_slug';
+import {
+  loadStorefrontByOwner,
+  LOCAL_ACTIVE_SLUG_KEY,
+  StorefrontData,
+} from '../../lib/storefrontService';
 
 interface StorefrontLiveCardProps {
   publishedCount: number;
@@ -36,7 +39,7 @@ export const StorefrontLiveCard: React.FC<StorefrontLiveCardProps> = ({
 
   const [slug, setSlug] = useState<string>(() => {
     try {
-      const stored = localStorage.getItem(LOCAL_STOREFRONT_SLUG_KEY);
+      const stored = localStorage.getItem(LOCAL_ACTIVE_SLUG_KEY);
       if (stored) return stored;
     } catch {
       // Ignore
@@ -51,45 +54,54 @@ export const StorefrontLiveCard: React.FC<StorefrontLiveCardProps> = ({
   const [themeColor, setThemeColor] = useState<string>('#FFB400');
 
   useEffect(() => {
-    async function loadStorefront() {
-      if (!user?.id && !profile) return;
+    async function fetchStorefront() {
+      const ownerId = user?.id || profile?.id;
+      if (!ownerId) return;
 
       let foundSlug = '';
 
-      if (isSupabaseConfigured && user?.id) {
-        try {
-          const { data, error } = await supabase
-            .from('storefronts')
-            .select('slug, banner_url, avatar_url, theme_color')
-            .eq('owner_id', user.id)
-            .maybeSingle();
-
-          if (!error && data) {
-            if (data.slug) foundSlug = data.slug;
-            if (data.banner_url) setBannerUrl(data.banner_url);
-            if (data.avatar_url) setAvatarUrl(data.avatar_url);
-            if (data.theme_color) setThemeColor(data.theme_color);
-          }
-        } catch (e) {
-          console.warn('StorefrontLiveCard fetch notice:', e);
+      try {
+        const sf = await loadStorefrontByOwner(ownerId);
+        if (sf) {
+          if (sf.slug) foundSlug = sf.slug;
+          if (sf.banner_url) setBannerUrl(sf.banner_url);
+          if (sf.avatar_url) setAvatarUrl(sf.avatar_url);
+          if (sf.theme_color) setThemeColor(sf.theme_color);
         }
+      } catch (e) {
+        console.warn('StorefrontLiveCard load notice:', e);
       }
 
       if (!foundSlug) {
-        const local = localStorage.getItem(LOCAL_STOREFRONT_SLUG_KEY);
+        const local = localStorage.getItem(LOCAL_ACTIVE_SLUG_KEY);
         if (local) {
           foundSlug = local;
         } else {
           const baseName = profile?.company_name || profile?.full_name || 'jadijcb-owner';
           foundSlug = generateUniqueStorefrontSlug(baseName);
-          localStorage.setItem(LOCAL_STOREFRONT_SLUG_KEY, foundSlug);
+          localStorage.setItem(LOCAL_ACTIVE_SLUG_KEY, foundSlug);
         }
       }
 
       setSlug(foundSlug);
     }
 
-    loadStorefront();
+    fetchStorefront();
+
+    const handleUpdate = (e: any) => {
+      const detail: StorefrontData = e.detail;
+      if (detail) {
+        if (detail.slug) setSlug(detail.slug);
+        if (detail.banner_url) setBannerUrl(detail.banner_url);
+        if (detail.avatar_url) setAvatarUrl(detail.avatar_url);
+        if (detail.theme_color) setThemeColor(detail.theme_color);
+      }
+    };
+
+    window.addEventListener('jadijcb_storefront_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('jadijcb_storefront_updated', handleUpdate);
+    };
   }, [user, profile]);
 
   const effectiveSlug = slug || 'store';

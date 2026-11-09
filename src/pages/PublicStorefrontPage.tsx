@@ -779,40 +779,10 @@ export const PublicStorefrontPage: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
                 {filteredMachines.map((machine) => (
                   <div key={machine.id} className="relative group">
-                    <MachineCard machine={machine} />
-
-                    {/* Quick Storefront Actions Overlay Bar */}
-                    <div className="mt-2 flex items-center gap-2">
-                      <Button
-                        type="button"
-                        variant="primary"
-                        size="sm"
-                        onClick={() => handleOpenBooking(machine)}
-                        className="flex-1 font-black text-xs py-2 shadow-xs"
-                        leftIcon={<CalendarCheck className="w-3.5 h-3.5" />}
-                      >
-                        {lang === 'fr' ? 'Demande de location' : 'طلب كراء'}
-                      </Button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleStartInternalChat(machine)}
-                        title={lang === 'fr' ? 'Discuter avec le loueur' : 'محادثة المالك'}
-                        className="p-2 rounded-xl bg-white border border-steel-300 text-steel-700 hover:text-ink hover:bg-steel-50 shadow-xs transition-colors cursor-pointer"
-                      >
-                        <MessageSquare className="w-4 h-4 text-primary-dark" />
-                      </button>
-
-                      <a
-                        href={getWhatsAppLink(machine)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        title="WhatsApp"
-                        className="p-2 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-700 hover:bg-emerald-100 shadow-xs transition-colors cursor-pointer"
-                      >
-                        <MessageCircle className="w-4 h-4" />
-                      </a>
-                    </div>
+                    <MachineCard
+                      machine={machine}
+                      onBookClick={handleOpenBooking}
+                    />
                   </div>
                 ))}
               </div>
@@ -906,13 +876,19 @@ export const PublicStorefrontPage: React.FC = () => {
 
                               {/* Popup Action Buttons */}
                               <div className="flex items-center gap-1.5 pt-1">
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenBooking(m)}
-                                  className="flex-1 py-1.5 rounded-lg bg-primary hover:bg-primary-hover text-ink text-[11px] font-black shadow-xs transition-colors cursor-pointer text-center"
-                                >
-                                  {lang === 'fr' ? 'Réserver' : 'حجز الآن'}
-                                </button>
+                                {Boolean(user?.id && (m.owner_id === user.id || (profile && m.owner_id === profile.id))) ? (
+                                  <span className="flex-1 py-1.5 px-2 rounded-lg bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold text-center">
+                                    {lang === 'fr' ? 'Votre propre engin' : 'آليتك الخاصة'}
+                                  </span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenBooking(m)}
+                                    className="flex-1 py-1.5 rounded-lg bg-primary hover:bg-primary-hover text-ink text-[11px] font-black shadow-xs transition-colors cursor-pointer text-center"
+                                  >
+                                    {lang === 'fr' ? 'Réserver' : 'حجز الآن'}
+                                  </button>
+                                )}
                                 <button
                                   type="button"
                                   onClick={() => handleStartInternalChat(m)}
@@ -988,16 +964,27 @@ export const PublicStorefrontPage: React.FC = () => {
 
                       {/* CTAs */}
                       <div className="space-y-2 pt-2 border-t border-steel-100">
-                        <Button
-                          type="button"
-                          variant="primary"
-                          size="md"
-                          onClick={() => handleOpenBooking(selectedMapMachine)}
-                          className="w-full justify-center font-black shadow-md text-sm"
-                          leftIcon={<CalendarCheck className="w-4 h-4" />}
-                        >
-                          {lang === 'fr' ? 'Réserver cet engin maintenant' : 'طلب كراء هذه الآلية الآن'}
-                        </Button>
+                        {Boolean(user?.id && (selectedMapMachine.owner_id === user.id || (profile && selectedMapMachine.owner_id === profile.id))) ? (
+                          <div className="w-full py-2.5 px-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-bold text-center flex items-center justify-center gap-1.5 shadow-2xs">
+                            <ShieldCheck className="w-4 h-4 text-amber-700 shrink-0" />
+                            <span>
+                              {lang === 'fr'
+                                ? 'Votre propre engin (Vous êtes le propriétaire)'
+                                : 'آليتك الخاصة (أنت المالك)'}
+                            </span>
+                          </div>
+                        ) : (
+                          <Button
+                            type="button"
+                            variant="primary"
+                            size="md"
+                            onClick={() => handleOpenBooking(selectedMapMachine)}
+                            className="w-full justify-center font-black shadow-md text-sm"
+                            leftIcon={<CalendarCheck className="w-4 h-4" />}
+                          >
+                            {lang === 'fr' ? 'Réserver cet engin maintenant' : 'طلب كراء هذه الآلية الآن'}
+                          </Button>
+                        )}
 
                         <div className="flex items-center gap-2">
                           <Button

@@ -19,6 +19,7 @@ import {
   Banknote,
   Fuel,
   MapPin,
+  MessageCircle,
 } from 'lucide-react';
 import { Booking, Machine, Client } from '../../types/database';
 import { Button } from '../ui/Button';
@@ -26,33 +27,49 @@ import { Input } from '../ui/Input';
 import { toast } from '../ui/Toast';
 import { useLanguage } from '../../hooks/useLanguage';
 import { useAuth } from '../../hooks/useAuth';
-import { supabase } from '../../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { bookingStore } from '../../lib/bookingStore';
 import { clientService } from '../../lib/clientService';
 
 interface CreateBookingModalProps {
   isOpen: boolean;
   onClose: () => void;
-  machines: Machine[];
-  existingBookings: Booking[];
-  onBookingCreated: (booking: Booking) => void;
+  machines?: Machine[];
+  machine?: Machine | null;
+  existingBookings?: Booking[];
+  preselectedMachineId?: string;
+  onBookingCreated?: (booking: Booking) => void;
 }
 
 export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
   isOpen,
   onClose,
-  machines,
-  existingBookings,
+  machines = [],
+  machine,
+  existingBookings = [],
+  preselectedMachineId,
   onBookingCreated,
 }) => {
   const { t, lang, isRTL } = useLanguage();
   const { profile, user } = useAuth();
 
-  const [machineId, setMachineId] = useState<string>(machines[0]?.id || '');
+  const machinesList = machine
+    ? [machine]
+    : machines.length > 0
+    ? machines
+    : [];
+
+  const initialMachineId =
+    machine?.id ||
+    preselectedMachineId ||
+    machinesList[0]?.id ||
+    '';
+
+  const [machineId, setMachineId] = useState<string>(initialMachineId);
   const [selectedClientId, setSelectedClientId] = useState<string>('new');
-  const [clientName, setClientName] = useState('');
-  const [clientPhone, setClientPhone] = useState('');
-  const [cinOrIce, setCinOrIce] = useState('');
+  const [clientName, setClientName] = useState(profile?.full_name || profile?.company_name || '');
+  const [clientPhone, setClientPhone] = useState(profile?.phone || '');
+  const [cinOrIce, setCinOrIce] = useState(profile?.ice_number || '');
   const [clientsList, setClientsList] = useState<Client[]>([]);
 
   const [startDate, setStartDate] = useState(
@@ -85,20 +102,36 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
     }
   }, [isOpen, ownerId]);
 
-  // Sync initial machine selection
+  // Sync initial machine selection and prefill user contact if available
   useEffect(() => {
-    if (machines.length > 0 && (!machineId || !machines.some((m) => m.id === machineId))) {
-      setMachineId(machines[0].id);
+    if (machine?.id) {
+      setMachineId(machine.id);
+    } else if (preselectedMachineId) {
+      setMachineId(preselectedMachineId);
+    } else if (machinesList.length > 0 && (!machineId || !machinesList.some((m) => m.id === machineId))) {
+      setMachineId(machinesList[0].id);
     }
-  }, [machines, isOpen]);
+
+    if (isOpen) {
+      if (!clientName && (profile?.full_name || profile?.company_name)) {
+        setClientName(profile.full_name || profile.company_name || '');
+      }
+      if (!clientPhone && profile?.phone) {
+        setClientPhone(profile.phone);
+      }
+      if (!cinOrIce && profile?.ice_number) {
+        setCinOrIce(profile.ice_number);
+      }
+    }
+  }, [machine, preselectedMachineId, machinesList, isOpen, profile]);
 
   // Handle client selection change
   const handleClientSelectChange = (val: string) => {
     setSelectedClientId(val);
     if (val === 'new') {
-      setClientName('');
-      setClientPhone('');
-      setCinOrIce('');
+      setClientName(profile?.full_name || profile?.company_name || '');
+      setClientPhone(profile?.phone || '');
+      setCinOrIce(profile?.ice_number || '');
     } else {
       const found = clientsList.find((c) => c.id === val);
       if (found) {
@@ -114,7 +147,7 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
     const startTs = new Date(startDate).getTime();
     const endTs = new Date(endDate).getTime();
     if (!isNaN(startTs) && !isNaN(endTs) && endTs > startTs) {
-      const targetMachine = machines.find((m) => m.id === machineId) || machines[0];
+      const targetMachine = machine || machinesList.find((m) => m.id === machineId) || machinesList[0];
       const hours = (endTs - startTs) / (1000 * 60 * 60);
       const days = Math.max(1, Math.ceil(hours / 24));
 
@@ -178,11 +211,9 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
 
   if (!isOpen) return null;
 
-  const targetMachine = machines.find((m) => m.id === machineId) || machines[0];
+  const targetMachine = machinesList.find((m) => m.id === machineId) || machinesList[0];
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
+  const handleExecuteBooking = async (openWhatsApp: boolean) => {
     const startTs = new Date(startDate).getTime();
     const endTs = new Date(endDate).getTime();
 
@@ -209,7 +240,7 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
 
     const resolvedOwnerId = targetMachine?.owner_id || ownerId || 'owner';
 
-    // Auto-save new client in directory if "new" was selected
+    // Auto-save new client in directory if "new" was selected by an authenticated owner
     let clientRefId = selectedClientId !== 'new' ? selectedClientId : undefined;
     if (selectedClientId === 'new' && ownerId) {
       try {
@@ -230,6 +261,7 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
       id: crypto.randomUUID(),
       machine_id: machineId,
       owner_id: resolvedOwnerId,
+      client_id: user?.id || null,
       client_name: clientName.trim(),
       client_phone: clientPhone.trim(),
       client_ref_id: clientRefId,
@@ -254,19 +286,20 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
       created_at: new Date().toISOString(),
     };
 
-    // Save to Supabase with overlap conflict handling
-    if (user?.id) {
+    // Save to Supabase (works for contractors, other owners, and external visitors)
+    if (isSupabaseConfigured) {
       try {
         const payload: any = {
           id: newBooking.id,
           machine_id: newBooking.machine_id,
           owner_id: resolvedOwnerId,
+          client_id: user?.id || null,
           client_name: newBooking.client_name,
           client_phone: newBooking.client_phone,
           start_at: newBooking.start_at,
           end_at: newBooking.end_at,
           start_date: newBooking.start_at,
-          end_date: newBooking.end_at,
+          end_date: newBooking.end_date,
           total_price: newBooking.total_price,
           deposit_amount: newBooking.deposit_amount,
           rate_type: newBooking.rate_type,
@@ -339,14 +372,46 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
     bookingStore.saveBooking(newBooking);
     setIsSubmitting(false);
 
+    // If WhatsApp requested, open chat with owner
+    if (openWhatsApp) {
+      const rawOwnerPhone = (targetMachine?.owner?.phone || (targetMachine as any)?.phone || '+212661234567').replace(/\D/g, '');
+      const startStr = new Date(startDate).toLocaleDateString('fr-FR');
+      const endStr = new Date(endDate).toLocaleDateString('fr-FR');
+      const machineTitle = targetMachine?.title_ar || targetMachine?.title_fr || `${targetMachine?.brand} ${targetMachine?.model}`;
+
+      const waMsg = `السلام عليكم ورحمة الله،
+أود تأكيد طلب كراء الآلية عبر منصة JADIJCB:
+
+🚜 الآلية: ${machineTitle} (${targetMachine?.city || ''})
+📅 الفترة: من ${startStr} إلى ${endStr}
+💰 السعر التقديري: ${Number(totalPrice).toLocaleString('fr-FR')} درهم
+👷 سائق معتمد: ${withOperator ? 'نعم' : 'لا'}
+⛽ الوقود: ${fuelIncluded ? 'شامل' : 'غير مشمول'}
+
+👤 الزبون / المقاولة: ${clientName.trim()}
+📱 الهاتف: ${clientPhone.trim()}
+📍 موقع الورش: ${siteAddress.trim() || targetMachine?.city || 'المغرب'}
+${notes.trim() ? `📝 ملاحظات: ${notes.trim()}\n` : ''}
+🔗 الرابط: ${window.location.origin}/marketplace/${targetMachine?.id}`;
+
+      window.open(`https://wa.me/${rawOwnerPhone}?text=${encodeURIComponent(waMsg)}`, '_blank');
+    }
+
     toast.success(
       lang === 'fr'
         ? 'Réservation enregistrée avec succès ! Le propriétaire a été notifié.'
-        : 'تم تسجيل وتثبيت حجز الآلية بنجاح! تم إشعار المالك فوراً.'
+        : 'تم تسجيل طلب الحجز بنجاح! تم إشعار المالك فوراً.'
     );
 
-    onBookingCreated(newBooking);
+    if (onBookingCreated) {
+      onBookingCreated(newBooking);
+    }
     onClose();
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    handleExecuteBooking(true);
   };
 
   return (
@@ -608,27 +673,38 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
           </div>
 
           {/* Actions */}
-          <div className="flex items-center justify-end gap-3 pt-3 border-t border-steel-100">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2.5 pt-3 border-t border-steel-100">
             <Button
               type="button"
               variant="outline"
               size="sm"
               onClick={onClose}
-              className="text-xs font-bold"
+              className="text-xs font-bold order-3 sm:order-1"
             >
               {lang === 'fr' ? 'Annuler' : 'إلغاء'}
             </Button>
 
             <Button
-              type="submit"
-              variant="primary"
+              type="button"
+              variant="outline"
               size="sm"
+              onClick={() => handleExecuteBooking(false)}
               isLoading={isSubmitting}
               disabled={Boolean(overlapError)}
-              className="font-black text-xs px-6 shadow-md"
+              className="text-xs font-bold text-steel-700 hover:text-ink order-2"
             >
-              {lang === 'fr' ? 'Confirmer la réservation' : 'تأكيد وحفظ الحجز'}
+              {lang === 'fr' ? 'Enregistrer sans WhatsApp' : 'تأكيد بالمنصة فقط'}
             </Button>
+
+            <button
+              type="button"
+              onClick={() => handleExecuteBooking(true)}
+              disabled={Boolean(overlapError) || isSubmitting}
+              className="flex items-center justify-center gap-2 py-2 px-4 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] text-white font-black text-xs shadow-md transition-all cursor-pointer min-h-[38px] order-1 sm:order-3"
+            >
+              <MessageCircle className="w-4 h-4 shrink-0" />
+              <span>{lang === 'fr' ? 'Confirmer & Contacter sur WhatsApp' : 'تأكيد الحجز والتواصل عبر واتساب'}</span>
+            </button>
           </div>
         </form>
       </div>

@@ -32,6 +32,7 @@ import {
   ArrowLeft,
   AlertCircle,
   RotateCcw,
+  CalendarCheck,
 } from 'lucide-react';
 import { PublicHeader } from '../components/layout/PublicHeader';
 import { Footer } from '../components/layout/Footer';
@@ -45,6 +46,7 @@ import { useFavorites } from '../hooks/useFavorites';
 import { useAuth } from '../hooks/useAuth';
 import { formatPriceMAD } from '../data/rentalTerms';
 import { MachineCard } from '../components/marketplace/MachineCard';
+import { CreateBookingModal } from '../components/bookings/CreateBookingModal';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { machineStore } from '../lib/machineStore';
 import { Machine } from '../types/database';
@@ -60,6 +62,10 @@ export const MachineDetailPage: React.FC = () => {
   const [similarMachines, setSimilarMachines] = useState<Machine[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isError, setIsError] = useState(false);
+
+  // Booking Modal State
+  const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
+  const [modalMachine, setModalMachine] = useState<Machine | null>(null);
 
   // Lightbox State
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
@@ -225,6 +231,23 @@ export const MachineDetailPage: React.FC = () => {
   const description = machine ? (lang === 'fr' ? machine.description_fr : machine.description_ar) : '';
   const isRent = machine ? machine.listing_mode !== 'sale' : true;
   const isFav = machine ? isFavorite(machine.id) : false;
+
+  // Check if current user owns this machine (cannot book own machines)
+  const currentUserId = user?.id || profile?.id;
+  const isOwnMachine = Boolean(
+    currentUserId &&
+    machine?.owner_id &&
+    (machine.owner_id === currentUserId || (profile && machine.owner_id === profile.id))
+  );
+
+  // Auto-open booking modal if arriving with ?book=true (and not own machine)
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('book') === 'true' && machine && !isOwnMachine) {
+      setModalMachine(machine);
+      setIsBookingModalOpen(true);
+    }
+  }, [machine, isOwnMachine]);
 
   // SEO: Dynamic Page Title, Meta Description & JSON-LD Product Schema
   useEffect(() => {
@@ -715,15 +738,40 @@ export const MachineDetailPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* CTAs: WhatsApp + Real-time Chat */}
+              {/* CTAs: Booking, WhatsApp + Real-time Chat */}
               <div className="space-y-2.5 pt-3">
+                {isOwnMachine ? (
+                  <div className="w-full py-3 px-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-bold text-center flex items-center justify-center gap-2 shadow-2xs">
+                    <ShieldCheck className="w-4 h-4 text-amber-700 shrink-0" />
+                    <span>
+                      {lang === 'fr'
+                        ? 'Votre propre engin (Vous êtes le propriétaire - Réservation désactivée)'
+                        : 'أنت المالك المسجل لهذه الآلية (لا يمكنك حجز آليتك الخاصة)'}
+                    </span>
+                  </div>
+                ) : isRent ? (
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="lg"
+                    onClick={() => {
+                      setModalMachine(machine);
+                      setIsBookingModalOpen(true);
+                    }}
+                    leftIcon={<CalendarCheck className="w-4 h-4" />}
+                    className="w-full justify-center font-black text-xs sm:text-sm min-h-[48px] shadow-md"
+                  >
+                    {lang === 'fr' ? 'Demande de réservation immédiate' : 'طلب كراء الآلية الآن'}
+                  </Button>
+                ) : null}
+
                 <a
                   href={whatsappUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="w-full flex items-center justify-center gap-2 bg-[#25D366] hover:bg-[#20bd5a] text-white font-black py-3 px-4 rounded-xl text-xs sm:text-sm shadow-md transition-all cursor-pointer min-h-[48px]"
                 >
-                  <MessageCircle className="w-4 h-4" />
+                  <MessageCircle className="w-4 h-4 fill-current" />
                   <span>{t('machine_detail.whatsapp')}</span>
                 </a>
 
@@ -783,7 +831,14 @@ export const MachineDetailPage: React.FC = () => {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
               {similarMachines.map((m) => (
-                <MachineCard key={m.id} machine={m} />
+                <MachineCard
+                  key={m.id}
+                  machine={m}
+                  onBookClick={(target) => {
+                    setModalMachine(target);
+                    setIsBookingModalOpen(true);
+                  }}
+                />
               ))}
             </div>
           </div>
@@ -826,6 +881,18 @@ export const MachineDetailPage: React.FC = () => {
             </div>
           )}
         </div>
+      )}
+
+      {/* Booking Modal for Clients, Intermediary Owners, and External Visitors */}
+      {isBookingModalOpen && (
+        <CreateBookingModal
+          isOpen={isBookingModalOpen}
+          onClose={() => {
+            setIsBookingModalOpen(false);
+            setModalMachine(null);
+          }}
+          machine={modalMachine || machine}
+        />
       )}
 
       <Footer />

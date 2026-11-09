@@ -15,22 +15,27 @@ import {
   UserCheck,
   Star,
   Check,
+  CalendarCheck,
+  MessageCircle,
 } from 'lucide-react';
 import { Machine } from '../../types/database';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { useLanguage } from '../../hooks/useLanguage';
 import { useFavorites } from '../../hooks/useFavorites';
+import { useAuth } from '../../hooks/useAuth';
 import { formatPriceMAD } from '../../data/rentalTerms';
 
 interface MachineCardProps {
   machine: Machine;
+  onBookClick?: (machine: Machine) => void;
 }
 
-export const MachineCard: React.FC<MachineCardProps> = ({ machine }) => {
+export const MachineCard: React.FC<MachineCardProps> = ({ machine, onBookClick }) => {
   const { t, lang, isRTL } = useLanguage();
   const navigate = useNavigate();
   const { isFavorite, toggleFavorite } = useFavorites();
+  const { user, profile } = useAuth();
 
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
@@ -61,6 +66,39 @@ export const MachineCard: React.FC<MachineCardProps> = ({ machine }) => {
 
   const title = lang === 'fr' ? machine.title_fr : machine.title_ar;
   const isRent = machine.listing_mode !== 'sale';
+
+  // Check if current user is the owner of this machine (cannot book own machines)
+  const currentUserId = user?.id || profile?.id;
+  const isOwnMachine = Boolean(
+    currentUserId &&
+    machine.owner_id &&
+    (machine.owner_id === currentUserId || (profile && machine.owner_id === profile.id))
+  );
+
+  // WhatsApp prefilled message & link
+  const ownerPhone = (
+    machine.owner?.phone ||
+    (machine as any).phone ||
+    '212661234567'
+  ).replace(/\D/g, '');
+
+  const machineTitle = (lang === 'fr' ? machine.title_fr : machine.title_ar) || `${machine.brand} ${machine.model}`;
+  const whatsappMsg = encodeURIComponent(
+    lang === 'fr'
+      ? `Bonjour, je souhaite réserver l'engin "${machineTitle}" (${machine.city || 'Maroc'}) proposé à ${machine.rate_daily?.toLocaleString('fr-FR')} MAD/jour sur JADIJCB.\nLien: ${typeof window !== 'undefined' ? window.location.origin : ''}/marketplace/${machine.id}`
+      : `السلام عليكم، أرغب في حجز الآلية "${machineTitle}" (${machine.city || 'المغرب'}) المعروضة بسعر ${machine.rate_daily?.toLocaleString('fr-FR')} د.م/يوم على منصة JADIJCB.\nالرابط: ${typeof window !== 'undefined' ? window.location.origin : ''}/marketplace/${machine.id}`
+  );
+  const whatsappLink = `https://wa.me/${ownerPhone}?text=${whatsappMsg}`;
+
+  const handleBookingClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (onBookClick) {
+      onBookClick(machine);
+    } else {
+      navigate(`/marketplace/${machine.id}?book=true`);
+    }
+  };
 
   return (
     <Card
@@ -217,6 +255,70 @@ export const MachineCard: React.FC<MachineCardProps> = ({ machine }) => {
             )}
           </div>
         </div>
+      </div>
+
+      {/* Action Area: Booking Button for Contractors/Brokers OR Own Machine Badge */}
+      <div className="px-4 pb-4 pt-0">
+        {isOwnMachine ? (
+          <div className="w-full py-2 px-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-bold text-center flex items-center justify-center gap-1.5 shadow-2xs">
+            <ShieldCheck className="w-4 h-4 text-amber-700 shrink-0" />
+            <span>
+              {lang === 'fr'
+                ? 'Votre propre engin (Vous êtes le propriétaire)'
+                : 'آليتك الخاصة (أنت المالك)'}
+            </span>
+          </div>
+        ) : isRent ? (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleBookingClick}
+              className="flex-1 py-2 px-3 rounded-xl bg-primary hover:bg-primary-hover active:scale-[0.99] text-ink text-xs font-black shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <CalendarCheck className="w-4 h-4 text-ink shrink-0" />
+              <span>{lang === 'fr' ? 'Réserver' : 'طلب حجز الآلية'}</span>
+            </button>
+
+            <a
+              href={whatsappLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              title={lang === 'fr' ? 'Contacter sur WhatsApp' : 'تواصل عبر واتساب'}
+              className="py-2 px-3 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] active:scale-[0.99] text-white text-xs font-bold shadow-xs transition-all flex items-center justify-center gap-1 cursor-pointer shrink-0"
+            >
+              <MessageCircle className="w-4 h-4 fill-current shrink-0" />
+              <span className="hidden sm:inline font-bold">{lang === 'fr' ? 'WhatsApp' : 'واتساب'}</span>
+            </a>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                navigate(`/marketplace/${machine.id}`);
+              }}
+              className="flex-1 py-2 px-3 rounded-xl bg-ink hover:bg-black text-primary text-xs font-black shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <Truck className="w-4 h-4 text-primary shrink-0" />
+              <span>{lang === 'fr' ? 'Détails & Achat' : 'تفاصيل ومعاينة الشراء'}</span>
+            </button>
+
+            <a
+              href={whatsappLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              title={lang === 'fr' ? 'Contacter sur WhatsApp' : 'تواصل عبر واتساب'}
+              className="py-2 px-3 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] text-white text-xs font-bold shadow-xs transition-all flex items-center justify-center gap-1 cursor-pointer shrink-0"
+            >
+              <MessageCircle className="w-4 h-4 fill-current shrink-0" />
+              <span className="hidden sm:inline font-bold">{lang === 'fr' ? 'WhatsApp' : 'واتساب'}</span>
+            </a>
+          </div>
+        )}
       </div>
     </Card>
   );

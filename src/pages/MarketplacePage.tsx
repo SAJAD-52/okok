@@ -22,6 +22,7 @@ import { MarketplaceFilterBar } from '../components/marketplace/MarketplaceFilte
 import { MarketplaceMap } from '../components/marketplace/MarketplaceMap';
 import { Skeleton } from '../components/ui/Skeleton';
 import { Button } from '../components/ui/Button';
+import { CreateBookingModal } from '../components/bookings/CreateBookingModal';
 import { useLanguage } from '../hooks/useLanguage';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { machineStore } from '../lib/machineStore';
@@ -39,6 +40,10 @@ export const MarketplacePage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isError, setIsError] = useState(false);
   const [page, setPage] = useState(1);
+
+  // Booking Modal State for Contractors & Mediating Owners
+  const [selectedMachineForBooking, setSelectedMachineForBooking] = useState<Machine | null>(null);
+  const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
 
   // Read URL search params
   const modeParam = searchParams.get('mode') || 'all';
@@ -314,7 +319,14 @@ export const MarketplacePage: React.FC = () => {
                   <>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
                       {visibleMachines.map((machine) => (
-                        <MachineCard key={machine.id} machine={machine} />
+                        <MachineCard
+                          key={machine.id}
+                          machine={machine}
+                          onBookClick={(m) => {
+                            setSelectedMachineForBooking(m);
+                            setIsBookingModalOpen(true);
+                          }}
+                        />
                       ))}
                     </div>
 
@@ -342,6 +354,19 @@ export const MarketplacePage: React.FC = () => {
           </div>
         </div>
       </main>
+
+      {/* Booking Modal for Contractors, Brokers, and Guests */}
+      {isBookingModalOpen && (
+        <CreateBookingModal
+          isOpen={isBookingModalOpen}
+          onClose={() => {
+            setIsBookingModalOpen(false);
+            setSelectedMachineForBooking(null);
+          }}
+          machine={selectedMachineForBooking}
+          machines={machines}
+        />
+      )}
 
       <Footer />
     </div>

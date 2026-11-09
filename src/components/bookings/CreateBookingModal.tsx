@@ -31,6 +31,7 @@ import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { bookingStore } from '../../lib/bookingStore';
 import { machineStore } from '../../lib/machineStore';
 import { clientService } from '../../lib/clientService';
+import { serverApi } from '../../lib/serverApi';
 
 interface CreateBookingModalProps {
   isOpen: boolean;
@@ -300,7 +301,27 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
       created_at: new Date().toISOString(),
     };
 
-    // Save to Supabase (works for contractors, other owners, and external visitors)
+    // 1. Direct Server SQLite Database Persistence (works across all browsers, devices and users)
+    try {
+      const serverRes = await serverApi.createBooking(newBooking);
+      if (!serverRes.success && serverRes.error?.includes('CONFLICT')) {
+        setIsSubmitting(false);
+        const conflictMsg =
+          lang === 'fr'
+            ? 'Conflit de calendrier : Cette machine est déjà réservée sur ces dates !'
+            : 'تعارض في التواريخ : هذه الآلية محجوزة مسبقاً في هذه الفترة!';
+        setOverlapError(conflictMsg);
+        toast.error(conflictMsg);
+        return;
+      }
+      if (serverRes.booking?.id) {
+        newBooking.id = serverRes.booking.id;
+      }
+    } catch (apiErr) {
+      console.warn('Server SQLite save notice:', apiErr);
+    }
+
+    // 2. Save to Supabase (if configured)
     if (isSupabaseConfigured) {
       try {
         const payload: any = {
@@ -382,7 +403,7 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
       }
     }
 
-    // Save locally & emit events (triggers instant bell notification across tabs)
+    // 3. Save locally & emit events (triggers instant bell notification across tabs)
     bookingStore.saveBooking(newBooking);
     setIsSubmitting(false);
 

@@ -6,6 +6,7 @@
 import { Booking, BookingStatus } from '../types/database';
 import { supabase } from './supabase';
 import { machineStore } from './machineStore';
+import { serverApi } from './serverApi';
 
 const CACHE_KEY = 'jadijcb_cached_bookings';
 
@@ -22,6 +23,31 @@ export const bookingStore = {
     }
   },
 
+  // Fetch from server SQLite DB and update cache
+  async fetchServerBookings(ownerId?: string): Promise<Booking[]> {
+    try {
+      const serverBookings = await serverApi.getBookings({ owner_id: ownerId });
+      if (serverBookings && serverBookings.length > 0) {
+        const current = this.getCachedBookings();
+        const map = new Map<string, Booking>();
+        // First current
+        for (const b of current) {
+          map.set(b.id, b);
+        }
+        // Then overwrite/merge with server records
+        for (const sb of serverBookings) {
+          map.set(sb.id, sb);
+        }
+        const updatedList = Array.from(map.values());
+        localStorage.setItem(CACHE_KEY, JSON.stringify(updatedList));
+        return serverBookings;
+      }
+    } catch (e) {
+      console.warn('fetchServerBookings notice:', e);
+    }
+    return [];
+  },
+
   // Clear all cached bookings
   clearAllBookings(): void {
     try {
@@ -32,7 +58,7 @@ export const bookingStore = {
     }
   },
 
-  // Save a new booking (Supabase + Local Cache)
+  // Save a new booking (Server SQLite DB + Local Cache)
   saveBooking(booking: Booking): void {
     try {
       const current = this.getCachedBookings();
@@ -40,6 +66,11 @@ export const bookingStore = {
       const filtered = current.filter((b) => b.id !== booking.id);
       filtered.unshift(booking);
       localStorage.setItem(CACHE_KEY, JSON.stringify(filtered));
+
+      // Asynchronously persist to server SQLite DB (visible across all browsers and devices)
+      serverApi.createBooking(booking).catch((err) => {
+        console.warn('Could not persist booking to server SQLite DB:', err);
+      });
 
       // Dispatch cross-tab storage event
       const eventPayload = { action: 'created', booking, ts: Date.now() };
@@ -68,6 +99,11 @@ export const bookingStore = {
         return b;
       });
       localStorage.setItem(CACHE_KEY, JSON.stringify(updated));
+
+      // Asynchronously update on server SQLite DB
+      serverApi.updateBookingStatus(id, newStatus, notes).catch((err) => {
+        console.warn('Could not update booking status on server SQLite DB:', err);
+      });
 
       const eventPayload = { action: 'updated', id, status: newStatus, ts: Date.now() };
       localStorage.setItem('jadijcb_last_booking_event', JSON.stringify(eventPayload));

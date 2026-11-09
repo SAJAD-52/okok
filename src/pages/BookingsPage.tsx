@@ -51,6 +51,7 @@ import { paymentService } from '../lib/paymentService';
 import { documentService } from '../lib/documentService';
 import { businessService } from '../lib/businessService';
 import { machineStore } from '../lib/machineStore';
+import { serverApi } from '../lib/serverApi';
 
 type TabFilter = 'all' | 'pending' | 'active' | 'completed' | 'cancelled' | 'dues';
 
@@ -131,6 +132,17 @@ export const BookingsPage: React.FC = () => {
 
       // 2. Load bookings (matches owner_id OR machine ownership)
       let bList: Booking[] = [];
+
+      // Query Server SQLite Database first
+      try {
+        const serverBookings = await serverApi.getBookings({ owner_id: ownerId });
+        if (serverBookings && serverBookings.length > 0) {
+          bList = serverBookings;
+        }
+      } catch (err) {
+        console.warn('Server SQLite bookings load notice:', err);
+      }
+
       if (isSupabaseConfigured) {
         try {
           let bQuery = supabase
@@ -257,11 +269,17 @@ export const BookingsPage: React.FC = () => {
       }
     }
 
+    // Periodic polling every 4 seconds to catch new bookings from other browsers
+    const pollInterval = setInterval(() => {
+      loadData();
+    }, 4000);
+
     return () => {
       window.removeEventListener('jadijcb_booking_event', handleUpdate);
       window.removeEventListener('jadijcb_payments_updated', handleUpdate);
       window.removeEventListener('jadijcb_machines_updated', handleUpdate);
       window.removeEventListener('storage', handleStorage);
+      clearInterval(pollInterval);
       if (channel) {
         supabase.removeChannel(channel);
       }

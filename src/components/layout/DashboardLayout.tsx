@@ -39,6 +39,7 @@ import { machineStore } from '../../lib/machineStore';
 import { chatStore } from '../../lib/chatStore';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { toast } from '../ui/Toast';
+import { serverApi, ServerNotification } from '../../lib/serverApi';
 
 export const DashboardLayout: React.FC = () => {
   const { t, isRTL, lang } = useLanguage();
@@ -52,6 +53,7 @@ export const DashboardLayout: React.FC = () => {
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
   const [pendingBookingsCount, setPendingBookingsCount] = useState<number>(0);
   const [pendingBookingsList, setPendingBookingsList] = useState<Booking[]>([]);
+  const [systemNotifications, setSystemNotifications] = useState<ServerNotification[]>([]);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
 
   const isContractor = profile?.role === 'client' || profile?.role === 'contractor';
@@ -126,6 +128,25 @@ export const DashboardLayout: React.FC = () => {
 
         let dbBookings: Booking[] = [];
 
+        // 1. Fetch from Server SQLite DB (shared across all devices & users)
+        try {
+          const serverBookings = await serverApi.getBookings({
+            owner_id: profile.id,
+            status: 'pending',
+          });
+          if (serverBookings && serverBookings.length > 0) {
+            dbBookings = serverBookings;
+          }
+
+          const notifRes = await serverApi.getNotifications({ user_id: profile.id });
+          if (notifRes.notifications) {
+            setSystemNotifications(notifRes.notifications);
+          }
+        } catch (serverErr) {
+          console.warn('Server SQLite pending load notice:', serverErr);
+        }
+
+        // 2. Fetch from Supabase (if configured)
         if (isSupabaseConfigured) {
           try {
             let query = supabase
@@ -149,7 +170,7 @@ export const DashboardLayout: React.FC = () => {
                 .eq('owner_id', profile.id)
                 .eq('status', 'pending');
               if (fallback) {
-                dbBookings = fallback.map((b: any) => ({
+                const mapped = fallback.map((b: any) => ({
                   id: b.id,
                   machine_id: b.machine_id,
                   owner_id: b.owner_id,
@@ -165,9 +186,10 @@ export const DashboardLayout: React.FC = () => {
                   machine: b.machines,
                   with_operator: Boolean(b.with_operator ?? true),
                 }));
+                dbBookings = [...dbBookings, ...mapped];
               }
             } else if (data) {
-              dbBookings = data.map((b: any) => ({
+              const mapped = data.map((b: any) => ({
                 id: b.id,
                 machine_id: b.machine_id,
                 owner_id: b.owner_id,
@@ -183,6 +205,7 @@ export const DashboardLayout: React.FC = () => {
                 machine: b.machines,
                 with_operator: Boolean(b.with_operator ?? true),
               }));
+              dbBookings = [...dbBookings, ...mapped];
             }
           } catch (e) {
             console.warn('DB pending check warning:', e);
@@ -217,6 +240,7 @@ export const DashboardLayout: React.FC = () => {
     // 1. In-tab custom event
     const handleEvent = () => checkPending();
     window.addEventListener('jadijcb_booking_event', handleEvent);
+    window.addEventListener('jadijcb_bookings_updated', handleEvent);
 
     // 2. Cross-tab storage event
     const handleStorage = (e: StorageEvent) => {
@@ -226,33 +250,14 @@ export const DashboardLayout: React.FC = () => {
     };
     window.addEventListener('storage', handleStorage);
 
-    // 3. Supabase Realtime channel subscription
-    let channel: any = null;
-    if (isSupabaseConfigured) {
-      try {
-        channel = supabase
-          .channel('realtime_owner_bookings_' + profile.id)
-          .on(
-            'postgres_changes',
-            { event: '*', schema: 'public', table: 'bookings', filter: `owner_id=eq.${profile.id}` },
-            () => checkPending()
-          )
-          .subscribe();
-      } catch {
-        // Ignore
-      }
-    }
-
-    // 4. Fallback interval polling every 8s
-    const timer = setInterval(checkPending, 8000);
+    // 3. Periodic polling every 4s to catch cross-browser bookings in real-time
+    const timer = setInterval(checkPending, 4000);
 
     return () => {
       window.removeEventListener('jadijcb_booking_event', handleEvent);
+      window.removeEventListener('jadijcb_bookings_updated', handleEvent);
       window.removeEventListener('storage', handleStorage);
       clearInterval(timer);
-      if (channel) {
-        supabase.removeChannel(channel);
-      }
     };
   }, [profile?.id, isContractor, lang]);
 
@@ -572,111 +577,177 @@ export const DashboardLayout: React.FC = () => {
             <div className="md:hidden">
               <LanguageSwitcher />
             </div>
-            {/* Notifications Button with Live Badge & Dropdown */}
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setIsNotificationsOpen((prev) => !prev)}
-                className="p-2 text-steel-600 hover:text-ink hover:bg-steel-100 rounded-lg min-h-[44px] min-w-[44px] flex items-center justify-center relative cursor-pointer"
-                aria-label="Notifications"
-              >
-                <Bell className="w-5 h-5" />
-                {pendingBookingsCount > 0 && (
-                  <span className="absolute top-1.5 end-1.5 px-1.5 py-0.2 rounded-full bg-primary text-ink text-[10px] font-black border border-white animate-pulse">
-                    {pendingBookingsCount}
-                  </span>
-                )}
-              </button>
+              {/* Notifications Button with Live Badge & Dropdown */}
+              {(() => {
+                const unreadSystemCount = systemNotifications.filter((n) => !n.is_read && !n.read).length;
+                const totalAlertsCount = pendingBookingsCount + unreadSystemCount;
 
-              {/* Notifications Dropdown */}
-              {isNotificationsOpen && (
-                <div className="absolute top-full end-0 mt-2 w-80 sm:w-96 bg-white border border-steel-200 rounded-2xl shadow-2xl z-50 overflow-hidden text-start animate-fade-in">
-                  <div className="bg-ink p-3.5 text-white flex items-center justify-between border-b border-primary">
-                    <div className="flex items-center gap-2">
-                      <Bell className="w-4 h-4 text-primary" />
-                      <span className="text-xs font-bold">
-                        {lang === 'fr' ? 'Notifications & Demandes' : 'الإشعارات وطلبات الكراء'}
-                      </span>
-                    </div>
-                    {pendingBookingsCount > 0 && (
-                      <span className="px-2 py-0.5 rounded-full bg-primary text-ink text-[10px] font-black">
-                        {pendingBookingsCount} {lang === 'fr' ? 'en attente' : 'قيد التأكيد'}
-                      </span>
-                    )}
-                  </div>
+                return (
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setIsNotificationsOpen((prev) => !prev)}
+                      className="p-2 text-steel-600 hover:text-ink hover:bg-steel-100 rounded-lg min-h-[44px] min-w-[44px] flex items-center justify-center relative cursor-pointer"
+                      aria-label="Notifications"
+                    >
+                      <Bell className="w-5 h-5" />
+                      {totalAlertsCount > 0 && (
+                        <span className="absolute top-1.5 end-1.5 px-1.5 py-0.2 rounded-full bg-primary text-ink text-[10px] font-black border border-white animate-pulse">
+                          {totalAlertsCount}
+                        </span>
+                      )}
+                    </button>
 
-                  <div className="max-h-80 overflow-y-auto p-2 space-y-2">
-                    {pendingBookingsList.length === 0 ? (
-                      <div className="p-6 text-center text-steel-400 text-xs">
-                        <Check className="w-8 h-8 mx-auto mb-1 text-steel-300" />
-                        <span>{lang === 'fr' ? 'Aucune nouvelle demande pour le moment.' : 'لا توجد طلبات حجز جديدة حالياً.'}</span>
-                      </div>
-                    ) : (
-                      pendingBookingsList.map((pb) => (
-                        <div
-                          key={pb.id}
-                          className="p-3 bg-amber-50/70 rounded-xl border border-amber-200 space-y-1.5 text-xs"
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="font-black text-ink">
-                              {pb.machine?.title_ar || pb.machine?.title_fr || 'آلية JCB'}
-                            </span>
-                            <span className="text-primary-dark font-black font-mono">
-                              {pb.total_price.toLocaleString('fr-FR')} MAD
+                    {/* Notifications Dropdown */}
+                    {isNotificationsOpen && (
+                      <div className="absolute top-full end-0 mt-2 w-80 sm:w-96 bg-white border border-steel-200 rounded-2xl shadow-2xl z-50 overflow-hidden text-start animate-fade-in">
+                        <div className="bg-ink p-3.5 text-white flex items-center justify-between border-b border-primary">
+                          <div className="flex items-center gap-2">
+                            <Bell className="w-4 h-4 text-primary" />
+                            <span className="text-xs font-bold">
+                              {lang === 'fr' ? 'Notifications & Demandes' : 'الإشعارات وطلبات الكراء'}
                             </span>
                           </div>
-                          <div className="text-[11px] text-steel-600 flex items-center gap-2">
-                            <span>{pb.client_name || 'زبون مقاولة'}</span>
-                            {pb.client_phone && (
-                              <span dir="ltr" className="font-mono text-steel-500">
-                                ({pb.client_phone})
+                          <div className="flex items-center gap-2">
+                            {totalAlertsCount > 0 && (
+                              <span className="px-2 py-0.5 rounded-full bg-primary text-ink text-[10px] font-black">
+                                {totalAlertsCount} {lang === 'fr' ? 'nouveaux' : 'جديد'}
                               </span>
                             )}
-                          </div>
-                          <div className="text-[10px] text-steel-500 font-mono" dir="ltr">
-                            {pb.start_at?.slice(0, 10)} → {pb.end_at?.slice(0, 10)}
-                          </div>
-                          <div className="flex items-center gap-2 pt-1 border-t border-amber-200/60">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setIsNotificationsOpen(false);
-                                navigate('/owner/bookings');
-                              }}
-                              className="px-2.5 py-1 rounded-lg bg-primary text-ink font-bold text-[11px] hover:bg-primary-hover transition-colors cursor-pointer"
-                            >
-                              {lang === 'fr' ? 'Voir et Confirmer' : 'مراجعة وتأكيد'}
-                            </button>
-                            {pb.client_phone && (
-                              <a
-                                href={`tel:${pb.client_phone}`}
-                                className="px-2.5 py-1 rounded-lg bg-white border border-steel-300 text-steel-700 font-bold text-[11px] hover:bg-steel-50 flex items-center gap-1"
+                            {unreadSystemCount > 0 && (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  await serverApi.markAllNotificationsRead(profile?.id);
+                                  setSystemNotifications((prev) =>
+                                    prev.map((n) => ({ ...n, is_read: true, read: true }))
+                                  );
+                                }}
+                                className="text-[10px] text-primary hover:underline cursor-pointer"
                               >
-                                <Phone className="w-3 h-3 text-emerald-600" />
-                                <span>{lang === 'fr' ? 'Appeler' : 'اتصال'}</span>
-                              </a>
+                                {lang === 'fr' ? 'Tout marquer lu' : 'قراءة الكل'}
+                              </button>
                             )}
                           </div>
                         </div>
-                      ))
+
+                        <div className="max-h-80 overflow-y-auto p-2 space-y-2">
+                          {pendingBookingsList.length === 0 && systemNotifications.length === 0 ? (
+                            <div className="p-6 text-center text-steel-400 text-xs">
+                              <Check className="w-8 h-8 mx-auto mb-1 text-steel-300" />
+                              <span>
+                                {lang === 'fr'
+                                  ? 'Aucune nouvelle demande pour le moment.'
+                                  : 'لا توجد طلبات حجز جديدة حالياً.'}
+                              </span>
+                            </div>
+                          ) : (
+                            <>
+                              {/* 1. Pending Bookings requiring action */}
+                              {pendingBookingsList.map((pb) => (
+                                <div
+                                  key={pb.id}
+                                  className="p-3 bg-amber-50/80 rounded-xl border border-amber-300 space-y-1.5 text-xs shadow-xs"
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <span className="font-black text-ink">
+                                      {pb.machine?.title_ar || pb.machine?.title_fr || 'آلية JCB'}
+                                    </span>
+                                    <span className="text-primary-dark font-black font-mono">
+                                      {pb.total_price.toLocaleString('fr-FR')} MAD
+                                    </span>
+                                  </div>
+                                  <div className="text-[11px] text-steel-600 flex items-center gap-2">
+                                    <span className="font-bold">{pb.client_name || 'زبون مقاولة'}</span>
+                                    {pb.client_phone && (
+                                      <span dir="ltr" className="font-mono text-steel-500">
+                                        ({pb.client_phone})
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[10px] text-steel-500 font-mono" dir="ltr">
+                                    {pb.start_at?.slice(0, 10)} → {pb.end_at?.slice(0, 10)}
+                                  </div>
+                                  <div className="flex items-center gap-2 pt-1 border-t border-amber-200/60">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setIsNotificationsOpen(false);
+                                        navigate('/owner/bookings?tab=pending');
+                                      }}
+                                      className="px-2.5 py-1 rounded-lg bg-primary text-ink font-bold text-[11px] hover:bg-primary-hover transition-colors cursor-pointer"
+                                    >
+                                      {lang === 'fr' ? 'Voir et Confirmer' : 'مراجعة وتأكيد'}
+                                    </button>
+                                    {pb.client_phone && (
+                                      <a
+                                        href={`https://wa.me/${pb.client_phone.replace(/\D/g, '')}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="px-2.5 py-1 rounded-lg bg-[#25D366] text-white font-bold text-[11px] hover:bg-[#20bd5a] flex items-center gap-1 cursor-pointer"
+                                      >
+                                        <MessageSquare className="w-3 h-3" />
+                                        <span>{lang === 'fr' ? 'WhatsApp' : 'واتساب'}</span>
+                                      </a>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+
+                              {/* 2. System notifications from SQLite DB */}
+                              {systemNotifications.map((notif) => (
+                                <div
+                                  key={notif.id}
+                                  onClick={async () => {
+                                    if (!notif.is_read) {
+                                      await serverApi.markNotificationRead(notif.id);
+                                      setSystemNotifications((prev) =>
+                                        prev.map((n) => (n.id === notif.id ? { ...n, is_read: true, read: true } : n))
+                                      );
+                                    }
+                                    setIsNotificationsOpen(false);
+                                    navigate('/owner/bookings?tab=pending');
+                                  }}
+                                  className={`p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
+                                    !notif.is_read
+                                      ? 'bg-primary/10 border-primary/40 font-medium'
+                                      : 'bg-steel-50/70 border-steel-200 text-steel-600'
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between text-ink font-bold mb-1">
+                                    <span>{lang === 'fr' ? notif.title_fr : notif.title_ar}</span>
+                                    <span className="text-[10px] text-steel-400 font-mono">
+                                      {notif.created_at?.slice(11, 16) || ''}
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-steel-600 line-clamp-2">
+                                    {lang === 'fr' ? notif.body_fr : notif.body_ar}
+                                  </p>
+                                </div>
+                              ))}
+                            </>
+                          )}
+                        </div>
+
+                        <div className="p-2 border-t border-steel-100 bg-steel-50 text-center">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsNotificationsOpen(false);
+                              navigate('/owner/bookings?tab=pending');
+                            }}
+                            className="text-xs text-primary-dark font-bold hover:underline cursor-pointer"
+                          >
+                            {lang === 'fr'
+                              ? 'Accéder au gestionnaire des réservations →'
+                              : 'الانتقال إلى سجل الحجوزات الكامل ←'}
+                          </button>
+                        </div>
+                      </div>
                     )}
                   </div>
-
-                  <div className="p-2 border-t border-steel-100 bg-steel-50 text-center">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsNotificationsOpen(false);
-                        navigate('/owner/bookings');
-                      }}
-                      className="text-xs text-primary-dark font-bold hover:underline cursor-pointer"
-                    >
-                      {lang === 'fr' ? 'Accéder au gestionnaire des réservations →' : 'الانتقال إلى سجل الحجوزات الكامل ←'}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
+                );
+              })()}
           </div>
         </header>
 

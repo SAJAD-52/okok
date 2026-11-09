@@ -55,6 +55,7 @@ import { paymentService } from '../lib/paymentService';
 import { leadService } from '../lib/leadService';
 import { businessService } from '../lib/businessService';
 import { documentService } from '../lib/documentService';
+import { serverApi } from '../lib/serverApi';
 import { recordUserActivityThrottled, usePwaInstall } from '../lib/pwaHelper';
 
 export const DashboardOverviewPage: React.FC = () => {
@@ -123,6 +124,16 @@ export const DashboardOverviewPage: React.FC = () => {
       // 2. Bookings (Matches owner_id OR machine ownership)
       let bList: Booking[] = [];
       const ownerMachineIds = realMachines.map((m) => m.id).filter(Boolean);
+
+      // Load from Server SQLite Database (shared across all devices & users)
+      try {
+        const serverBookings = await serverApi.getBookings({ owner_id: userId });
+        if (serverBookings && serverBookings.length > 0) {
+          bList = serverBookings;
+        }
+      } catch (serverErr) {
+        console.warn('Server SQLite bookings load notice:', serverErr);
+      }
 
       if (isSupabaseConfigured) {
         try {
@@ -234,6 +245,11 @@ export const DashboardOverviewPage: React.FC = () => {
     };
     window.addEventListener('storage', handleStorage);
 
+    // Periodic polling every 4 seconds to catch new bookings from other browsers
+    const pollInterval = setInterval(() => {
+      loadDashboardData();
+    }, 4000);
+
     return () => {
       window.removeEventListener('jadijcb_machines_updated', handleUpdate);
       window.removeEventListener('jadijcb_booking_event', handleUpdate);
@@ -241,6 +257,7 @@ export const DashboardOverviewPage: React.FC = () => {
       window.removeEventListener('jadijcb_documents_updated', handleUpdate);
       window.removeEventListener('jadijcb_business_profile_updated', handleUpdate);
       window.removeEventListener('storage', handleStorage);
+      clearInterval(pollInterval);
     };
   }, [loadDashboardData]);
 

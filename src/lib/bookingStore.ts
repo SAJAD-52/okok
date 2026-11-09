@@ -5,6 +5,7 @@
 
 import { Booking, BookingStatus } from '../types/database';
 import { supabase } from './supabase';
+import { machineStore } from './machineStore';
 
 const CACHE_KEY = 'jadijcb_cached_bookings';
 
@@ -46,6 +47,7 @@ export const bookingStore = {
 
       // Dispatch event for instant UI reactive update in current tab
       window.dispatchEvent(new CustomEvent('jadijcb_booking_event', { detail: eventPayload }));
+      window.dispatchEvent(new CustomEvent('jadijcb_bookings_updated', { detail: eventPayload }));
     } catch (e) {
       console.warn('Could not cache booking locally:', e);
     }
@@ -72,46 +74,65 @@ export const bookingStore = {
 
       // Dispatch event
       window.dispatchEvent(new CustomEvent('jadijcb_booking_event', { detail: eventPayload }));
+      window.dispatchEvent(new CustomEvent('jadijcb_bookings_updated', { detail: eventPayload }));
     } catch (e) {
       console.warn('Could not update cached booking:', e);
     }
   },
 
   // Merge Supabase bookings with local cache for Owner
-  mergeOwnerBookings(supabaseBookings: Booking[], ownerId: string, ownerMachineIds: string[] = []): Booking[] {
+  mergeOwnerBookings(
+    supabaseBookings: Booking[],
+    ownerId?: string,
+    ownerMachineIds: string[] = [],
+    isSuperAdmin: boolean = false
+  ): Booking[] {
     const cached = this.getCachedBookings();
+    const allLocalMachines = machineStore.getCachedMachines();
+
     const matchingCached = cached.filter((b) => {
-      const isOwner = b.owner_id === ownerId;
-      const isMachineOwner = ownerMachineIds.includes(b.machine_id);
+      if (isSuperAdmin) return true;
+      if (!ownerId) return true;
+      const isOwner =
+        b.owner_id === ownerId ||
+        !b.owner_id ||
+        b.owner_id === 'owner' ||
+        b.owner_id === 'demo-owner';
+      const isMachineOwner = Boolean(b.machine_id && ownerMachineIds.includes(b.machine_id));
       return isOwner || isMachineOwner;
     });
 
     const map = new Map<string, Booking>();
     // First put Supabase bookings
     for (const b of supabaseBookings) {
-      map.set(b.id, b);
+      const resolvedMachine = b.machine || allLocalMachines.find((m) => m.id === b.machine_id);
+      map.set(b.id, { ...b, machine: resolvedMachine });
     }
     // Then merge matching cached bookings (if newer or pending)
     for (const b of matchingCached) {
+      const resolvedMachine = b.machine || allLocalMachines.find((m) => m.id === b.machine_id);
       if (!map.has(b.id)) {
-        map.set(b.id, b);
+        map.set(b.id, { ...b, machine: resolvedMachine });
       } else {
         // If cached has different status, preserve latest
         const existing = map.get(b.id)!;
         if (b.status !== existing.status) {
-          map.set(b.id, { ...existing, status: b.status });
+          map.set(b.id, { ...existing, status: b.status, machine: existing.machine || resolvedMachine });
         }
       }
     }
 
     return Array.from(map.values()).sort(
-      (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+      (a, b) =>
+        new Date(b.created_at || b.start_at || 0).getTime() -
+        new Date(a.created_at || a.start_at || 0).getTime()
     );
   },
 
   // Merge Supabase bookings with local cache for Contractor
   mergeContractorBookings(supabaseBookings: Booking[], clientId: string, clientPhone?: string): Booking[] {
     const cached = this.getCachedBookings();
+    const allLocalMachines = machineStore.getCachedMachines();
     const matchingCached = cached.filter((b) => {
       const isClient = b.client_id === clientId;
       const isPhone = clientPhone && b.client_phone === clientPhone;
@@ -120,15 +141,17 @@ export const bookingStore = {
 
     const map = new Map<string, Booking>();
     for (const b of supabaseBookings) {
-      map.set(b.id, b);
+      const resolvedMachine = b.machine || allLocalMachines.find((m) => m.id === b.machine_id);
+      map.set(b.id, { ...b, machine: resolvedMachine });
     }
     for (const b of matchingCached) {
+      const resolvedMachine = b.machine || allLocalMachines.find((m) => m.id === b.machine_id);
       if (!map.has(b.id)) {
-        map.set(b.id, b);
+        map.set(b.id, { ...b, machine: resolvedMachine });
       } else {
         const existing = map.get(b.id)!;
         if (b.status !== existing.status) {
-          map.set(b.id, { ...existing, status: b.status });
+          map.set(b.id, { ...existing, status: b.status, machine: existing.machine || resolvedMachine });
         }
       }
     }
@@ -139,11 +162,23 @@ export const bookingStore = {
   },
 
   // Count pending bookings for owner
-  getPendingCountForOwner(ownerId?: string, machineIds: string[] = []): number {
-    if (!ownerId) return 0;
+  getPendingCountForOwner(
+    ownerId?: string,
+    machineIds: string[] = [],
+    isSuperAdmin: boolean = false
+  ): number {
     const cached = this.getCachedBookings();
-    return cached.filter(
-      (b) => (b.owner_id === ownerId || machineIds.includes(b.machine_id)) && b.status === 'pending'
-    ).length;
+    return cached.filter((b) => {
+      if (b.status !== 'pending') return false;
+      if (isSuperAdmin) return true;
+      if (!ownerId) return true;
+      return (
+        b.owner_id === ownerId ||
+        !b.owner_id ||
+        b.owner_id === 'owner' ||
+        b.owner_id === 'demo-owner' ||
+        (b.machine_id && machineIds.includes(b.machine_id))
+      );
+    }).length;
   },
 };

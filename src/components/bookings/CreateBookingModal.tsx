@@ -29,6 +29,7 @@ import { useLanguage } from '../../hooks/useLanguage';
 import { useAuth } from '../../hooks/useAuth';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { bookingStore } from '../../lib/bookingStore';
+import { machineStore } from '../../lib/machineStore';
 import { clientService } from '../../lib/clientService';
 
 interface CreateBookingModalProps {
@@ -238,11 +239,24 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
 
     setIsSubmitting(true);
 
-    const resolvedOwnerId = targetMachine?.owner_id || ownerId || 'owner';
+    const isUuid = (str?: string | null) =>
+      Boolean(str && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str));
+
+    let resolvedOwnerId = targetMachine?.owner_id;
+    if (!isUuid(resolvedOwnerId)) {
+      const foundInCache = machineStore.getCachedMachines().find((m) => m.id === machineId);
+      if (isUuid(foundInCache?.owner_id)) {
+        resolvedOwnerId = foundInCache!.owner_id;
+      } else if (isUuid(ownerId)) {
+        resolvedOwnerId = ownerId;
+      } else {
+        resolvedOwnerId = targetMachine?.owner_id || ownerId || 'owner';
+      }
+    }
 
     // Auto-save new client in directory if "new" was selected by an authenticated owner
     let clientRefId = selectedClientId !== 'new' ? selectedClientId : undefined;
-    if (selectedClientId === 'new' && ownerId) {
+    if (selectedClientId === 'new' && ownerId && isUuid(ownerId)) {
       try {
         const clientRes = await clientService.createClient(ownerId, {
           name: clientName.trim(),
@@ -261,7 +275,7 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
       id: crypto.randomUUID(),
       machine_id: machineId,
       owner_id: resolvedOwnerId,
-      client_id: user?.id || null,
+      client_id: isUuid(user?.id) ? user.id : null,
       client_name: clientName.trim(),
       client_phone: clientPhone.trim(),
       client_ref_id: clientRefId,
@@ -292,8 +306,8 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
         const payload: any = {
           id: newBooking.id,
           machine_id: newBooking.machine_id,
-          owner_id: resolvedOwnerId,
-          client_id: user?.id || null,
+          ...(isUuid(resolvedOwnerId) ? { owner_id: resolvedOwnerId } : {}),
+          ...(isUuid(user?.id) ? { client_id: user.id } : {}),
           client_name: newBooking.client_name,
           client_phone: newBooking.client_phone,
           start_at: newBooking.start_at,

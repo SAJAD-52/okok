@@ -35,6 +35,7 @@ import { PaymentProofModal } from '../dashboard/PaymentProofModal';
 import { ProfileSettingsModal } from '../profile/ProfileSettingsModal';
 import { Booking } from '../../types/database';
 import { bookingStore } from '../../lib/bookingStore';
+import { machineStore } from '../../lib/machineStore';
 import { chatStore } from '../../lib/chatStore';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { toast } from '../ui/Toast';
@@ -117,46 +118,83 @@ export const DashboardLayout: React.FC = () => {
 
     const checkPending = async () => {
       try {
-        const cached = bookingStore.getCachedBookings().filter(
-          (b) => (b.owner_id === profile.id || !b.owner_id) && b.status === 'pending'
-        );
-        let list = [...cached];
+        const ownerMachineIds = machineStore
+          .getCachedMachines()
+          .filter((m) => m.owner_id === profile.id || !m.owner_id)
+          .map((m) => m.id)
+          .filter(Boolean);
+
+        let dbBookings: Booking[] = [];
 
         if (isSupabaseConfigured) {
-          const { data } = await supabase
-            .from('bookings')
-            .select('*, machines(*)')
-            .eq('owner_id', profile.id)
-            .eq('status', 'pending');
+          try {
+            let query = supabase
+              .from('bookings')
+              .select('*, machines(*)')
+              .eq('status', 'pending');
 
-          if (data) {
-            const mapped: Booking[] = data.map((b: any) => ({
-              id: b.id,
-              machine_id: b.machine_id,
-              owner_id: b.owner_id,
-              client_id: b.client_id,
-              client_name: b.client_name,
-              client_phone: b.client_phone,
-              start_at: b.start_at,
-              end_at: b.end_at,
-              total_price: Number(b.total_price) || 0,
-              status: b.status,
-              notes: b.notes,
-              created_at: b.created_at,
-              machine: b.machines,
-              with_operator: Boolean(b.with_operator ?? true),
-            }));
-
-            for (const m of mapped) {
-              if (!list.some((item) => item.id === m.id)) {
-                list.push(m);
-              }
+            if (isSuperAdmin) {
+              // Super admin sees all pending
+            } else if (ownerMachineIds.length > 0) {
+              query = query.or(`owner_id.eq.${profile.id},machine_id.in.(${ownerMachineIds.join(',')})`);
+            } else {
+              query = query.eq('owner_id', profile.id);
             }
+
+            const { data, error } = await query;
+            if (error) {
+              const { data: fallback } = await supabase
+                .from('bookings')
+                .select('*, machines(*)')
+                .eq('owner_id', profile.id)
+                .eq('status', 'pending');
+              if (fallback) {
+                dbBookings = fallback.map((b: any) => ({
+                  id: b.id,
+                  machine_id: b.machine_id,
+                  owner_id: b.owner_id,
+                  client_id: b.client_id,
+                  client_name: b.client_name,
+                  client_phone: b.client_phone,
+                  start_at: b.start_at || b.start_date,
+                  end_at: b.end_at || b.end_date,
+                  total_price: Number(b.total_price) || 0,
+                  status: b.status,
+                  notes: b.notes,
+                  created_at: b.created_at,
+                  machine: b.machines,
+                  with_operator: Boolean(b.with_operator ?? true),
+                }));
+              }
+            } else if (data) {
+              dbBookings = data.map((b: any) => ({
+                id: b.id,
+                machine_id: b.machine_id,
+                owner_id: b.owner_id,
+                client_id: b.client_id,
+                client_name: b.client_name,
+                client_phone: b.client_phone,
+                start_at: b.start_at || b.start_date,
+                end_at: b.end_at || b.end_date,
+                total_price: Number(b.total_price) || 0,
+                status: b.status,
+                notes: b.notes,
+                created_at: b.created_at,
+                machine: b.machines,
+                with_operator: Boolean(b.with_operator ?? true),
+              }));
+            }
+          } catch (e) {
+            console.warn('DB pending check warning:', e);
           }
         }
 
-        setPendingBookingsList(list);
-        const count = list.length;
+        const merged = bookingStore
+          .mergeOwnerBookings(dbBookings, profile.id, ownerMachineIds, isSuperAdmin)
+          .filter((b) => b.status === 'pending');
+
+        setPendingBookingsList(merged);
+        const count = merged.length;
         setPendingBookingsCount(count);
 
         // Notify user if a new booking just arrived
@@ -169,7 +207,7 @@ export const DashboardLayout: React.FC = () => {
         }
         previousCount = count;
       } catch {
-        const c = bookingStore.getPendingCountForOwner(profile.id);
+        const c = bookingStore.getPendingCountForOwner(profile.id, [], isSuperAdmin);
         setPendingBookingsCount(c);
       }
     };

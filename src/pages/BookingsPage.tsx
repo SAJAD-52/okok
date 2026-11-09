@@ -56,16 +56,30 @@ type TabFilter = 'all' | 'pending' | 'active' | 'completed' | 'cancelled' | 'due
 
 export const BookingsPage: React.FC = () => {
   const { t, lang, isRTL } = useLanguage();
-  const { user, profile } = useAuth();
+  const { user, profile, isSuperAdmin } = useAuth();
   const navigate = useNavigate();
 
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [machines, setMachines] = useState<Machine[]>([]);
   const [payments, setPayments] = useState<BookingPayment[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [activeTab, setActiveTab] = useState<TabFilter>('all');
+
+  // Read URL query tab (e.g. /owner/bookings?tab=pending)
+  const [activeTab, setActiveTab] = useState<TabFilter>(() => {
+    const p = new URLSearchParams(window.location.search).get('tab') as TabFilter | null;
+    return p && ['all', 'pending', 'active', 'completed', 'cancelled', 'dues'].includes(p) ? p : 'all';
+  });
+
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+
+  // Sync tab if URL search changes
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search).get('tab') as TabFilter | null;
+    if (p && ['all', 'pending', 'active', 'completed', 'cancelled', 'dues'].includes(p)) {
+      setActiveTab(p);
+    }
+  }, [window.location.search]);
 
   // Selected Booking for Payment Recording
   const [paymentTargetBooking, setPaymentTargetBooking] = useState<{
@@ -79,7 +93,7 @@ export const BookingsPage: React.FC = () => {
   const ownerId = user?.id || profile?.id;
 
   const loadData = useCallback(async () => {
-    if (!ownerId) {
+    if (!ownerId && !isSuperAdmin) {
       setIsLoading(false);
       return;
     }
@@ -90,10 +104,11 @@ export const BookingsPage: React.FC = () => {
       // 1. Load machines
       let mList: Machine[] = [];
       if (isSupabaseConfigured) {
-        const { data: mData } = await supabase
-          .from('machines')
-          .select('*')
-          .eq('owner_id', ownerId);
+        let mQuery = supabase.from('machines').select('*');
+        if (!isSuperAdmin && ownerId) {
+          mQuery = mQuery.eq('owner_id', ownerId);
+        }
+        const { data: mData } = await mQuery;
         if (mData) {
           mList = mData.map((m: any) => ({
             id: m.id,
@@ -112,56 +127,98 @@ export const BookingsPage: React.FC = () => {
       }
       const mergedMachines = machineStore.mergeMachines(mList, ownerId);
       setMachines(mergedMachines);
+      const ownerMachineIds = mergedMachines.map((m) => m.id).filter(Boolean);
 
-      // 2. Load bookings
+      // 2. Load bookings (matches owner_id OR machine ownership)
       let bList: Booking[] = [];
       if (isSupabaseConfigured) {
-        const { data: bData } = await supabase
-          .from('bookings')
-          .select('*, machines(*)')
-          .eq('owner_id', ownerId)
-          .order('start_at', { ascending: false });
+        try {
+          let bQuery = supabase
+            .from('bookings')
+            .select('*, machines(*)')
+            .order('start_at', { ascending: false });
 
-        if (bData) {
-          bList = bData.map((b: any) => ({
-            id: b.id,
-            machine_id: b.machine_id,
-            owner_id: b.owner_id,
-            client_name: b.client_name,
-            client_phone: b.client_phone,
-            start_at: b.start_at || b.start_date,
-            end_at: b.end_at || b.end_date,
-            total_price: Number(b.total_price) || 0,
-            deposit_amount: Number(b.deposit_amount) || 0,
-            rate_type: b.rate_type || 'daily',
-            status: b.status,
-            notes: b.notes,
-            created_at: b.created_at,
-            machine: b.machines,
-            with_operator: Boolean(b.with_operator),
-          }));
+          if (isSuperAdmin) {
+            // Super Admin can see all bookings
+          } else if (ownerId && ownerMachineIds.length > 0) {
+            bQuery = bQuery.or(`owner_id.eq.${ownerId},machine_id.in.(${ownerMachineIds.join(',')})`);
+          } else if (ownerId) {
+            bQuery = bQuery.eq('owner_id', ownerId);
+          }
+
+          const { data: bData, error: bErr } = await bQuery;
+          if (bErr) {
+            console.warn('Primary bookings query failed, falling back:', bErr.message);
+            if (ownerId) {
+              const { data: fallback } = await supabase
+                .from('bookings')
+                .select('*, machines(*)')
+                .eq('owner_id', ownerId)
+                .order('start_at', { ascending: false });
+              if (fallback) {
+                bList = fallback.map((b: any) => ({
+                  id: b.id,
+                  machine_id: b.machine_id,
+                  owner_id: b.owner_id,
+                  client_name: b.client_name,
+                  client_phone: b.client_phone,
+                  start_at: b.start_at || b.start_date,
+                  end_at: b.end_at || b.end_date,
+                  total_price: Number(b.total_price) || 0,
+                  deposit_amount: Number(b.deposit_amount) || 0,
+                  rate_type: b.rate_type || 'daily',
+                  status: b.status,
+                  notes: b.notes,
+                  created_at: b.created_at,
+                  machine: b.machines,
+                  with_operator: Boolean(b.with_operator),
+                }));
+              }
+            }
+          } else if (bData) {
+            bList = bData.map((b: any) => ({
+              id: b.id,
+              machine_id: b.machine_id,
+              owner_id: b.owner_id,
+              client_name: b.client_name,
+              client_phone: b.client_phone,
+              start_at: b.start_at || b.start_date,
+              end_at: b.end_at || b.end_date,
+              total_price: Number(b.total_price) || 0,
+              deposit_amount: Number(b.deposit_amount) || 0,
+              rate_type: b.rate_type || 'daily',
+              status: b.status,
+              notes: b.notes,
+              created_at: b.created_at,
+              machine: b.machines,
+              with_operator: Boolean(b.with_operator),
+            }));
+          }
+        } catch (e) {
+          console.warn('Bookings load exception:', e);
         }
       }
 
-      // Merge with local booking store
-      const localCached = bookingStore.getCachedBookings().filter(
-        (b) => b.owner_id === ownerId || !b.owner_id
+      // Merge with local booking store (including machines match and super admin)
+      const mergedBookings = bookingStore.mergeOwnerBookings(
+        bList,
+        ownerId,
+        ownerMachineIds,
+        isSuperAdmin
       );
-      const combinedMap = new Map<string, Booking>();
-      for (const b of localCached) combinedMap.set(b.id, b);
-      for (const b of bList) combinedMap.set(b.id, b);
-      const mergedBookings = Array.from(combinedMap.values());
       setBookings(mergedBookings);
 
       // 3. Load payments
-      const loadedPayments = await paymentService.getPaymentsForOwner(ownerId);
-      setPayments(loadedPayments);
+      if (ownerId) {
+        const loadedPayments = await paymentService.getPaymentsForOwner(ownerId);
+        setPayments(loadedPayments);
+      }
     } catch (err) {
       console.warn('Error loading bookings page data:', err);
     } finally {
       setIsLoading(false);
     }
-  }, [ownerId]);
+  }, [ownerId, isSuperAdmin]);
 
   useEffect(() => {
     loadData();
@@ -717,14 +774,39 @@ export const BookingsPage: React.FC = () => {
                     {/* Left: Workflow Status Transitions */}
                     <div className="flex items-center gap-1.5">
                       {booking.status === 'pending' && (
-                        <button
-                          type="button"
-                          onClick={() => handleUpdateStatus(booking.id, 'active')}
-                          className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1 cursor-pointer shadow-xs"
-                        >
-                          <Check className="w-3.5 h-3.5" />
-                          <span>{lang === 'fr' ? 'Confirmer le départ' : 'تأكيد وبدء الكراء'}</span>
-                        </button>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateStatus(booking.id, 'active')}
+                            className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-xs"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            <span>{lang === 'fr' ? 'Accepter & Confirmer' : 'تأكيد وقبول الحجز'}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateStatus(booking.id, 'cancelled')}
+                            className="px-3 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-bold text-xs flex items-center gap-1 cursor-pointer"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                            <span>{lang === 'fr' ? 'Refuser' : 'رفض الطلب'}</span>
+                          </button>
+
+                          {booking.client_phone && (
+                            <a
+                              href={`https://wa.me/${booking.client_phone.replace(/\D/g, '')}?text=${encodeURIComponent(
+                                `السلام عليكم ${booking.client_name}، بخصوص طلب كراء الآلية (${booking.machine?.title_ar || 'JCB'}) عبر منصة JADIJCB.`
+                              )}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-3 py-1.5 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] text-white font-bold text-xs flex items-center gap-1.5 shadow-xs"
+                            >
+                              <MessageSquare className="w-3.5 h-3.5" />
+                              <span>{lang === 'fr' ? 'WhatsApp Client' : 'واتساب الزبون'}</span>
+                            </a>
+                          )}
+                        </div>
                       )}
 
                       {booking.status === 'active' && (

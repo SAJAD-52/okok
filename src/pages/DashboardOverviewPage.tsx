@@ -34,6 +34,7 @@ import {
   CheckCircle2,
   Send,
   ExternalLink,
+  X,
 } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -59,7 +60,7 @@ import { recordUserActivityThrottled, usePwaInstall } from '../lib/pwaHelper';
 export const DashboardOverviewPage: React.FC = () => {
   const { t, lang, isRTL } = useLanguage();
   const navigate = useNavigate();
-  const { profile, user } = useAuth();
+  const { profile, user, isSuperAdmin } = useAuth();
   const { isInstallable, promptInstall } = usePwaInstall();
 
   const [isAddMachineModalOpen, setIsAddMachineModalOpen] = useState(false);
@@ -119,38 +120,79 @@ export const DashboardOverviewPage: React.FC = () => {
       const realMachines = machineStore.mergeMachines(mList, userId);
       setMachines(realMachines);
 
-      // 2. Bookings
+      // 2. Bookings (Matches owner_id OR machine ownership)
       let bList: Booking[] = [];
+      const ownerMachineIds = realMachines.map((m) => m.id).filter(Boolean);
+
       if (isSupabaseConfigured) {
-        const { data: bData } = await supabase
-          .from('bookings')
-          .select('*, machines(*)')
-          .eq('owner_id', userId);
-        if (bData) {
-          bList = bData.map((b: any) => ({
-            id: b.id,
-            machine_id: b.machine_id,
-            owner_id: b.owner_id,
-            client_name: b.client_name,
-            client_phone: b.client_phone,
-            start_at: b.start_at || b.start_date,
-            end_at: b.end_at || b.end_date,
-            total_price: Number(b.total_price) || 0,
-            deposit_amount: Number(b.deposit_amount) || 0,
-            status: b.status,
-            with_operator: Boolean(b.with_operator ?? true),
-            created_at: b.created_at,
-            machine: b.machines,
-          }));
+        try {
+          let bQuery = supabase
+            .from('bookings')
+            .select('*, machines(*)')
+            .order('start_at', { ascending: false });
+
+          if (isSuperAdmin) {
+            // Super Admin
+          } else if (userId && ownerMachineIds.length > 0) {
+            bQuery = bQuery.or(`owner_id.eq.${userId},machine_id.in.(${ownerMachineIds.join(',')})`);
+          } else if (userId) {
+            bQuery = bQuery.eq('owner_id', userId);
+          }
+
+          const { data: bData, error: bErr } = await bQuery;
+          if (bErr) {
+            if (userId) {
+              const { data: fallback } = await supabase
+                .from('bookings')
+                .select('*, machines(*)')
+                .eq('owner_id', userId);
+              if (fallback) {
+                bList = fallback.map((b: any) => ({
+                  id: b.id,
+                  machine_id: b.machine_id,
+                  owner_id: b.owner_id,
+                  client_name: b.client_name,
+                  client_phone: b.client_phone,
+                  start_at: b.start_at || b.start_date,
+                  end_at: b.end_at || b.end_date,
+                  total_price: Number(b.total_price) || 0,
+                  deposit_amount: Number(b.deposit_amount) || 0,
+                  status: b.status,
+                  with_operator: Boolean(b.with_operator ?? true),
+                  created_at: b.created_at,
+                  machine: b.machines,
+                }));
+              }
+            }
+          } else if (bData) {
+            bList = bData.map((b: any) => ({
+              id: b.id,
+              machine_id: b.machine_id,
+              owner_id: b.owner_id,
+              client_name: b.client_name,
+              client_phone: b.client_phone,
+              start_at: b.start_at || b.start_date,
+              end_at: b.end_at || b.end_date,
+              total_price: Number(b.total_price) || 0,
+              deposit_amount: Number(b.deposit_amount) || 0,
+              status: b.status,
+              with_operator: Boolean(b.with_operator ?? true),
+              created_at: b.created_at,
+              machine: b.machines,
+            }));
+          }
+        } catch (e) {
+          console.warn('Dashboard bookings load exception:', e);
         }
       }
-      const localCachedBookings = bookingStore.getCachedBookings().filter(
-        (b) => b.owner_id === userId || !b.owner_id
+
+      const mergedBookings = bookingStore.mergeOwnerBookings(
+        bList,
+        userId,
+        ownerMachineIds,
+        isSuperAdmin
       );
-      const bMap = new Map<string, Booking>();
-      for (const b of localCachedBookings) bMap.set(b.id, b);
-      for (const b of bList) bMap.set(b.id, b);
-      setBookings(Array.from(bMap.values()));
+      setBookings(mergedBookings);
 
       // 3. Leads
       const loadedLeads = await leadService.getLeadsForOwner(userId);
@@ -168,7 +210,7 @@ export const DashboardOverviewPage: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [userId]);
+  }, [userId, isSuperAdmin]);
 
   useEffect(() => {
     loadDashboardData();
@@ -180,14 +222,62 @@ export const DashboardOverviewPage: React.FC = () => {
     window.addEventListener('jadijcb_documents_updated', handleUpdate);
     window.addEventListener('jadijcb_business_profile_updated', handleUpdate);
 
+    // Cross-tab storage updates
+    const handleStorage = (e: StorageEvent) => {
+      if (
+        e.key === 'jadijcb_cached_bookings' ||
+        e.key === 'jadijcb_last_booking_event' ||
+        e.key === 'jadijcb_user_machines'
+      ) {
+        loadDashboardData();
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+
     return () => {
       window.removeEventListener('jadijcb_machines_updated', handleUpdate);
       window.removeEventListener('jadijcb_booking_event', handleUpdate);
       window.removeEventListener('jadijcb_leads_updated', handleUpdate);
       window.removeEventListener('jadijcb_documents_updated', handleUpdate);
       window.removeEventListener('jadijcb_business_profile_updated', handleUpdate);
+      window.removeEventListener('storage', handleStorage);
     };
   }, [loadDashboardData]);
+
+  // Pending incoming rental requests
+  const pendingBookings = useMemo(() => {
+    return bookings.filter((b) => b.status === 'pending');
+  }, [bookings]);
+
+  const handleAcceptBooking = async (bookingId: string) => {
+    bookingStore.updateBookingStatus(bookingId, 'active');
+    setBookings((prev) =>
+      prev.map((b) => (b.id === bookingId ? { ...b, status: 'active' } : b))
+    );
+    if (isSupabaseConfigured) {
+      try {
+        await supabase.from('bookings').update({ status: 'active' }).eq('id', bookingId);
+      } catch (err) {
+        console.warn('Status update DB error:', err);
+      }
+    }
+    toast.success(lang === 'fr' ? 'Réservation acceptée et activée !' : 'تم قبول وتأكيد الحجز بنجاح!');
+  };
+
+  const handleDeclineBooking = async (bookingId: string) => {
+    bookingStore.updateBookingStatus(bookingId, 'cancelled');
+    setBookings((prev) =>
+      prev.map((b) => (b.id === bookingId ? { ...b, status: 'cancelled' } : b))
+    );
+    if (isSupabaseConfigured) {
+      try {
+        await supabase.from('bookings').update({ status: 'cancelled' }).eq('id', bookingId);
+      } catch (err) {
+        console.warn('Status update DB error:', err);
+      }
+    }
+    toast.info(lang === 'fr' ? 'Demande de location refusée' : 'تم رفض وإلغاء طلب الحجز');
+  };
 
   // Operational metrics for "اليوم"
   const now = new Date();
@@ -500,9 +590,197 @@ export const DashboardOverviewPage: React.FC = () => {
         </Card>
       )}
 
-      {/* "اليوم" Daily Operational Cards Grid (4 Cards with deep-links) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Card 1: Overdue Returns (Urgent Action) */}
+      {/* PENDING RENTAL REQUESTS HERO BANNER / SECTION */}
+      {pendingBookings.length > 0 && (
+        <Card className="p-5 sm:p-6 bg-gradient-to-r from-amber-500/15 via-primary/10 to-white border-2 border-primary rounded-3xl shadow-elevated space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-primary/20 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-primary text-ink flex items-center justify-center font-black shadow-sm shrink-0">
+                <CalendarCheck className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-base sm:text-lg font-black text-ink">
+                    {lang === 'fr' ? 'Nouvelles demandes de location reçues' : 'طلبات الكراء الواردة (تتطلب قرارك)'}
+                  </h2>
+                  <span className="px-2.5 py-0.5 rounded-full bg-primary text-ink text-xs font-black animate-pulse">
+                    {pendingBookings.length} {lang === 'fr' ? 'en attente' : 'طلب جديد'}
+                  </span>
+                </div>
+                <p className="text-xs text-steel-600 mt-0.5">
+                  {lang === 'fr'
+                    ? 'Des clients souhaitent louer vos engins. Confirmez ou contactez-les directement.'
+                    : 'زبائن ومقاولات قدموا طلبات كراء لآلياتك. أكد الحجز فوراً أو تواصل معهم عبر الواتساب.'}
+                </p>
+              </div>
+            </div>
+
+            <Link
+              to="/owner/bookings?tab=pending"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-ink text-primary hover:bg-black font-black text-xs transition-all shadow-xs self-start sm:self-auto"
+            >
+              <span>{lang === 'fr' ? 'Voir toutes les demandes' : 'إدارة كافة طلبات الكراء'}</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+
+          {/* Cards of Pending Bookings */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {pendingBookings.map((b) => (
+              <div
+                key={b.id}
+                className="p-4 bg-white rounded-2xl border border-steel-200 shadow-xs flex flex-col justify-between space-y-3"
+              >
+                <div>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-10 h-10 rounded-xl bg-amber-50 text-primary-dark flex items-center justify-center font-black shrink-0 border border-amber-200">
+                        <Truck className="w-5 h-5" />
+                      </div>
+                      <div className="min-w-0">
+                        <h4 className="font-black text-xs text-ink truncate">
+                          {b.machine?.title_ar || b.machine?.title_fr || 'آلية JCB'}
+                        </h4>
+                        <span className="text-[10px] text-steel-500 font-mono">
+                          {b.machine?.brand} {b.machine?.model}
+                        </span>
+                      </div>
+                    </div>
+                    <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 text-[10px] font-black shrink-0">
+                      {lang === 'fr' ? 'En attente' : 'قيد التأكيد'}
+                    </span>
+                  </div>
+
+                  <div className="mt-3 pt-2 border-t border-steel-100 space-y-1.5 text-xs text-steel-700">
+                    <div className="flex items-center justify-between">
+                      <span className="text-steel-500 text-[11px] flex items-center gap-1">
+                        <User className="w-3 h-3 text-steel-400" />
+                        {lang === 'fr' ? 'Client :' : 'الزبون:'}
+                      </span>
+                      <span className="font-bold text-ink">{b.client_name || 'زبون مقاولة'}</span>
+                    </div>
+
+                    {b.client_phone && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-steel-500 text-[11px] flex items-center gap-1">
+                          <Phone className="w-3 h-3 text-steel-400" />
+                          {lang === 'fr' ? 'Téléphone :' : 'الهاتف:'}
+                        </span>
+                        <span className="font-mono font-bold text-steel-800" dir="ltr">
+                          {b.client_phone}
+                        </span>
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between">
+                      <span className="text-steel-500 text-[11px] flex items-center gap-1">
+                        <Clock className="w-3 h-3 text-steel-400" />
+                        {lang === 'fr' ? 'Dates :' : 'الفترة:'}
+                      </span>
+                      <span className="font-mono text-[11px] text-steel-700" dir="ltr">
+                        {b.start_at?.slice(0, 10)} → {b.end_at?.slice(0, 10)}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1 font-bold">
+                      <span className="text-steel-500 text-[11px]">
+                        {lang === 'fr' ? 'Montant estimé :' : 'المبلغ المقدر:'}
+                      </span>
+                      <span className="font-mono font-black text-ink text-sm">
+                        {Number(b.total_price).toLocaleString('fr-FR')} MAD
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Quick actions: Accept, WhatsApp, Decline */}
+                <div className="pt-2 border-t border-steel-100 flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleAcceptBooking(b.id)}
+                    className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-black text-xs flex items-center justify-center gap-1 shadow-xs transition-all cursor-pointer"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>{lang === 'fr' ? 'Accepter' : 'قبول وتأكيد'}</span>
+                  </button>
+
+                  {b.client_phone && (
+                    <a
+                      href={`https://wa.me/${b.client_phone.replace(/\D/g, '')}?text=${encodeURIComponent(
+                        `السلام عليكم ${b.client_name}، بخصوص طلب كراء الآلية (${b.machine?.title_ar || ''}) عبر منصة JADIJCB.`
+                      )}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="py-2 px-3 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] text-white font-bold text-xs flex items-center justify-center gap-1 shadow-xs transition-colors cursor-pointer"
+                      title="WhatsApp Client"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline font-bold">واتساب</span>
+                    </a>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => handleDeclineBooking(b.id)}
+                    className="p-2 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 transition-colors cursor-pointer"
+                    title={lang === 'fr' ? 'Refuser' : 'رفض'}
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* "اليوم" Daily Operational Cards Grid (5 Cards with deep-links) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+        {/* Card 1: Pending Rental Requests (Demandes de location) */}
+        <div
+          onClick={() => navigate('/owner/bookings?tab=pending')}
+          className={`p-5 rounded-2xl border transition-all cursor-pointer shadow-xs flex flex-col justify-between ${
+            pendingBookings.length > 0
+              ? 'bg-amber-50/80 border-primary ring-2 ring-primary/40'
+              : 'bg-white border-steel-200 hover:border-steel-300'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-steel-600">
+              {lang === 'fr' ? 'Demandes de location' : 'طلبات الكراء الواردة'}
+            </span>
+            <div
+              className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                pendingBookings.length > 0
+                  ? 'bg-primary text-ink animate-pulse shadow-sm'
+                  : 'bg-steel-100 text-steel-500'
+              }`}
+            >
+              <CalendarCheck className="w-5 h-5" />
+            </div>
+          </div>
+
+          <div className="pt-3">
+            <span
+              className={`text-2xl font-black font-mono block ${
+                pendingBookings.length > 0 ? 'text-amber-900 font-extrabold' : 'text-ink'
+              }`}
+            >
+              {pendingBookings.length}
+            </span>
+            <span className="text-[11px] text-steel-500 mt-0.5 block">
+              {pendingBookings.length > 0
+                ? lang === 'fr'
+                  ? 'Nouvelles demandes à confirmer'
+                  : 'طلبات جديدة تتطلب التأكيد'
+                : lang === 'fr'
+                ? 'Aucune demande en attente'
+                : 'لا توجد طلبات معلقة حالياً'}
+            </span>
+          </div>
+        </div>
+
+        {/* Card 2: Overdue Returns (Urgent Action) */}
         <div
           onClick={() => navigate('/owner/bookings?tab=active')}
           className={`p-5 rounded-2xl border transition-all cursor-pointer shadow-xs flex flex-col justify-between ${
@@ -537,8 +815,8 @@ export const DashboardOverviewPage: React.FC = () => {
             <span className="text-[11px] text-steel-500 mt-0.5 block">
               {overdueBookings.length > 0
                 ? lang === 'fr'
-                  ? 'À contacter d\'urgence pour clôture ou prolongation'
-                  : 'يتطلب التواصل العاجل للتمديد أو الاستلام'
+                  ? 'À contacter d\'urgence'
+                  : 'يتطلب التواصل للتمديد أو الاستلام'
                 : lang === 'fr'
                 ? 'Aucun retard constaté'
                 : 'لا توجد آليات متأخرة حالياً'}
@@ -546,7 +824,7 @@ export const DashboardOverviewPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Card 2: Returns Due Today & Tomorrow */}
+        {/* Card 3: Returns Due Today & Tomorrow */}
         <div
           onClick={() => navigate('/owner/bookings?tab=active')}
           className="p-5 rounded-2xl border border-steel-200 bg-white hover:border-steel-300 transition-all cursor-pointer shadow-xs flex flex-col justify-between"
@@ -567,16 +845,16 @@ export const DashboardOverviewPage: React.FC = () => {
             <span className="text-[11px] text-steel-500 mt-0.5 block">
               {dueSoonBookings.length > 0
                 ? lang === 'fr'
-                  ? 'Engins prévus au retour sur site'
+                  ? 'Engins prévus au retour'
                   : 'آليات متوقع وصولها أو تمديدها'
                 : lang === 'fr'
                 ? 'Aucun retour programmé'
-                : 'لا توجد نهايات كراء اليوم أو غداً'}
+                : 'لا توجد نهايات كراء قريبة'}
             </span>
           </div>
         </div>
 
-        {/* Card 3: Unpaid Dues Total */}
+        {/* Card 4: Unpaid Dues Total */}
         <div
           onClick={() => navigate('/owner/bookings?tab=dues')}
           className="p-5 rounded-2xl border border-steel-200 bg-white hover:border-steel-300 transition-all cursor-pointer shadow-xs flex flex-col justify-between"
@@ -610,7 +888,7 @@ export const DashboardOverviewPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Card 4: New Leads Captured */}
+        {/* Card 5: New Leads Captured */}
         <div
           onClick={() => navigate('/owner/storefront')}
           className="p-5 rounded-2xl border border-steel-200 bg-white hover:border-steel-300 transition-all cursor-pointer shadow-xs flex flex-col justify-between"

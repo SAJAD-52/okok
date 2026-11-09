@@ -271,5 +271,34 @@ DO $$ BEGIN
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
--- 10. Refresh Schema Cache
+-- 10. Bookings RLS enhancements: Allow public/guest inserts, allow owners to view bookings by owner_id or machine ownership
+DO $$ BEGIN
+  DROP POLICY IF EXISTS "Public or authenticated can create bookings" ON public.bookings;
+  DROP POLICY IF EXISTS "Authenticated users can create bookings" ON public.bookings;
+  DROP POLICY IF EXISTS "Clients can book machines" ON public.bookings;
+  CREATE POLICY "Public or authenticated can create bookings" ON public.bookings
+    FOR INSERT WITH CHECK (true);
+
+  DROP POLICY IF EXISTS "Owners, clients, or admins can view their bookings" ON public.bookings;
+  CREATE POLICY "Owners, clients, or admins can view their bookings" ON public.bookings
+    FOR SELECT USING (
+      auth.uid() = owner_id
+      OR auth.uid() = client_id
+      OR machine_id IN (SELECT id FROM public.machines WHERE owner_id = auth.uid())
+      OR EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
+    );
+
+  DROP POLICY IF EXISTS "Owners or clients can update bookings" ON public.bookings;
+  CREATE POLICY "Owners or clients can update bookings" ON public.bookings
+    FOR UPDATE USING (
+      auth.uid() = owner_id
+      OR auth.uid() = client_id
+      OR machine_id IN (SELECT id FROM public.machines WHERE owner_id = auth.uid())
+      OR EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
+    );
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+-- 11. Refresh Schema Cache
 NOTIFY pgrst, 'reload schema';
+

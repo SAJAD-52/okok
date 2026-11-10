@@ -3,6 +3,7 @@
 // ============================================================================
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Plus,
   Search,
@@ -11,6 +12,7 @@ import {
   Trash2,
   Eye,
   EyeOff,
+  ExternalLink,
   Truck,
   Wrench,
   Tag,
@@ -136,6 +138,19 @@ export const MachinesPage: React.FC = () => {
       window.removeEventListener('jadijcb_machines_updated', handleUpdate);
     };
   }, [loadMachines]);
+
+  // Auto-open edit modal if ?edit=machineId query parameter exists
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const editId = params.get('edit');
+    if (editId && machines.length > 0) {
+      const target = machines.find((m) => m.id === editId);
+      if (target) {
+        setSelectedMachineToEdit(target);
+        setIsStepperOpen(true);
+      }
+    }
+  }, [machines]);
 
   const handleOpenAdd = () => {
     setSelectedMachineToEdit(null);
@@ -456,17 +471,32 @@ export const MachinesPage: React.FC = () => {
                   <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                     {/* Left: Thumbnail & Info */}
                     <div className="flex items-start sm:items-center gap-3.5 w-full sm:w-auto">
-                      <img
-                        src={machine.images[0] || 'https://images.unsplash.com/photo-1579829366248-204fe8413f31?w=400&q=80'}
-                        alt={machine.title_ar}
-                        className="w-20 h-20 sm:w-24 sm:h-20 rounded-xl object-cover border border-steel-200 shrink-0 bg-steel-100"
-                      />
+                      <Link
+                        to={`/marketplace/${machine.id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="shrink-0 group"
+                        title={lang === 'fr' ? 'معاينة في صفحة المنتج' : 'معاينة في صفحة المنتج'}
+                      >
+                        <img
+                          src={machine.images[0] || 'https://images.unsplash.com/photo-1579829366248-204fe8413f31?w=400&q=80'}
+                          alt={machine.title_ar}
+                          className="w-20 h-20 sm:w-24 sm:h-20 rounded-xl object-cover border border-steel-200 shrink-0 bg-steel-100 group-hover:opacity-90 transition-opacity"
+                        />
+                      </Link>
 
                       <div>
                         <div className="flex items-center gap-2 mb-1">
-                          <span className="font-black text-sm text-ink hover:text-primary-dark transition-colors">
-                            {lang === 'fr' ? machine.title_fr : machine.title_ar}
-                          </span>
+                          <Link
+                            to={`/marketplace/${machine.id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-black text-sm text-ink hover:text-primary-dark transition-colors flex items-center gap-1 group"
+                            title={lang === 'fr' ? 'Aperçu sur la page produit' : 'معاينة الآلية في صفحة المنتج'}
+                          >
+                            <span>{lang === 'fr' ? machine.title_fr : machine.title_ar}</span>
+                            <ExternalLink className="w-3 h-3 text-steel-400 group-hover:text-primary-dark transition-colors" />
+                          </Link>
 
                           <Badge
                             variant={machine.listing_mode === 'sale' ? 'neutral' : 'warning'}
@@ -575,6 +605,18 @@ export const MachinesPage: React.FC = () => {
                             <EyeOff className="w-4 h-4" />
                           )}
                         </button>
+
+                        {/* Preview on Public Product Page (زر معاينة الآلية في صفحة المنتج) */}
+                        <Link
+                          to={`/marketplace/${machine.id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-2 rounded-xl bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-300 transition-colors cursor-pointer min-h-[38px] min-w-[38px] flex items-center justify-center group"
+                          title={lang === 'fr' ? 'Aperçu sur la page produit' : 'معاينة الآلية في صفحة المنتج'}
+                          aria-label={lang === 'fr' ? 'Aperçu sur la page produit' : 'معاينة الآلية في صفحة المنتج'}
+                        >
+                          <ExternalLink className="w-4 h-4 text-amber-700 group-hover:scale-110 transition-transform" />
+                        </Link>
 
                         {/* Edit Button */}
                         <button

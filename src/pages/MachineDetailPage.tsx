@@ -27,6 +27,7 @@ import {
   Fuel,
   Info,
   Check,
+  Edit2,
   Building2,
   ArrowRight,
   ArrowLeft,
@@ -741,13 +742,22 @@ export const MachineDetailPage: React.FC = () => {
               {/* CTAs: Booking, WhatsApp + Real-time Chat */}
               <div className="space-y-2.5 pt-3">
                 {isOwnMachine ? (
-                  <div className="w-full py-3 px-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-bold text-center flex items-center justify-center gap-2 shadow-2xs">
-                    <ShieldCheck className="w-4 h-4 text-amber-700 shrink-0" />
-                    <span>
-                      {lang === 'fr'
-                        ? 'Votre propre engin (Vous êtes le propriétaire - Réservation désactivée)'
-                        : 'أنت المالك المسجل لهذه الآلية (لا يمكنك حجز آليتك الخاصة)'}
-                    </span>
+                  <div className="space-y-2">
+                    <div className="w-full py-3 px-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-bold text-center flex items-center justify-center gap-2 shadow-2xs">
+                      <ShieldCheck className="w-4 h-4 text-amber-700 shrink-0" />
+                      <span>
+                        {lang === 'fr'
+                          ? 'Aperçu en direct (Vous êtes le propriétaire de cette machine)'
+                          : 'معاينة حية للمنتج (أنت المالك المسجل لهذه الآلية)'}
+                      </span>
+                    </div>
+                    <Link
+                      to={`/owner/machines?edit=${machine.id}`}
+                      className="w-full flex items-center justify-center gap-2 bg-steel-900 hover:bg-steel-800 text-primary font-black py-3 px-4 rounded-xl text-xs sm:text-sm shadow-md transition-all cursor-pointer min-h-[46px]"
+                    >
+                      <Edit2 className="w-4 h-4" />
+                      <span>{lang === 'fr' ? 'Modifier cette machine dans mon parc' : 'تعديل بيانات هذه الآلية في أسطولي'}</span>
+                    </Link>
                   </div>
                 ) : isRent ? (
                   <Button

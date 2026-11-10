@@ -299,6 +299,36 @@ DO $$ BEGIN
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
--- 11. Refresh Schema Cache
+-- 11. Auto-synchronize owner_id from machines table (ensures owner ALWAYS receives bookings)
+CREATE OR REPLACE FUNCTION public.sync_booking_owner_id()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  IF NEW.machine_id IS NOT NULL THEN
+    SELECT owner_id INTO NEW.owner_id
+    FROM public.machines
+    WHERE id = NEW.machine_id;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_sync_booking_owner_id ON public.bookings;
+CREATE TRIGGER trg_sync_booking_owner_id
+  BEFORE INSERT OR UPDATE OF machine_id ON public.bookings
+  FOR EACH ROW
+  EXECUTE FUNCTION public.sync_booking_owner_id();
+
+-- Backfill: Fix any existing bookings whose owner_id was omitted or mismatched
+UPDATE public.bookings b
+SET owner_id = m.owner_id
+FROM public.machines m
+WHERE b.machine_id = m.id
+  AND m.owner_id IS NOT NULL
+  AND (b.owner_id IS NULL OR b.owner_id <> m.owner_id);
+
+-- 12. Refresh Schema Cache
 NOTIFY pgrst, 'reload schema';
 

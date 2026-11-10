@@ -120,11 +120,27 @@ export const DashboardLayout: React.FC = () => {
 
     const checkPending = async () => {
       try {
-        const ownerMachineIds = machineStore
+        let ownerMachineIds = machineStore
           .getCachedMachines()
           .filter((m) => m.owner_id === profile.id || !m.owner_id)
           .map((m) => m.id)
           .filter(Boolean);
+
+        // Also fetch owner machine IDs from database to ensure fresh fleet list
+        if (isSupabaseConfigured && profile.id) {
+          try {
+            const { data: dbMachs } = await supabase
+              .from('machines')
+              .select('id')
+              .eq('owner_id', profile.id);
+            if (dbMachs && dbMachs.length > 0) {
+              const freshIds = dbMachs.map((m: any) => m.id).filter(Boolean);
+              ownerMachineIds = Array.from(new Set([...ownerMachineIds, ...freshIds]));
+            }
+          } catch {
+            // ignore
+          }
+        }
 
         let dbBookings: Booking[] = [];
 
@@ -149,47 +165,56 @@ export const DashboardLayout: React.FC = () => {
         // 2. Fetch from Supabase (if configured)
         if (isSupabaseConfigured) {
           try {
-            let query = supabase
-              .from('bookings')
-              .select('*, machines(*)')
-              .eq('status', 'pending');
+            const fetchedMap = new Map<string, any>();
 
             if (isSuperAdmin) {
-              // Super admin sees all pending
-            } else if (ownerMachineIds.length > 0) {
-              query = query.or(`owner_id.eq.${profile.id},machine_id.in.(${ownerMachineIds.join(',')})`);
-            } else {
-              query = query.eq('owner_id', profile.id);
-            }
-
-            const { data, error } = await query;
-            if (error) {
-              const { data: fallback } = await supabase
+              // Super admin sees all pending bookings
+              const { data: allData } = await supabase
                 .from('bookings')
                 .select('*, machines(*)')
-                .eq('owner_id', profile.id)
                 .eq('status', 'pending');
-              if (fallback) {
-                const mapped = fallback.map((b: any) => ({
-                  id: b.id,
-                  machine_id: b.machine_id,
-                  owner_id: b.owner_id,
-                  client_id: b.client_id,
-                  client_name: b.client_name,
-                  client_phone: b.client_phone,
-                  start_at: b.start_at || b.start_date,
-                  end_at: b.end_at || b.end_date,
-                  total_price: Number(b.total_price) || 0,
-                  status: b.status,
-                  notes: b.notes,
-                  created_at: b.created_at,
-                  machine: b.machines,
-                  with_operator: Boolean(b.with_operator ?? true),
-                }));
-                dbBookings = [...dbBookings, ...mapped];
+              if (allData) {
+                for (const row of allData) fetchedMap.set(row.id, row);
               }
-            } else if (data) {
-              const mapped = data.map((b: any) => ({
+            } else {
+              // 1. Pending bookings where user is directly the booking owner
+              if (profile.id) {
+                const { data: ownerData } = await supabase
+                  .from('bookings')
+                  .select('*, machines(*)')
+                  .eq('status', 'pending')
+                  .eq('owner_id', profile.id);
+                if (ownerData) {
+                  for (const row of ownerData) fetchedMap.set(row.id, row);
+                }
+              }
+
+              // 2. Pending bookings for machines belonging to the owner's fleet
+              if (ownerMachineIds.length > 0) {
+                const { data: machineData } = await supabase
+                  .from('bookings')
+                  .select('*, machines(*)')
+                  .eq('status', 'pending')
+                  .in('machine_id', ownerMachineIds);
+                if (machineData) {
+                  for (const row of machineData) fetchedMap.set(row.id, row);
+                }
+              }
+
+              // 3. Fallback: query without where clause (Supabase RLS secures records to owner)
+              if (fetchedMap.size === 0) {
+                const { data: rlsData } = await supabase
+                  .from('bookings')
+                  .select('*, machines(*)')
+                  .eq('status', 'pending');
+                if (rlsData) {
+                  for (const row of rlsData) fetchedMap.set(row.id, row);
+                }
+              }
+            }
+
+            if (fetchedMap.size > 0) {
+              const mapped = Array.from(fetchedMap.values()).map((b: any) => ({
                 id: b.id,
                 machine_id: b.machine_id,
                 owner_id: b.owner_id,

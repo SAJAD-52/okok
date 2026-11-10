@@ -145,50 +145,56 @@ export const BookingsPage: React.FC = () => {
 
       if (isSupabaseConfigured) {
         try {
-          let bQuery = supabase
-            .from('bookings')
-            .select('*, machines(*)')
-            .order('start_at', { ascending: false });
+          const fetchedMap = new Map<string, any>();
 
           if (isSuperAdmin) {
             // Super Admin can see all bookings
-          } else if (ownerId && ownerMachineIds.length > 0) {
-            bQuery = bQuery.or(`owner_id.eq.${ownerId},machine_id.in.(${ownerMachineIds.join(',')})`);
-          } else if (ownerId) {
-            bQuery = bQuery.eq('owner_id', ownerId);
-          }
-
-          const { data: bData, error: bErr } = await bQuery;
-          if (bErr) {
-            console.warn('Primary bookings query failed, falling back:', bErr.message);
+            const { data: allData, error: allErr } = await supabase
+              .from('bookings')
+              .select('*, machines(*)')
+              .order('start_at', { ascending: false });
+            if (!allErr && allData) {
+              for (const row of allData) fetchedMap.set(row.id, row);
+            }
+          } else {
+            // 1. Fetch bookings where user is directly the owner
             if (ownerId) {
-              const { data: fallback } = await supabase
+              const { data: ownerData } = await supabase
                 .from('bookings')
                 .select('*, machines(*)')
                 .eq('owner_id', ownerId)
                 .order('start_at', { ascending: false });
-              if (fallback) {
-                bList = fallback.map((b: any) => ({
-                  id: b.id,
-                  machine_id: b.machine_id,
-                  owner_id: b.owner_id,
-                  client_name: b.client_name,
-                  client_phone: b.client_phone,
-                  start_at: b.start_at || b.start_date,
-                  end_at: b.end_at || b.end_date,
-                  total_price: Number(b.total_price) || 0,
-                  deposit_amount: Number(b.deposit_amount) || 0,
-                  rate_type: b.rate_type || 'daily',
-                  status: b.status,
-                  notes: b.notes,
-                  created_at: b.created_at,
-                  machine: b.machines,
-                  with_operator: Boolean(b.with_operator),
-                }));
+              if (ownerData) {
+                for (const row of ownerData) fetchedMap.set(row.id, row);
               }
             }
-          } else if (bData) {
-            bList = bData.map((b: any) => ({
+
+            // 2. Fetch bookings where machine belongs to user's fleet (catches guest/external bookings)
+            if (ownerMachineIds.length > 0) {
+              const { data: machineData } = await supabase
+                .from('bookings')
+                .select('*, machines(*)')
+                .in('machine_id', ownerMachineIds)
+                .order('start_at', { ascending: false });
+              if (machineData) {
+                for (const row of machineData) fetchedMap.set(row.id, row);
+              }
+            }
+
+            // 3. Fallback: query without filter since Supabase RLS restricts to owner's bookings
+            if (fetchedMap.size === 0) {
+              const { data: rlsData } = await supabase
+                .from('bookings')
+                .select('*, machines(*)')
+                .order('start_at', { ascending: false });
+              if (rlsData) {
+                for (const row of rlsData) fetchedMap.set(row.id, row);
+              }
+            }
+          }
+
+          if (fetchedMap.size > 0) {
+            bList = Array.from(fetchedMap.values()).map((b: any) => ({
               id: b.id,
               machine_id: b.machine_id,
               owner_id: b.owner_id,

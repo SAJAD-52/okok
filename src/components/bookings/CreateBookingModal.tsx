@@ -243,16 +243,36 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
     const isUuid = (str?: string | null) =>
       Boolean(str && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str));
 
-    let resolvedOwnerId = targetMachine?.owner_id;
-    if (!isUuid(resolvedOwnerId)) {
+    // Resolve TRUE machine owner (never confuse client/renter with machine owner!)
+    let resolvedOwnerId: string | undefined = isUuid(targetMachine?.owner_id) ? targetMachine!.owner_id : undefined;
+
+    // 1. Look up machine's owner directly in Supabase machines table
+    if (!resolvedOwnerId && machineId && isSupabaseConfigured) {
+      try {
+        const { data: mData } = await supabase
+          .from('machines')
+          .select('owner_id')
+          .eq('id', machineId)
+          .maybeSingle();
+        if (mData?.owner_id && isUuid(mData.owner_id)) {
+          resolvedOwnerId = mData.owner_id;
+        }
+      } catch (lookupErr) {
+        console.warn('Machine owner lookup notice:', lookupErr);
+      }
+    }
+
+    // 2. Fallback to cached machines
+    if (!resolvedOwnerId && machineId) {
       const foundInCache = machineStore.getCachedMachines().find((m) => m.id === machineId);
       if (isUuid(foundInCache?.owner_id)) {
         resolvedOwnerId = foundInCache!.owner_id;
-      } else if (isUuid(ownerId)) {
-        resolvedOwnerId = ownerId;
-      } else {
-        resolvedOwnerId = targetMachine?.owner_id || ownerId || 'owner';
       }
+    }
+
+    // 3. Fallback to targetMachine property even if non-standard UUID
+    if (!resolvedOwnerId && targetMachine?.owner_id) {
+      resolvedOwnerId = targetMachine.owner_id;
     }
 
     // Auto-save new client in directory if "new" was selected by an authenticated owner
@@ -275,7 +295,7 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
     const newBooking: Booking = {
       id: crypto.randomUUID(),
       machine_id: machineId,
-      owner_id: resolvedOwnerId,
+      owner_id: resolvedOwnerId || ownerId || 'owner',
       client_id: isUuid(user?.id) ? user.id : null,
       client_name: clientName.trim(),
       client_phone: clientPhone.trim(),

@@ -109,6 +109,17 @@ db.exec(`
   );
 `);
 
+try {
+  db.exec(`
+    UPDATE bookings 
+    SET owner_id = (SELECT owner_id FROM machines WHERE machines.id = bookings.machine_id)
+    WHERE machine_id IN (SELECT id FROM machines WHERE owner_id IS NOT NULL AND owner_id != '')
+      AND (owner_id IS NULL OR owner_id = '' OR owner_id = 'owner' OR owner_id != (SELECT owner_id FROM machines WHERE machines.id = bookings.machine_id));
+  `);
+} catch (syncErr) {
+  console.warn('SQLite booking owner backfill notice:', syncErr);
+}
+
 console.log('✅ SQLite Database initialized at:', DB_PATH);
 
 // Middlewares
@@ -278,34 +289,42 @@ app.post('/api/bookings', (req, res) => {
       });
     }
 
-    // Determine target machine details
+    // Determine target machine details and guaranteed true owner
     let machineJson = '';
     let machineTitle = 'الآلية';
     let machineTitleFr = 'Engin';
-    let resolvedOwnerId = b.owner_id || '';
+    let resolvedOwnerId = '';
 
-    if (b.machine && typeof b.machine === 'object') {
-      machineJson = JSON.stringify(b.machine);
-      machineTitle = b.machine.title_ar || b.machine.title_fr || `${b.machine.brand || ''} ${b.machine.model || ''}`;
-      machineTitleFr = b.machine.title_fr || b.machine.title_ar || machineTitle;
-      if (!resolvedOwnerId && b.machine.owner_id) {
+    // 1. Prioritize database lookup for machine owner
+    try {
+      const mRow: any = db.prepare('SELECT * FROM machines WHERE id = ?').get(b.machine_id);
+      if (mRow) {
+        machineJson = mRow.data_json || '';
+        machineTitle = mRow.title_ar || mRow.title_fr || 'الآلية';
+        machineTitleFr = mRow.title_fr || mRow.title_ar || 'Engin';
+        if (mRow.owner_id) {
+          resolvedOwnerId = mRow.owner_id;
+        }
+      }
+    } catch {
+      // Ignore lookup error
+    }
+
+    // 2. Attached machine object
+    if (!resolvedOwnerId && b.machine && typeof b.machine === 'object') {
+      if (!machineJson) machineJson = JSON.stringify(b.machine);
+      if (machineTitle === 'الآلية' && (b.machine.title_ar || b.machine.title_fr)) {
+        machineTitle = b.machine.title_ar || b.machine.title_fr;
+        machineTitleFr = b.machine.title_fr || b.machine.title_ar;
+      }
+      if (b.machine.owner_id) {
         resolvedOwnerId = b.machine.owner_id;
       }
-    } else {
-      // Lookup in machines table
-      try {
-        const mRow: any = db.prepare('SELECT * FROM machines WHERE id = ?').get(b.machine_id);
-        if (mRow) {
-          machineJson = mRow.data_json;
-          machineTitle = mRow.title_ar || mRow.title_fr || 'الآلية';
-          machineTitleFr = mRow.title_fr || mRow.title_ar || 'Engin';
-          if (!resolvedOwnerId && mRow.owner_id) {
-            resolvedOwnerId = mRow.owner_id;
-          }
-        }
-      } catch {
-        // Ignore lookup error
-      }
+    }
+
+    // 3. Fallback to passed owner_id if machine had no specific owner
+    if (!resolvedOwnerId) {
+      resolvedOwnerId = b.owner_id || '';
     }
 
     const insertStmt = db.prepare(`

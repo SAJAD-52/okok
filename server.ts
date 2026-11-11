@@ -12,7 +12,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { createServer as createViteServer } from 'vite';
 
 const app = express();
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+const PRIMARY_PORT = 3000;
+const SECONDARY_PORT = process.env.PORT && parseInt(process.env.PORT, 10) !== PRIMARY_PORT ? parseInt(process.env.PORT, 10) : null;
 const isProd = process.env.NODE_ENV === 'production';
 
 // Ensure data folder exists
@@ -936,17 +937,29 @@ async function startServer() {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   } else {
-    // Mount Vite in middleware mode
+    // Mount Vite in middleware mode with HMR disabled to prevent WebSocket collisions
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 JADIJCB Full-Stack Server running on http://0.0.0.0:${PORT} (${isProd ? 'Production' : 'Development'})`);
+  // Primary listener on port 3000 as required by environment
+  app.listen(PRIMARY_PORT, '0.0.0.0', () => {
+    console.log(`🚀 JADIJCB Full-Stack Server running on http://0.0.0.0:${PRIMARY_PORT} (${isProd ? 'Production' : 'Development'})`);
   });
+
+  // Secondary listener if environment passes a different PORT (e.g. 8080)
+  if (SECONDARY_PORT) {
+    try {
+      app.listen(SECONDARY_PORT, '0.0.0.0', () => {
+        console.log(`🚀 Secondary listener active on http://0.0.0.0:${SECONDARY_PORT}`);
+      });
+    } catch (e) {
+      console.warn('Secondary port bind notice:', e);
+    }
+  }
 }
 
 startServer().catch((err) => {

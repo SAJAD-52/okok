@@ -6,6 +6,7 @@
 import { supabase, isSupabaseConfigured } from './supabase';
 import { ChatConversationItem, ChatMessageItem, ChatParticipant } from '../types/chat';
 import { Machine, UserProfile } from '../types/database';
+import { serverApi } from './serverApi';
 
 const LOCAL_STORAGE_CONVERSATIONS_KEY = 'jadijcb_chat_conversations';
 const LOCAL_STORAGE_MESSAGES_KEY = 'jadijcb_chat_messages';
@@ -255,7 +256,32 @@ class ChatStore {
 
   // Get messages for a conversation
   async getMessages(conversationId: string): Promise<ChatMessageItem[]> {
-    return this.messagesMap[conversationId] || [];
+    const local = this.messagesMap[conversationId] || [];
+    try {
+      const serverMsgs = await serverApi.getMessages(conversationId);
+      if (serverMsgs && serverMsgs.length > 0) {
+        const mergedMap = new Map<string, ChatMessageItem>();
+        for (const m of local) mergedMap.set(m.id, m);
+        for (const m of serverMsgs) {
+          mergedMap.set(m.id, {
+            id: m.id,
+            conversation_id: m.conversation_id,
+            sender_id: m.sender_id,
+            body: m.body || m.content || '',
+            read_at: m.read_at,
+            created_at: m.created_at,
+          });
+        }
+        const merged = Array.from(mergedMap.values()).sort(
+          (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        );
+        this.messagesMap[conversationId] = merged;
+        return merged;
+      }
+    } catch {
+      // Fallback to local
+    }
+    return local;
   }
 
   // Send a message
@@ -291,6 +317,16 @@ class ChatStore {
       }
       this.saveConvs();
     }
+
+    // Persist to Server SQLite DB & trigger real-time notification
+    serverApi
+      .sendMessage({
+        conversation_id: conversationId,
+        sender_id: senderId,
+        body: trimmed,
+        recipient_id: otherParticipantId,
+      })
+      .catch(() => {});
 
     // Attempt to persist in Supabase if configured
     if (isSupabaseConfigured) {
@@ -456,6 +492,18 @@ class ChatStore {
 
     this.conversations.unshift(newConv);
     this.saveConvs();
+
+    serverApi
+      .createConversation({
+        id: newId,
+        machine_id: machine?.id,
+        participant_a: userAId,
+        participant_b: userBId,
+        machine,
+        target_profile: targetProfile,
+      })
+      .catch(() => {});
+
     return newConv;
   }
 

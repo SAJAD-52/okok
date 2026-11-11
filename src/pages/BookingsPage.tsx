@@ -52,6 +52,7 @@ import { documentService } from '../lib/documentService';
 import { businessService } from '../lib/businessService';
 import { machineStore } from '../lib/machineStore';
 import { serverApi } from '../lib/serverApi';
+import { mapDatabaseError } from '../lib/errorHelpers';
 
 type TabFilter = 'all' | 'pending' | 'active' | 'completed' | 'cancelled' | 'dues';
 
@@ -294,6 +295,7 @@ export const BookingsPage: React.FC = () => {
 
   // Status transitions
   const handleUpdateStatus = async (bookingId: string, newStatus: BookingStatus) => {
+    const prevStatus = bookings.find((b) => b.id === bookingId)?.status;
     bookingStore.updateBookingStatus(bookingId, newStatus);
     setBookings((prev) =>
       prev.map((b) => (b.id === bookingId ? { ...b, status: newStatus } : b))
@@ -301,14 +303,33 @@ export const BookingsPage: React.FC = () => {
 
     if (isSupabaseConfigured) {
       try {
-        await supabase
+        const { error } = await supabase
           .from('bookings')
           .update({ status: newStatus })
           .eq('id', bookingId);
-      } catch (err) {
-        console.warn('Status update DB error:', err);
+        if (error) {
+          if (prevStatus) {
+            bookingStore.updateBookingStatus(bookingId, prevStatus);
+            setBookings((prev) =>
+              prev.map((b) => (b.id === bookingId ? { ...b, status: prevStatus } : b))
+            );
+          }
+          toast.error(t(mapDatabaseError(error)));
+          return;
+        }
+      } catch {
+        if (prevStatus) {
+          bookingStore.updateBookingStatus(bookingId, prevStatus);
+          setBookings((prev) =>
+            prev.map((b) => (b.id === bookingId ? { ...b, status: prevStatus } : b))
+          );
+        }
+        toast.error(t('common.error'));
+        return;
       }
     }
+
+    serverApi.updateBookingStatus(bookingId, newStatus).catch(() => {});
 
     toast.success(
       lang === 'fr'

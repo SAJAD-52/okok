@@ -57,6 +57,7 @@ import { businessService } from '../lib/businessService';
 import { documentService } from '../lib/documentService';
 import { serverApi } from '../lib/serverApi';
 import { recordUserActivityThrottled, usePwaInstall } from '../lib/pwaHelper';
+import { mapDatabaseError } from '../lib/errorHelpers';
 
 export const DashboardOverviewPage: React.FC = () => {
   const { t, lang, isRTL } = useLanguage();
@@ -277,32 +278,70 @@ export const DashboardOverviewPage: React.FC = () => {
   }, [bookings]);
 
   const handleAcceptBooking = async (bookingId: string) => {
+    const prevStatus = bookings.find((b) => b.id === bookingId)?.status;
     bookingStore.updateBookingStatus(bookingId, 'active');
     setBookings((prev) =>
       prev.map((b) => (b.id === bookingId ? { ...b, status: 'active' } : b))
     );
     if (isSupabaseConfigured) {
       try {
-        await supabase.from('bookings').update({ status: 'active' }).eq('id', bookingId);
-      } catch (err) {
-        console.warn('Status update DB error:', err);
+        const { error } = await supabase.from('bookings').update({ status: 'active' }).eq('id', bookingId);
+        if (error) {
+          if (prevStatus) {
+            bookingStore.updateBookingStatus(bookingId, prevStatus);
+            setBookings((prev) =>
+              prev.map((b) => (b.id === bookingId ? { ...b, status: prevStatus } : b))
+            );
+          }
+          toast.error(t(mapDatabaseError(error)));
+          return;
+        }
+      } catch {
+        if (prevStatus) {
+          bookingStore.updateBookingStatus(bookingId, prevStatus);
+          setBookings((prev) =>
+            prev.map((b) => (b.id === bookingId ? { ...b, status: prevStatus } : b))
+          );
+        }
+        toast.error(t('common.error'));
+        return;
       }
     }
+    serverApi.updateBookingStatus(bookingId, 'active').catch(() => {});
     toast.success(lang === 'fr' ? 'Réservation acceptée et activée !' : 'تم قبول وتأكيد الحجز بنجاح!');
   };
 
   const handleDeclineBooking = async (bookingId: string) => {
+    const prevStatus = bookings.find((b) => b.id === bookingId)?.status;
     bookingStore.updateBookingStatus(bookingId, 'cancelled');
     setBookings((prev) =>
       prev.map((b) => (b.id === bookingId ? { ...b, status: 'cancelled' } : b))
     );
     if (isSupabaseConfigured) {
       try {
-        await supabase.from('bookings').update({ status: 'cancelled' }).eq('id', bookingId);
-      } catch (err) {
-        console.warn('Status update DB error:', err);
+        const { error } = await supabase.from('bookings').update({ status: 'cancelled' }).eq('id', bookingId);
+        if (error) {
+          if (prevStatus) {
+            bookingStore.updateBookingStatus(bookingId, prevStatus);
+            setBookings((prev) =>
+              prev.map((b) => (b.id === bookingId ? { ...b, status: prevStatus } : b))
+            );
+          }
+          toast.error(t(mapDatabaseError(error)));
+          return;
+        }
+      } catch {
+        if (prevStatus) {
+          bookingStore.updateBookingStatus(bookingId, prevStatus);
+          setBookings((prev) =>
+            prev.map((b) => (b.id === bookingId ? { ...b, status: prevStatus } : b))
+          );
+        }
+        toast.error(t('common.error'));
+        return;
       }
     }
+    serverApi.updateBookingStatus(bookingId, 'cancelled').catch(() => {});
     toast.info(lang === 'fr' ? 'Demande de location refusée' : 'تم رفض وإلغاء طلب الحجز');
   };
 

@@ -90,12 +90,33 @@ export const MachineDetailPage: React.FC = () => {
     try {
       let data: any = null;
       if (isSupabaseConfigured) {
-        const res = await supabase
+        let { data: mData, error: mError } = await supabase
           .from('machines')
-          .select('*, profiles(full_name, company_name, phone, city)')
+          .select('*, profiles:owner_id(full_name, company_name, phone, city)')
           .eq('id', id)
           .maybeSingle();
-        data = res.data;
+
+        if (mError || !mData?.profiles) {
+          const { data: baseData } = await supabase
+            .from('machines')
+            .select('*')
+            .eq('id', id)
+            .maybeSingle();
+          if (baseData) {
+            mData = baseData;
+            if (baseData.owner_id) {
+              const { data: prof } = await supabase
+                .from('profiles')
+                .select('full_name, company_name, phone, city')
+                .eq('id', baseData.owner_id)
+                .maybeSingle();
+              if (prof) {
+                mData.profiles = prof;
+              }
+            }
+          }
+        }
+        data = mData;
       }
 
       if (!data) {
@@ -153,11 +174,11 @@ export const MachineDetailPage: React.FC = () => {
         rating_avg: data.rating_avg || 0,
         reviews_count: data.reviews_count || 0,
         owner: {
-          full_name: data.profiles?.full_name || 'Partenaire JADIJCB',
-          company_name: data.profiles?.company_name || 'Entreprise BTP',
-          phone: data.profiles?.phone || '+212600000000',
+          full_name: data.profiles?.full_name || (lang === 'fr' ? 'Propriétaire certifié' : 'مالك معتمد'),
+          company_name: data.profiles?.company_name || data.profiles?.full_name || '',
+          phone: data.profiles?.phone || '',
           city: data.profiles?.city || data.city,
-          whatsapp_verified: true,
+          whatsapp_verified: Boolean(data.profiles?.phone),
         },
         created_at: data.created_at,
         updated_at: data.created_at,
@@ -369,15 +390,15 @@ export const MachineDetailPage: React.FC = () => {
     : ['https://images.unsplash.com/photo-1579829366248-204fe8413f31?w=800&q=80'];
 
   // Prefilled WhatsApp message
-  const ownerPhone = machine.owner?.phone || '+212661234567';
+  const ownerPhone = machine.owner?.phone ? machine.owner.phone.replace(/\D/g, '') : '';
   const whatsappMessage =
     lang === 'fr'
       ? `Bonjour, je vous contacte depuis JADIJCB au sujet de votre engin "${machine.title_fr}" (${machine.brand} ${machine.model}) à ${machine.city}. Est-il disponible ?`
       : `السلام عليكم، أتواصل معكم عبر منصة JADIJCB بخصوص آلية "${machine.title_ar}" (${machine.brand} ${machine.model}) بمدينة ${machine.city}. هل هي متاحة للكراء؟`;
 
-  const whatsappUrl = `https://wa.me/${ownerPhone.replace(/\D/g, '')}?text=${encodeURIComponent(
-    whatsappMessage
-  )}`;
+  const whatsappUrl = ownerPhone
+    ? `https://wa.me/${ownerPhone}?text=${encodeURIComponent(whatsappMessage)}`
+    : `https://wa.me/?text=${encodeURIComponent(whatsappMessage)}`;
 
   const calculateEstimate = () => {
     if (!isRent) return machine.sale_price || 0;

@@ -317,33 +317,134 @@ export const AdminPage: React.FC = () => {
     }
   };
 
+  // Preview signed receipt URL from private payment-proofs bucket
+  const handlePreviewProof = async (proofUrl: string) => {
+    if (!proofUrl) return;
+    if (
+      proofUrl.startsWith('http://') ||
+      proofUrl.startsWith('https://') ||
+      proofUrl.startsWith('data:') ||
+      proofUrl.startsWith('blob:')
+    ) {
+      setSelectedProofUrl(proofUrl);
+      return;
+    }
+    if (isSupabaseConfigured) {
+      try {
+        const { data, error } = await supabase.storage
+          .from('payment-proofs')
+          .createSignedUrl(proofUrl, 3600);
+        if (!error && data?.signedUrl) {
+          setSelectedProofUrl(data.signedUrl);
+          return;
+        }
+      } catch (err) {
+        console.warn('Could not generate signed URL for receipt:', err);
+      }
+      const { data: pubData } = supabase.storage.from('payment-proofs').getPublicUrl(proofUrl);
+      setSelectedProofUrl(pubData?.publicUrl || proofUrl);
+    } else {
+      setSelectedProofUrl(proofUrl);
+    }
+  };
+
   // Payment actions
   const handleApprovePayment = async (id: string) => {
     setProcessingId(id);
+    let success = false;
+    let errMsg = '';
+
     if (isSupabaseConfigured) {
       try {
-        await supabase.rpc('approve_payment', { payment_id: id, months: durationMonths });
-      } catch (e) {
-        console.warn('approve_payment warning:', e);
+        const { error: rpcErr } = await supabase.rpc('approve_payment', {
+          payment_id: id,
+          months: durationMonths,
+        });
+        if (!rpcErr) {
+          success = true;
+        } else {
+          console.warn('approve_payment RPC notice, attempting direct update:', rpcErr);
+          const { error: pErr } = await supabase
+            .from('payments')
+            .update({ status: 'approved' })
+            .eq('id', id);
+          const pRecord = payments.find((p) => p.id === id);
+          if (!pErr && pRecord?.user_id) {
+            const targetDate = new Date();
+            targetDate.setMonth(targetDate.getMonth() + durationMonths);
+            const { error: profErr } = await supabase
+              .from('profiles')
+              .update({
+                subscription_status: 'active',
+                subscription_ends_at: targetDate.toISOString(),
+              })
+              .eq('id', pRecord.user_id);
+
+            if (!profErr) {
+              success = true;
+            } else {
+              errMsg = profErr.message;
+            }
+          } else if (pErr) {
+            errMsg = pErr.message;
+          }
+        }
+      } catch (e: any) {
+        errMsg = e.message || 'Error approving payment';
       }
+    } else {
+      success = true;
     }
-    setPayments((prev) => prev.map((p) => (p.id === id ? { ...p, status: 'approved' as PaymentStatus } : p)));
+
     setProcessingId(null);
-    toast.success('تمت الموافقة على التحويل البنكي وتمديد الاشتراك بنجاح!');
+    if (success) {
+      setPayments((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, status: 'approved' as PaymentStatus } : p))
+      );
+      toast.success(
+        lang === 'fr'
+          ? 'Paiement approuvé et abonnement activé !'
+          : 'تمت الموافقة على التحويل البنكي وتمديد الاشتراك بنجاح!'
+      );
+    } else {
+      toast.error(
+        errMsg || (lang === 'fr' ? 'Échec de la validation' : 'تعذر اعتماد الدفعة في قاعدة البيانات')
+      );
+    }
   };
 
   const handleRejectPayment = async (id: string) => {
     setProcessingId(id);
+    let success = false;
+    let errMsg = '';
+
     if (isSupabaseConfigured) {
       try {
-        await supabase.from('payments').update({ status: 'rejected' }).eq('id', id);
-      } catch (e) {
-        console.warn('reject payment warning:', e);
+        const { error } = await supabase
+          .from('payments')
+          .update({ status: 'rejected' })
+          .eq('id', id);
+        if (!error) {
+          success = true;
+        } else {
+          errMsg = error.message;
+        }
+      } catch (e: any) {
+        errMsg = e.message || 'Error rejecting payment';
       }
+    } else {
+      success = true;
     }
-    setPayments((prev) => prev.map((p) => (p.id === id ? { ...p, status: 'rejected' as PaymentStatus } : p)));
+
     setProcessingId(null);
-    toast.error('تم رفض الوصل وإشعار المستخدم.');
+    if (success) {
+      setPayments((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, status: 'rejected' as PaymentStatus } : p))
+      );
+      toast.error(lang === 'fr' ? 'Reçu rejeté' : 'تم رفض الوصل وإشعار المستخدم.');
+    } else {
+      toast.error(errMsg || (lang === 'fr' ? 'Échec du rejet' : 'تعذر تحديث حالة الوصل'));
+    }
   };
 
   return (
@@ -883,7 +984,7 @@ export const AdminPage: React.FC = () => {
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => setSelectedProofUrl(p.proof_url)}
+                    onClick={() => handlePreviewProof(p.proof_url)}
                     leftIcon={<Eye className="w-3.5 h-3.5" />}
                     className="text-xs"
                   >

@@ -11,6 +11,7 @@ import { useLanguage } from '../hooks/useLanguage';
 import { ChatConversationItem, ChatParticipant } from '../types/chat';
 import { Machine } from '../types/database';
 import { chatStore } from '../lib/chatStore';
+import { serverApi } from '../lib/serverApi';
 import { ConversationList } from '../features/chat/ConversationList';
 import { ChatThread } from '../features/chat/ChatThread';
 
@@ -34,6 +35,41 @@ export const Messages: React.FC = () => {
       // Load from chatStore
       const storeList = await chatStore.getConversationsForUser(currentUserId);
       let combined: ChatConversationItem[] = [...storeList];
+
+      // Pull from server SQLite database
+      try {
+        const sConvs = await serverApi.getConversations(currentUserId);
+        if (sConvs && sConvs.length > 0) {
+          for (const sc of sConvs) {
+            const existingIdx = combined.findIndex((x) => x.id === sc.id);
+            const otherId = sc.participant_a === currentUserId ? sc.participant_b : sc.participant_a;
+            const item: ChatConversationItem = {
+              id: sc.id,
+              machine_id: sc.machine_id,
+              participant_a: sc.participant_a,
+              participant_b: sc.participant_b,
+              last_message_at: sc.last_message_at || new Date().toISOString(),
+              unread_count: 0,
+              last_message: sc.last_message || '',
+              other_participant: sc.target_profile || {
+                id: otherId,
+                full_name: 'شريك JADIJCB',
+                phone: '+212600000000',
+                role: 'owner',
+                city: 'المغرب',
+              },
+              machine: sc.machine,
+            };
+            if (existingIdx >= 0) {
+              combined[existingIdx] = { ...combined[existingIdx], ...item };
+            } else {
+              combined.unshift(item);
+            }
+          }
+        }
+      } catch {
+        // Ignore server fallback error
+      }
 
       // Pull from Supabase if configured
       if (isSupabaseConfigured && currentUserId) {

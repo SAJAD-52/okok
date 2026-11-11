@@ -102,12 +102,11 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
   const [lat, setLat] = useState<number>(machineToEdit?.location_lat || 33.5731);
   const [lng, setLng] = useState<number>(machineToEdit?.location_lng || -7.5898);
 
-  // Images (up to 8)
+  // Images (up to 8 real photos)
   const [images, setImages] = useState<string[]>(
-    machineToEdit?.images?.length
-      ? machineToEdit.images
-      : ['https://images.unsplash.com/photo-1579829366248-204fe8413f31?w=800&q=80']
+    machineToEdit?.images?.length ? machineToEdit.images : []
   );
+  const [pendingFiles, setPendingFiles] = useState<{ file: File; previewUrl: string }[]>([]);
   const [isCompressingImages, setIsCompressingImages] = useState(false);
 
   // Publishing
@@ -142,12 +141,15 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
 
     try {
       const newUrls: string[] = [];
+      const newPending: { file: File; previewUrl: string }[] = [];
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         const compressed = await compressImage(file);
         newUrls.push(compressed.previewUrl);
+        newPending.push({ file: compressed.file, previewUrl: compressed.previewUrl });
       }
 
+      setPendingFiles((prev) => [...prev, ...newPending].slice(0, 8));
       setImages((prev) => [...prev, ...newUrls].slice(0, 8));
       toast.success(
         lang === 'fr'
@@ -162,7 +164,9 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
   };
 
   const handleRemoveImage = (index: number) => {
+    const removedUrl = images[index];
     setImages((prev) => prev.filter((_, i) => i !== index));
+    setPendingFiles((prev) => prev.filter((p) => p.previewUrl !== removedUrl));
   };
 
   const handleFinalSubmit = async () => {
@@ -177,6 +181,47 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
     }
 
     setIsSubmitting(true);
+
+    // Upload pending blob images to Supabase machine-images bucket
+    const finalImageUrls: string[] = [];
+    const currentUserId = user?.id || profile?.id;
+
+    for (let i = 0; i < images.length; i++) {
+      const img = images[i];
+      if (img.startsWith('http://') || img.startsWith('https://')) {
+        finalImageUrls.push(img);
+      } else if (img.startsWith('blob:') && isSupabaseConfigured && currentUserId) {
+        const pendingItem = pendingFiles.find((p) => p.previewUrl === img);
+        if (pendingItem?.file) {
+          try {
+            const fileExt = pendingItem.file.name.split('.').pop() || 'jpg';
+            const filePath = `${currentUserId}/${Date.now()}_${i}.${fileExt}`;
+            const { data: uploadData, error: uploadErr } = await supabase.storage
+              .from('machine-images')
+              .upload(filePath, pendingItem.file, {
+                cacheControl: '3600',
+                upsert: false,
+              });
+
+            if (!uploadErr && uploadData?.path) {
+              const { data: pubData } = supabase.storage
+                .from('machine-images')
+                .getPublicUrl(uploadData.path);
+              if (pubData?.publicUrl) {
+                finalImageUrls.push(pubData.publicUrl);
+                continue;
+              }
+            }
+          } catch (uploadErr) {
+            console.warn('Machine image storage upload notice:', uploadErr);
+          }
+        }
+        // Fallback: keep preview URL if storage fails or offline
+        finalImageUrls.push(img);
+      } else {
+        finalImageUrls.push(img);
+      }
+    }
 
     const cityName = MOROCCAN_CITIES.find((c) => c.id === cityId)?.name_ar || cityId;
     const catSlug = isSparePart ? 'spare-parts' : categoryId;
@@ -214,21 +259,19 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
       delivery_available: deliveryAvailable,
       status: isPublished ? 'available' : 'inactive',
       is_published: isPublished,
-      images: images.length
-        ? images
-        : ['https://images.unsplash.com/photo-1579829366248-204fe8413f31?w=800&q=80'],
+      images: finalImageUrls,
       specs: {
         operating_weight_ton: 8.5,
         engine_power_hp: 92,
         bucket_capacity_m3: 1.0,
       },
-      views_count: machineToEdit?.views_count || 12,
-      rating_avg: machineToEdit?.rating_avg || 4.9,
-      reviews_count: machineToEdit?.reviews_count || 3,
+      views_count: machineToEdit?.views_count || 0,
+      rating_avg: machineToEdit?.rating_avg || 5.0,
+      reviews_count: machineToEdit?.reviews_count || 0,
       owner: {
-        full_name: profile?.full_name || 'مالك آليات معتمد',
-        company_name: profile?.company_name || 'مقاولة تأجير معتمدة',
-        phone: profile?.phone || '+212600000000',
+        full_name: profile?.full_name || (lang === 'fr' ? 'Propriétaire certifié' : 'مالك معتمد'),
+        company_name: profile?.company_name || profile?.full_name || '',
+        phone: profile?.phone || '',
         whatsapp_verified: true,
       },
       created_at: machineToEdit?.created_at || new Date().toISOString(),

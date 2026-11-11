@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { mapDatabaseError } from '../../lib/errorHelpers';
+import { compressImage } from '../../lib/imageCompressor';
 import {
   MONTHLY_PLAN_PRICE_MAD,
   WHATSAPP_ADMIN_LINK,
@@ -82,16 +83,18 @@ export const PaymentProofModal: React.FC<PaymentProofModalProps> = ({
     setTimeout(() => setIsCopied(false), 2500);
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files?.[0];
     if (selected) {
-      if (selected.size > 5 * 1024 * 1024) {
-        toast.error(lang === 'fr' ? 'Le fichier dépasse 5 Mo' : 'حجم الملف يتجاوز 5 ميغابايت');
-        return;
+      try {
+        const compressed = await compressImage(selected);
+        setFile(compressed.file);
+        setPreviewUrl(compressed.previewUrl);
+      } catch {
+        setFile(selected);
+        const url = URL.createObjectURL(selected);
+        setPreviewUrl(url);
       }
-      setFile(selected);
-      const url = URL.createObjectURL(selected);
-      setPreviewUrl(url);
     }
   };
 

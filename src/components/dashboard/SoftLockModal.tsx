@@ -28,6 +28,8 @@ import { toast } from '../ui/Toast';
 import { useLanguage } from '../../hooks/useLanguage';
 import { useAuth } from '../../hooks/useAuth';
 import { PaymentMethod } from '../../types/database';
+import { mapDatabaseError } from '../../lib/errorHelpers';
+import { compressImage } from '../../lib/imageCompressor';
 
 interface SoftLockModalProps {
   isLocked: boolean;
@@ -77,15 +79,17 @@ export const SoftLockModal: React.FC<SoftLockModalProps> = ({ isLocked }) => {
     setTimeout(() => setIsCopied(false), 2500);
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files?.[0];
     if (selected) {
-      if (selected.size > 5 * 1024 * 1024) {
-        toast.error(lang === 'fr' ? 'Le fichier dépasse 5 Mo' : 'حجم الملف يتجاوز 5 ميغابايت');
-        return;
+      try {
+        const compressed = await compressImage(selected);
+        setFile(compressed.file);
+        setPreviewUrl(compressed.previewUrl);
+      } catch {
+        setFile(selected);
+        setPreviewUrl(URL.createObjectURL(selected));
       }
-      setFile(selected);
-      setPreviewUrl(URL.createObjectURL(selected));
     }
   };
 
@@ -105,21 +109,28 @@ export const SoftLockModal: React.FC<SoftLockModalProps> = ({ isLocked }) => {
     setIsSubmitting(true);
 
     try {
-      let uploadedProofUrl = previewUrl || 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?w=600&q=80';
+      let uploadedProofUrl = '';
 
-      if (isSupabaseConfigured && user?.id && file) {
-        const fileExt = file.name.split('.').pop() || 'jpg';
-        const filePath = `${user.id}/${Date.now()}_receipt.${fileExt}`;
+      if (isSupabaseConfigured && user?.id) {
+        if (file) {
+          const fileExt = file.name.split('.').pop() || 'jpg';
+          const filePath = `${user.id}/${Date.now()}_receipt.${fileExt}`;
 
-        const { error: uploadError } = await supabase.storage
-          .from('payment-proofs')
-          .upload(filePath, file, { cacheControl: '3600', upsert: false });
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('payment-proofs')
+            .upload(filePath, file, { cacheControl: '3600', upsert: false });
 
-        if (!uploadError) {
-          uploadedProofUrl = filePath;
+          if (uploadError) {
+            setIsSubmitting(false);
+            const errKey = mapDatabaseError(uploadError);
+            toast.error(t(errKey));
+            return;
+          }
+
+          uploadedProofUrl = uploadData?.path || filePath;
         }
 
-        await supabase.from('payments').insert({
+        const { error: insertError } = await supabase.from('payments').insert({
           user_id: user.id,
           amount,
           method,
@@ -127,6 +138,13 @@ export const SoftLockModal: React.FC<SoftLockModalProps> = ({ isLocked }) => {
           proof_url: uploadedProofUrl,
           status: 'pending',
         });
+
+        if (insertError) {
+          setIsSubmitting(false);
+          const errKey = mapDatabaseError(insertError);
+          toast.error(t(errKey));
+          return;
+        }
       }
 
       setIsSubmitting(false);

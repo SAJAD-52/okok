@@ -107,6 +107,26 @@ db.exec(`
     data_json TEXT,
     created_at TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS conversations (
+    id TEXT PRIMARY KEY,
+    machine_id TEXT,
+    participant_a TEXT NOT NULL,
+    participant_b TEXT NOT NULL,
+    last_message TEXT,
+    last_message_at TEXT NOT NULL,
+    data_json TEXT,
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS messages (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    sender_id TEXT NOT NULL,
+    body TEXT NOT NULL,
+    read_at TEXT,
+    created_at TEXT NOT NULL
+  );
 `);
 
 try {
@@ -545,6 +565,31 @@ app.post('/api/notifications/mark-all-read', (req, res) => {
   }
 });
 
+// 8b. Notifications - Create Custom In-App Notification
+app.post('/api/notifications', (req, res) => {
+  try {
+    const { user_id, title_ar, title_fr, body_ar, body_fr, type, data } = req.body || {};
+    const id = `notif_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    db.prepare(`
+      INSERT INTO notifications (id, user_id, title_ar, title_fr, body_ar, body_fr, type, is_read, data_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+    `).run(
+      id,
+      user_id || 'owner',
+      title_ar || 'إشعار جديد',
+      title_fr || 'Nouvelle notification',
+      body_ar || '',
+      body_fr || '',
+      type || 'info',
+      data ? JSON.stringify(data) : null,
+      new Date().toISOString()
+    );
+    res.json({ success: true, id });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // 9. Machines - GET List
 app.get('/api/machines', (req, res) => {
   try {
@@ -700,6 +745,180 @@ app.post('/api/clients', (req, res) => {
     );
 
     res.json({ success: true, client: { ...client, id } });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 12. Conversations - GET List
+app.get('/api/conversations', (req, res) => {
+  try {
+    const { user_id } = req.query;
+    let query = 'SELECT * FROM conversations WHERE 1=1';
+    const params: any[] = [];
+    if (user_id) {
+      query += ' AND (participant_a = ? OR participant_b = ?)';
+      params.push(String(user_id), String(user_id));
+    }
+    query += ' ORDER BY last_message_at DESC LIMIT 50';
+    const rows = db.prepare(query).all(...params);
+    const conversations = rows.map((r: any) => {
+      let data = {};
+      try {
+        if (r.data_json) data = JSON.parse(r.data_json);
+      } catch {}
+      return {
+        id: r.id,
+        machine_id: r.machine_id,
+        participant_a: r.participant_a,
+        participant_b: r.participant_b,
+        last_message: r.last_message,
+        last_message_at: r.last_message_at,
+        created_at: r.created_at,
+        ...data,
+      };
+    });
+    res.json({ success: true, conversations });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 13. Conversations - POST Create or Get Existing
+app.post('/api/conversations', (req, res) => {
+  try {
+    const { id, machine_id, participant_a, participant_b, machine, target_profile } = req.body || {};
+    if (!participant_a || !participant_b) {
+      return res.status(400).json({ success: false, error: 'Both participants are required' });
+    }
+
+    // Check existing
+    const existing: any = db.prepare(`
+      SELECT * FROM conversations
+      WHERE (participant_a = ? AND participant_b = ?)
+         OR (participant_a = ? AND participant_b = ?)
+      ORDER BY last_message_at DESC LIMIT 1
+    `).get(participant_a, participant_b, participant_b, participant_a);
+
+    if (existing) {
+      let data = {};
+      try {
+        if (existing.data_json) data = JSON.parse(existing.data_json);
+      } catch {}
+      return res.json({
+        success: true,
+        conversation: {
+          id: existing.id,
+          machine_id: existing.machine_id,
+          participant_a: existing.participant_a,
+          participant_b: existing.participant_b,
+          last_message: existing.last_message,
+          last_message_at: existing.last_message_at,
+          ...data,
+        },
+      });
+    }
+
+    const convId = id || `conv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const now = new Date().toISOString();
+    const dataJson = JSON.stringify({ machine, target_profile });
+
+    db.prepare(`
+      INSERT INTO conversations (id, machine_id, participant_a, participant_b, last_message, last_message_at, data_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(convId, machine_id || null, participant_a, participant_b, '', now, dataJson, now);
+
+    res.json({
+      success: true,
+      conversation: {
+        id: convId,
+        machine_id: machine_id || null,
+        participant_a,
+        participant_b,
+        last_message: '',
+        last_message_at: now,
+        machine,
+        target_profile,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 14. Messages - GET List by Conversation ID
+app.get('/api/messages', (req, res) => {
+  try {
+    const { conversation_id } = req.query;
+    if (!conversation_id) {
+      return res.status(400).json({ success: false, error: 'conversation_id is required' });
+    }
+    const rows = db.prepare(`
+      SELECT * FROM messages
+      WHERE conversation_id = ?
+      ORDER BY created_at ASC
+    `).all(String(conversation_id));
+
+    res.json({ success: true, messages: rows });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 15. Messages - POST Send Message
+app.post('/api/messages', (req, res) => {
+  try {
+    const { conversation_id, sender_id, body, recipient_id } = req.body || {};
+    if (!conversation_id || !sender_id || !body) {
+      return res.status(400).json({ success: false, error: 'Missing required fields' });
+    }
+
+    const msgId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const now = new Date().toISOString();
+    const trimmed = String(body).trim();
+
+    db.prepare(`
+      INSERT INTO messages (id, conversation_id, sender_id, body, read_at, created_at)
+      VALUES (?, ?, ?, ?, NULL, ?)
+    `).run(msgId, conversation_id, sender_id, trimmed, now);
+
+    // Update conversation last_message & timestamp
+    db.prepare(`
+      UPDATE conversations
+      SET last_message = ?, last_message_at = ?
+      WHERE id = ?
+    `).run(trimmed, now, conversation_id);
+
+    // If recipient is known, insert an in-app notification
+    if (recipient_id) {
+      const notifId = `notif_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      db.prepare(`
+        INSERT INTO notifications (id, user_id, title_ar, title_fr, body_ar, body_fr, type, is_read, data_json, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+      `).run(
+        notifId,
+        recipient_id,
+        'رسالة جديدة في المحادثة',
+        'Nouveau message dans le chat',
+        trimmed.length > 70 ? trimmed.substring(0, 70) + '...' : trimmed,
+        trimmed.length > 70 ? trimmed.substring(0, 70) + '...' : trimmed,
+        'chat_message',
+        JSON.stringify({ conversation_id, message_id: msgId, sender_id }),
+        now
+      );
+    }
+
+    res.json({
+      success: true,
+      message: {
+        id: msgId,
+        conversation_id,
+        sender_id,
+        body: trimmed,
+        read_at: null,
+        created_at: now,
+      },
+    });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }

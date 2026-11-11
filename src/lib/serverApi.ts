@@ -173,4 +173,96 @@ export const serverApi = {
       return [];
     }
   },
+
+  // 9. Create Custom In-App Notification
+  async createNotification(payload: {
+    user_id: string;
+    title_ar: string;
+    title_fr: string;
+    body_ar: string;
+    body_fr: string;
+    type?: string;
+    data?: any;
+  }): Promise<boolean> {
+    try {
+      const res = await fetch(`${BASE_URL}/api/notifications`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  },
+
+  // 10. Fetch Conversations from Server
+  async getConversations(userId?: string): Promise<any[]> {
+    try {
+      const searchParams = new URLSearchParams();
+      if (userId) searchParams.set('user_id', userId);
+      const res = await fetch(`${BASE_URL}/api/conversations?${searchParams.toString()}`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data.conversations) ? data.conversations : [];
+    } catch {
+      return [];
+    }
+  },
+
+  // 11. Create or Get Conversation on Server
+  async createConversation(payload: {
+    id?: string;
+    machine_id?: string;
+    participant_a: string;
+    participant_b: string;
+    machine?: any;
+    target_profile?: any;
+  }): Promise<any | null> {
+    try {
+      const res = await fetch(`${BASE_URL}/api/conversations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.conversation || null;
+    } catch {
+      return null;
+    }
+  },
+
+  // 12. Fetch Messages from Server
+  async getMessages(conversationId: string): Promise<any[]> {
+    try {
+      const res = await fetch(`${BASE_URL}/api/messages?conversation_id=${encodeURIComponent(conversationId)}`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data.messages) ? data.messages : [];
+    } catch {
+      return [];
+    }
+  },
+
+  // 13. Send Message on Server
+  async sendMessage(payload: {
+    conversation_id: string;
+    sender_id: string;
+    body: string;
+    recipient_id?: string;
+  }): Promise<any | null> {
+    try {
+      const res = await fetch(`${BASE_URL}/api/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.message || null;
+    } catch {
+      return null;
+    }
+  },
 };

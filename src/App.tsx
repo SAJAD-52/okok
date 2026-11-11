@@ -112,7 +112,9 @@ export const App: React.FC = () => {
             <Route path="/app/analytics" element={<Navigate to="/owner/analytics" replace />} />
             <Route path="/app/storefront" element={<Navigate to="/owner/storefront" replace />} />
             <Route path="/app/settings/business" element={<Navigate to="/owner/settings/business" replace />} />
-            <Route path="/app/messages" element={<Navigate to="/owner/messages" replace />} />
+            {/* Direct /messages and /contractor/messages shortcuts */}
+            <Route path="/messages" element={<Navigate to="/owner/messages" replace />} />
+            <Route path="/contractor/messages" element={<Navigate to="/entreprise/messages" replace />} />
 
             {/* Protected Contractor / Entreprise Portal Routes */}
             <Route

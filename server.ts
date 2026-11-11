@@ -22,113 +22,137 @@ if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-// Initialize SQLite database
+// Initialize SQLite database with self-healing recovery if corrupted
 const DB_PATH = path.join(DATA_DIR, 'jadijcb.db');
-const db = new DatabaseSync(DB_PATH);
 
-// Enable WAL mode & foreign keys for concurrency and reliability
-try {
-  db.exec('PRAGMA journal_mode = WAL;');
-  db.exec('PRAGMA synchronous = NORMAL;');
-} catch (e) {
-  console.warn('SQLite PRAGMA notice:', e);
+function createTables(database: DatabaseSync) {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS bookings (
+      id TEXT PRIMARY KEY,
+      machine_id TEXT NOT NULL,
+      owner_id TEXT,
+      client_id TEXT,
+      client_name TEXT NOT NULL,
+      client_phone TEXT NOT NULL,
+      client_ref_id TEXT,
+      start_at TEXT,
+      end_at TEXT,
+      start_date TEXT,
+      end_date TEXT,
+      total_price REAL DEFAULT 0,
+      deposit_amount REAL DEFAULT 0,
+      rate_type TEXT DEFAULT 'daily',
+      with_operator INTEGER DEFAULT 1,
+      fuel_included INTEGER DEFAULT 0,
+      delivery_requested INTEGER DEFAULT 0,
+      delivery_fee REAL DEFAULT 0,
+      site_address TEXT,
+      status TEXT DEFAULT 'pending',
+      notes TEXT,
+      paid_amount REAL DEFAULT 0,
+      balance_due REAL DEFAULT 0,
+      payment_status TEXT DEFAULT 'unpaid',
+      machine_json TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY,
+      user_id TEXT,
+      title_ar TEXT NOT NULL,
+      title_fr TEXT NOT NULL,
+      body_ar TEXT NOT NULL,
+      body_fr TEXT NOT NULL,
+      type TEXT DEFAULT 'booking_request',
+      is_read INTEGER DEFAULT 0,
+      data_json TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS machines (
+      id TEXT PRIMARY KEY,
+      owner_id TEXT,
+      title_ar TEXT,
+      title_fr TEXT,
+      brand TEXT,
+      model TEXT,
+      category TEXT,
+      city TEXT,
+      daily_rate REAL DEFAULT 0,
+      sale_price REAL DEFAULT 0,
+      listing_mode TEXT DEFAULT 'rent',
+      data_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS clients (
+      id TEXT PRIMARY KEY,
+      owner_id TEXT,
+      name TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      cin_or_ice TEXT,
+      company TEXT,
+      email TEXT,
+      address TEXT,
+      notes TEXT,
+      data_json TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS conversations (
+      id TEXT PRIMARY KEY,
+      machine_id TEXT,
+      participant_a TEXT NOT NULL,
+      participant_b TEXT NOT NULL,
+      last_message TEXT,
+      last_message_at TEXT NOT NULL,
+      data_json TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS messages (
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL,
+      sender_id TEXT NOT NULL,
+      body TEXT NOT NULL,
+      read_at TEXT,
+      created_at TEXT NOT NULL
+    );
+  `);
 }
 
-// Create Tables
-db.exec(`
-  CREATE TABLE IF NOT EXISTS bookings (
-    id TEXT PRIMARY KEY,
-    machine_id TEXT NOT NULL,
-    owner_id TEXT,
-    client_id TEXT,
-    client_name TEXT NOT NULL,
-    client_phone TEXT NOT NULL,
-    client_ref_id TEXT,
-    start_at TEXT,
-    end_at TEXT,
-    start_date TEXT,
-    end_date TEXT,
-    total_price REAL DEFAULT 0,
-    deposit_amount REAL DEFAULT 0,
-    rate_type TEXT DEFAULT 'daily',
-    with_operator INTEGER DEFAULT 1,
-    fuel_included INTEGER DEFAULT 0,
-    delivery_requested INTEGER DEFAULT 0,
-    delivery_fee REAL DEFAULT 0,
-    site_address TEXT,
-    status TEXT DEFAULT 'pending',
-    notes TEXT,
-    paid_amount REAL DEFAULT 0,
-    balance_due REAL DEFAULT 0,
-    payment_status TEXT DEFAULT 'unpaid',
-    machine_json TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT
-  );
+function initDatabase(): DatabaseSync {
+  try {
+    const instance = new DatabaseSync(DB_PATH);
+    try {
+      instance.exec('PRAGMA journal_mode = WAL;');
+      instance.exec('PRAGMA synchronous = NORMAL;');
+    } catch (e) {
+      console.warn('SQLite PRAGMA notice:', e);
+    }
+    createTables(instance);
+    return instance;
+  } catch (err: any) {
+    console.warn('SQLite database recovery triggered:', err);
+    try {
+      if (fs.existsSync(DB_PATH)) fs.unlinkSync(DB_PATH);
+      if (fs.existsSync(DB_PATH + '-wal')) fs.unlinkSync(DB_PATH + '-wal');
+      if (fs.existsSync(DB_PATH + '-shm')) fs.unlinkSync(DB_PATH + '-shm');
+    } catch (cleanErr) {
+      console.warn('Could not clean corrupted database files:', cleanErr);
+    }
+    const freshInstance = new DatabaseSync(DB_PATH);
+    try {
+      freshInstance.exec('PRAGMA journal_mode = WAL;');
+      freshInstance.exec('PRAGMA synchronous = NORMAL;');
+    } catch {}
+    createTables(freshInstance);
+    return freshInstance;
+  }
+}
 
-  CREATE TABLE IF NOT EXISTS notifications (
-    id TEXT PRIMARY KEY,
-    user_id TEXT,
-    title_ar TEXT NOT NULL,
-    title_fr TEXT NOT NULL,
-    body_ar TEXT NOT NULL,
-    body_fr TEXT NOT NULL,
-    type TEXT DEFAULT 'booking_request',
-    is_read INTEGER DEFAULT 0,
-    data_json TEXT,
-    created_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS machines (
-    id TEXT PRIMARY KEY,
-    owner_id TEXT,
-    title_ar TEXT,
-    title_fr TEXT,
-    brand TEXT,
-    model TEXT,
-    category TEXT,
-    city TEXT,
-    daily_rate REAL DEFAULT 0,
-    sale_price REAL DEFAULT 0,
-    listing_mode TEXT DEFAULT 'rent',
-    data_json TEXT NOT NULL,
-    created_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS clients (
-    id TEXT PRIMARY KEY,
-    owner_id TEXT,
-    name TEXT NOT NULL,
-    phone TEXT NOT NULL,
-    cin_or_ice TEXT,
-    company TEXT,
-    email TEXT,
-    address TEXT,
-    notes TEXT,
-    data_json TEXT,
-    created_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS conversations (
-    id TEXT PRIMARY KEY,
-    machine_id TEXT,
-    participant_a TEXT NOT NULL,
-    participant_b TEXT NOT NULL,
-    last_message TEXT,
-    last_message_at TEXT NOT NULL,
-    data_json TEXT,
-    created_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS messages (
-    id TEXT PRIMARY KEY,
-    conversation_id TEXT NOT NULL,
-    sender_id TEXT NOT NULL,
-    body TEXT NOT NULL,
-    read_at TEXT,
-    created_at TEXT NOT NULL
-  );
-`);
+const db = initDatabase();
 
 try {
   db.exec(`

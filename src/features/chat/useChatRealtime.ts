@@ -88,13 +88,21 @@ export function useChatRealtime(activeConversation: ChatConversationItem | null)
       loadMessages();
     }, 2500);
 
-    // 2. Window custom event
+    // 2. Window custom chat event
     const handleChatEvent = () => {
       loadMessages();
     };
     window.addEventListener('jadijcb_chat_event', handleChatEvent);
 
-    // 3. Cross-tab storage event
+    // 3. Local typing indicator event
+    const handleTypingEvent = (e: any) => {
+      if (e.detail?.conversationId === activeConversation?.id) {
+        setIsPeerTyping(Boolean(e.detail?.isTyping));
+      }
+    };
+    window.addEventListener('jadijcb_typing_event', handleTypingEvent);
+
+    // 4. Cross-tab storage event
     const handleStorageEvent = (e: StorageEvent) => {
       if (e.key === 'jadijcb_chat_messages' || e.key === 'jadijcb_chat_conversations') {
         loadMessages();
@@ -105,9 +113,10 @@ export function useChatRealtime(activeConversation: ChatConversationItem | null)
     return () => {
       clearInterval(pollTimer);
       window.removeEventListener('jadijcb_chat_event', handleChatEvent);
+      window.removeEventListener('jadijcb_typing_event', handleTypingEvent);
       window.removeEventListener('storage', handleStorageEvent);
     };
-  }, [loadMessages]);
+  }, [loadMessages, activeConversation?.id]);
 
   // 2. Setup Supabase Realtime Subscription & Presence for Active Conversation
   useEffect(() => {

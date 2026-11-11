@@ -17,6 +17,7 @@ import {
   Check,
   CalendarCheck,
   MessageCircle,
+  MessageSquare,
 } from 'lucide-react';
 import { Machine } from '../../types/database';
 import { Card } from '../ui/Card';
@@ -98,6 +99,14 @@ export const MachineCard: React.FC<MachineCardProps> = ({ machine, onBookClick }
     } else {
       navigate(`/marketplace/${machine.id}?book=true`);
     }
+  };
+
+  const handleChatClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const isContractor = profile?.role === 'contractor' || profile?.role === 'client';
+    const basePath = isContractor ? '/entreprise/messages' : '/owner/messages';
+    navigate(`${basePath}?machine_id=${machine.id}&target_user=${machine.owner_id || ''}`);
   };
 
   return (
@@ -269,14 +278,24 @@ export const MachineCard: React.FC<MachineCardProps> = ({ machine, onBookClick }
             </span>
           </div>
         ) : isRent ? (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <button
               type="button"
               onClick={handleBookingClick}
-              className="flex-1 py-2 px-3 rounded-xl bg-primary hover:bg-primary-hover active:scale-[0.99] text-ink text-xs font-black shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+              className="flex-1 py-2 px-2.5 rounded-xl bg-primary hover:bg-primary-hover active:scale-[0.99] text-ink text-xs font-black shadow-xs transition-all flex items-center justify-center gap-1 cursor-pointer truncate"
             >
-              <CalendarCheck className="w-4 h-4 text-ink shrink-0" />
-              <span>{lang === 'fr' ? 'Réserver' : 'طلب حجز الآلية'}</span>
+              <CalendarCheck className="w-3.5 h-3.5 text-ink shrink-0" />
+              <span className="truncate">{lang === 'fr' ? 'Réserver' : 'طلب حجز'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleChatClick}
+              title={lang === 'fr' ? 'Discussion instantanée dans la plateforme' : 'محادثة فورية داخل المنصة'}
+              className="py-2 px-2.5 rounded-xl bg-steel-900 hover:bg-black active:scale-[0.99] text-primary text-xs font-black shadow-xs transition-all flex items-center justify-center gap-1 cursor-pointer shrink-0"
+            >
+              <MessageSquare className="w-3.5 h-3.5 text-primary shrink-0" />
+              <span className="hidden sm:inline font-bold">{lang === 'fr' ? 'Chat' : 'محادثة'}</span>
             </button>
 
             <a
@@ -285,14 +304,14 @@ export const MachineCard: React.FC<MachineCardProps> = ({ machine, onBookClick }
               rel="noopener noreferrer"
               onClick={(e) => e.stopPropagation()}
               title={lang === 'fr' ? 'Contacter sur WhatsApp' : 'تواصل عبر واتساب'}
-              className="py-2 px-3 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] active:scale-[0.99] text-white text-xs font-bold shadow-xs transition-all flex items-center justify-center gap-1 cursor-pointer shrink-0"
+              className="py-2 px-2.5 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] active:scale-[0.99] text-white text-xs font-bold shadow-xs transition-all flex items-center justify-center gap-1 cursor-pointer shrink-0"
             >
-              <MessageCircle className="w-4 h-4 fill-current shrink-0" />
+              <MessageCircle className="w-3.5 h-3.5 fill-current shrink-0" />
               <span className="hidden sm:inline font-bold">{lang === 'fr' ? 'WhatsApp' : 'واتساب'}</span>
             </a>
           </div>
         ) : (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <button
               type="button"
               onClick={(e) => {
@@ -300,10 +319,20 @@ export const MachineCard: React.FC<MachineCardProps> = ({ machine, onBookClick }
                 e.preventDefault();
                 navigate(`/marketplace/${machine.id}`);
               }}
-              className="flex-1 py-2 px-3 rounded-xl bg-ink hover:bg-black text-primary text-xs font-black shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+              className="flex-1 py-2 px-2.5 rounded-xl bg-ink hover:bg-black text-primary text-xs font-black shadow-xs transition-all flex items-center justify-center gap-1 cursor-pointer truncate"
             >
-              <Truck className="w-4 h-4 text-primary shrink-0" />
-              <span>{lang === 'fr' ? 'Détails & Achat' : 'تفاصيل ومعاينة الشراء'}</span>
+              <Truck className="w-3.5 h-3.5 text-primary shrink-0" />
+              <span className="truncate">{lang === 'fr' ? 'Détails & Achat' : 'معاينة الشراء'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleChatClick}
+              title={lang === 'fr' ? 'Discussion instantanée dans la plateforme' : 'محادثة فورية داخل المنصة'}
+              className="py-2 px-2.5 rounded-xl bg-steel-100 hover:bg-steel-200 active:scale-[0.99] text-ink text-xs font-black shadow-xs transition-all flex items-center justify-center gap-1 cursor-pointer shrink-0"
+            >
+              <MessageSquare className="w-3.5 h-3.5 text-steel-700 shrink-0" />
+              <span className="hidden sm:inline font-bold">{lang === 'fr' ? 'Chat' : 'محادثة'}</span>
             </button>
 
             <a
@@ -312,9 +341,9 @@ export const MachineCard: React.FC<MachineCardProps> = ({ machine, onBookClick }
               rel="noopener noreferrer"
               onClick={(e) => e.stopPropagation()}
               title={lang === 'fr' ? 'Contacter sur WhatsApp' : 'تواصل عبر واتساب'}
-              className="py-2 px-3 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] text-white text-xs font-bold shadow-xs transition-all flex items-center justify-center gap-1 cursor-pointer shrink-0"
+              className="py-2 px-2.5 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] text-white text-xs font-bold shadow-xs transition-all flex items-center justify-center gap-1 cursor-pointer shrink-0"
             >
-              <MessageCircle className="w-4 h-4 fill-current shrink-0" />
+              <MessageCircle className="w-3.5 h-3.5 fill-current shrink-0" />
               <span className="hidden sm:inline font-bold">{lang === 'fr' ? 'WhatsApp' : 'واتساب'}</span>
             </a>
           </div>

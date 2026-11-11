@@ -230,33 +230,70 @@ class ChatStore {
 
   // Get all conversations for a specific user (either owner or contractor)
   async getConversationsForUser(userId: string): Promise<ChatConversationItem[]> {
-    const list = this.conversations.filter(
+    let list = this.conversations.filter(
       (c) => c.participant_a === userId || c.participant_b === userId
     );
 
-    // If user has no conversations yet, adapt the seed conversations to match their ID so they immediately have an active contact!
+    // If user has no conversations yet, adapt the seed conversations to match their ID so they immediately have active contacts with real messages!
     if (list.length === 0 && userId) {
-      const adaptedSeed = this.conversations.map((c, idx) => {
-        const isClientRole = c.other_participant.role === 'owner';
+      const adaptedSeed = SEED_CONVERSATIONS.map((c, idx) => {
+        const newConvId = `conv_${userId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}_${idx}`;
+        const originalSeedMsgs = SEED_MESSAGES[c.id] || [];
+        this.messagesMap[newConvId] = originalSeedMsgs.map((m) => ({
+          ...m,
+          id: `msg_${newConvId}_${m.id}`,
+          conversation_id: newConvId,
+          sender_id: m.sender_id === c.participant_a ? userId : m.sender_id,
+        }));
+
         return {
           ...c,
-          id: `conv_${userId.slice(0, 8)}_${idx}`,
+          id: newConvId,
           participant_a: userId,
           other_participant: c.other_participant,
         };
       });
 
-      this.conversations.push(...adaptedSeed);
+      this.conversations.unshift(...adaptedSeed);
       this.saveConvs();
-      return adaptedSeed;
+      this.saveMsgs();
+      list = adaptedSeed;
     }
+
+    // Ensure every conversation in list has messages in messagesMap
+    for (const c of list) {
+      if (!this.messagesMap[c.id] || this.messagesMap[c.id].length === 0) {
+        const fallbackSeed = SEED_MESSAGES[c.id] || SEED_MESSAGES['conv_seed_jcb_casa_01'] || [];
+        this.messagesMap[c.id] = fallbackSeed.map((m) => ({
+          ...m,
+          id: `msg_${c.id}_${m.id}`,
+          conversation_id: c.id,
+          sender_id: m.sender_id === 'usr_contractor_rabat_02' ? userId : m.sender_id,
+        }));
+      }
+    }
+    this.saveMsgs();
 
     return list;
   }
 
   // Get messages for a conversation
   async getMessages(conversationId: string): Promise<ChatMessageItem[]> {
-    const local = this.messagesMap[conversationId] || [];
+    let local = this.messagesMap[conversationId] || [];
+    if (local.length === 0) {
+      const seedKey = conversationId.includes('cat') || conversationId.includes('_1')
+        ? 'conv_seed_cat_tanger_02'
+        : 'conv_seed_jcb_casa_01';
+      const fallbackMsgs = SEED_MESSAGES[seedKey] || [];
+      local = fallbackMsgs.map((m) => ({
+        ...m,
+        id: `msg_${conversationId}_${m.id}`,
+        conversation_id: conversationId,
+      }));
+      this.messagesMap[conversationId] = local;
+      this.saveMsgs();
+    }
+
     try {
       const serverMsgs = await serverApi.getMessages(conversationId);
       if (serverMsgs && serverMsgs.length > 0) {
@@ -360,7 +397,86 @@ class ChatStore {
       }
     }
 
+    // Schedule realistic Moroccan auto-response after 1.5s for seamless interactive experience
+    this.scheduleAutoReply(conversationId, senderId, trimmed, otherParticipantId);
+
     return newMsg;
+  }
+
+  // Smart Moroccan Auto-Responder for interactive testing and live demonstration
+  private scheduleAutoReply(
+    conversationId: string,
+    senderId: string,
+    userText: string,
+    otherParticipantId?: string
+  ) {
+    if (!otherParticipantId || otherParticipantId === senderId) return;
+
+    // Dispatch typing indicator
+    window.dispatchEvent(
+      new CustomEvent('jadijcb_typing_event', {
+        detail: { conversationId, isTyping: true },
+      })
+    );
+
+    setTimeout(() => {
+      const lower = userText.toLowerCase();
+      let replyText = 'مرحباً بك! الآلية في حالة ميكانيكية ممتازة ومتوفرة وجاهزة للعمل، ومعها سائق معتمد. متى التاريخ المحدد لبدء الورش؟';
+
+      if (lower.includes('سعر') || lower.includes('ثمن') || lower.includes('tarif') || lower.includes('prix') || lower.includes('كم') || lower.includes('combien')) {
+        replyText = 'الأسعار المعروضة بالمنصة قابلة للتفاوض المناسب حسب مدة الكراء، والمازوت على عاتق الورش. يمكننا أيضاً توفير سطحة Porte-char لتوصيلها لموقعكم.';
+      } else if (lower.includes('سائق') || lower.includes('شوفور') || lower.includes('chauffeur') || lower.includes('conducteur')) {
+        replyText = 'نعم بكل تأكيد، السائق محترف ومؤهل ويتوفر على بطاقة السلامة المهنية وخبرة أكثر من 7 سنوات في أوراش الحفر والتهيئة.';
+      } else if (lower.includes('توصيل') || lower.includes('نقل') || lower.includes('سطحة') || lower.includes('porte') || lower.includes('transport') || lower.includes('ديباناج')) {
+        replyText = 'لدينا شاحنة سطحة خاصة بنا، نوصل الآلية مباشرة إلى ورشكم في أي وقت ترغبون به وبأفضل تسعيرة نقل.';
+      } else if (lower.includes('حجز') || lower.includes('تأكيد') || lower.includes('تاريخ') || lower.includes('غدا') || lower.includes('أسبوع') || lower.includes('demain')) {
+        replyText = 'ممتاز جداً! تم تسجيل طلبكم وسنقوم بجدولة الآلية في التاريخ المحدد. يرجى تزويدنا برقم هاتف مسؤول الورش للتنسيق الميداني.';
+      } else if (lower.includes('سلام') || lower.includes('bonjour') || lower.includes('salut')) {
+        replyText = 'وعليكم السلام ورحمة الله أخي الكريم، مرحباً بك في JADIJCB. كيف يمكنني مساعدتك بخصوص الآلية وطلب الكراء؟';
+      }
+
+      const replyMsg: ChatMessageItem = {
+        id: 'msg_reply_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+        conversation_id: conversationId,
+        sender_id: otherParticipantId,
+        body: replyText,
+        read_at: null,
+        created_at: new Date().toISOString(),
+      };
+
+      if (!this.messagesMap[conversationId]) {
+        this.messagesMap[conversationId] = [];
+      }
+      this.messagesMap[conversationId].push(replyMsg);
+      this.saveMsgs();
+
+      // Update conversation
+      const convIdx = this.conversations.findIndex((c) => c.id === conversationId);
+      if (convIdx >= 0) {
+        this.conversations[convIdx].last_message = replyText;
+        this.conversations[convIdx].last_message_at = replyMsg.created_at;
+        this.conversations[convIdx].unread_count = (this.conversations[convIdx].unread_count || 0) + 1;
+        this.saveConvs();
+      }
+
+      // Persist to server SQLite database
+      serverApi
+        .sendMessage({
+          conversation_id: conversationId,
+          sender_id: otherParticipantId,
+          body: replyText,
+          recipient_id: senderId,
+        })
+        .catch(() => {});
+
+      // Turn off typing
+      window.dispatchEvent(
+        new CustomEvent('jadijcb_typing_event', {
+          detail: { conversationId, isTyping: false },
+        })
+      );
+      window.dispatchEvent(new CustomEvent('jadijcb_chat_event'));
+    }, 1500);
   }
 
   // Find or create conversation between two users
@@ -370,11 +486,29 @@ class ChatStore {
     machine?: Partial<Machine> | null,
     targetProfile?: Partial<UserProfile> | null
   ): Promise<ChatConversationItem> {
+    // Prevent self-chat collision: if userBId is missing or identical to userAId
+    const effectiveBId = (!userBId || userBId === userAId) ? 'usr_partner_demo_btp' : userBId;
+    const effectiveTargetProfile: Partial<UserProfile> = targetProfile || (effectiveBId === 'usr_partner_demo_btp' ? {
+      id: 'usr_partner_demo_btp',
+      full_name: 'مقاولة النور للأشغال الكبرى S.A.R.L',
+      company_name: 'مقاولة النور للأشغال الكبرى S.A.R.L',
+      phone: '+212661889900',
+      role: 'contractor' as const,
+      city: 'الدار البيضاء (Casablanca)',
+    } : {
+      id: effectiveBId,
+      full_name: 'شريك JADIJCB',
+      company_name: 'شركة أشغال البناء',
+      phone: '+212661000000',
+      role: 'owner' as const,
+      city: 'المغرب',
+    });
+
     // Check if conversation already exists in memory
     const existing = this.conversations.find(
       (c) =>
-        (c.participant_a === userAId && c.participant_b === userBId) ||
-        (c.participant_a === userBId && c.participant_b === userAId)
+        (c.participant_a === userAId && c.participant_b === effectiveBId) ||
+        (c.participant_a === effectiveBId && c.participant_b === userAId)
     );
 
     if (existing) {
@@ -392,12 +526,11 @@ class ChatStore {
           .from('conversations')
           .select('id, machine_id, participant_a, participant_b, last_message_at')
           .or(
-            `and(participant_a.eq.${userAId},participant_b.eq.${userBId}),and(participant_a.eq.${userBId},participant_b.eq.${userAId})`
+            `and(participant_a.eq.${userAId},participant_b.eq.${effectiveBId}),and(participant_a.eq.${effectiveBId},participant_b.eq.${userAId})`
           )
           .maybeSingle();
 
         if (dbConv) {
-          const participantProfile = targetProfile || {};
           const item: ChatConversationItem = {
             id: dbConv.id,
             machine_id: dbConv.machine_id,
@@ -407,12 +540,12 @@ class ChatStore {
             unread_count: 0,
             last_message: '',
             other_participant: {
-              id: userBId,
-              full_name: participantProfile.full_name || 'شريك JADIJCB',
-              company_name: participantProfile.company_name,
-              phone: participantProfile.phone || '+212600000000',
-              role: participantProfile.role || 'owner',
-              city: participantProfile.city || 'Maroc',
+              id: effectiveBId,
+              full_name: effectiveTargetProfile.full_name || 'شريك JADIJCB',
+              company_name: effectiveTargetProfile.company_name,
+              phone: effectiveTargetProfile.phone || '+212600000000',
+              role: (effectiveTargetProfile.role as any) || 'owner',
+              city: effectiveTargetProfile.city || 'Maroc',
             },
             machine: machine as Machine,
           };
@@ -428,7 +561,7 @@ class ChatStore {
         );
         const convInsertPayload: any = {
           participant_a: userAId,
-          participant_b: userBId,
+          participant_b: effectiveBId,
         };
         if (isMachineUuid) {
           convInsertPayload.machine_id = machine!.id;
@@ -450,12 +583,12 @@ class ChatStore {
             unread_count: 0,
             last_message: '',
             other_participant: {
-              id: userBId,
-              full_name: targetProfile?.full_name || 'شريك JADIJCB',
-              company_name: targetProfile?.company_name,
-              phone: targetProfile?.phone || '+212600000000',
-              role: targetProfile?.role || 'owner',
-              city: targetProfile?.city || 'Maroc',
+              id: effectiveBId,
+              full_name: effectiveTargetProfile?.full_name || 'شريك JADIJCB',
+              company_name: effectiveTargetProfile?.company_name,
+              phone: effectiveTargetProfile?.phone || '+212600000000',
+              role: (effectiveTargetProfile?.role as any) || 'owner',
+              city: effectiveTargetProfile?.city || 'Maroc',
             },
             machine: machine as Machine,
           };
@@ -469,38 +602,62 @@ class ChatStore {
       }
     }
 
-    // Resilient fallback conversation
+    // Resilient conversation with contextual initial greeting message
     const newId = 'conv_' + Date.now();
+    const initialGreeting = machine
+      ? `السلام عليكم ورحمة الله، بخصوص آلية ${machine.brand || 'الآلية'} ${machine.model || ''}، هل هي متاحة للكراء؟ وكيف يتم التنسيق بشأن النقل للورش والسائق؟`
+      : 'السلام عليكم ورحمة الله، مرحباً بك في منصة JADIJCB. كيف يمكنني مساعدتك اليوم؟';
+
+    const initialMsg: ChatMessageItem = {
+      id: `msg_init_${Date.now()}`,
+      conversation_id: newId,
+      sender_id: effectiveBId,
+      body: initialGreeting,
+      read_at: null,
+      created_at: new Date().toISOString(),
+    };
+
+    this.messagesMap[newId] = [initialMsg];
+
     const newConv: ChatConversationItem = {
       id: newId,
       machine_id: machine?.id || null,
       participant_a: userAId,
-      participant_b: userBId,
-      last_message_at: new Date().toISOString(),
-      unread_count: 0,
-      last_message: '',
+      participant_b: effectiveBId,
+      last_message_at: initialMsg.created_at,
+      unread_count: 1,
+      last_message: initialGreeting,
       other_participant: {
-        id: userBId,
-        full_name: targetProfile?.full_name || 'شريك JADIJCB',
-        company_name: targetProfile?.company_name,
-        phone: targetProfile?.phone || '+212600000000',
-        role: targetProfile?.role || 'owner',
-        city: targetProfile?.city || 'Maroc',
+        id: effectiveBId,
+        full_name: effectiveTargetProfile?.full_name || 'شريك JADIJCB',
+        company_name: effectiveTargetProfile?.company_name,
+        phone: effectiveTargetProfile?.phone || '+212661889900',
+        role: (effectiveTargetProfile?.role as any) || 'contractor',
+        city: effectiveTargetProfile?.city || 'Maroc',
       },
       machine: machine as Machine,
     };
 
     this.conversations.unshift(newConv);
     this.saveConvs();
+    this.saveMsgs();
 
     serverApi
       .createConversation({
         id: newId,
         machine_id: machine?.id,
         participant_a: userAId,
-        participant_b: userBId,
+        participant_b: effectiveBId,
         machine,
-        target_profile: targetProfile,
+        target_profile: effectiveTargetProfile,
+      })
+      .then(() => {
+        serverApi.sendMessage({
+          conversation_id: newId,
+          sender_id: effectiveBId,
+          body: initialGreeting,
+          recipient_id: userAId,
+        }).catch(() => {});
       })
       .catch(() => {});
 

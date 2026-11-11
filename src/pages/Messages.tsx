@@ -11,6 +11,7 @@ import { useLanguage } from '../hooks/useLanguage';
 import { ChatConversationItem, ChatParticipant } from '../types/chat';
 import { Machine } from '../types/database';
 import { chatStore } from '../lib/chatStore';
+import { machineStore } from '../lib/machineStore';
 import { serverApi } from '../lib/serverApi';
 import { ConversationList } from '../features/chat/ConversationList';
 import { ChatThread } from '../features/chat/ChatThread';
@@ -227,19 +228,29 @@ export const Messages: React.FC = () => {
         let targetMachine: any = null;
         let targetProfile: any = null;
 
-        if (urlMachineId && isSupabaseConfigured) {
-          try {
-            const { data: mData } = await supabase
-              .from('machines')
-              .select('*, profiles(*)')
-              .eq('id', urlMachineId)
-              .maybeSingle();
-            if (mData) {
-              targetMachine = mData;
-              targetProfile = mData.profiles;
+        if (urlMachineId) {
+          if (isSupabaseConfigured) {
+            try {
+              const { data: mData } = await supabase
+                .from('machines')
+                .select('*, profiles(*)')
+                .eq('id', urlMachineId)
+                .maybeSingle();
+              if (mData) {
+                targetMachine = mData;
+                targetProfile = mData.profiles;
+              }
+            } catch (e) {
+              console.warn('Machine fetch error:', e);
             }
-          } catch (e) {
-            console.warn('Machine fetch error:', e);
+          }
+
+          if (!targetMachine) {
+            const cachedM = machineStore.getCachedMachines().find((m) => m.id === urlMachineId);
+            if (cachedM) {
+              targetMachine = cachedM;
+              targetProfile = cachedM.owner;
+            }
           }
         }
 

@@ -572,7 +572,7 @@ class ChatStore {
           .insert(convInsertPayload)
           .select()
           .maybeSingle();
-
+        if (insErr) console.error('CONV_INSERT_ERROR', insErr.message, insErr.code, insErr.details);
         if (!insErr && inserted) {
           const item: ChatConversationItem = {
             id: inserted.id,

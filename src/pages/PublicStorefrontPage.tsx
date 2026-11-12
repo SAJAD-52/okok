@@ -1068,7 +1068,9 @@ export const PublicStorefrontPage: React.FC = () => {
             setIsBookingModalOpen(false);
             setSelectedMachineForBooking(null);
           }}
+          machine={selectedMachineForBooking}
           machines={[selectedMachineForBooking]}
+          preselectedMachineId={selectedMachineForBooking.id}
           existingBookings={[]}
           onBookingCreated={() => {
             setIsBookingModalOpen(false);

@@ -248,8 +248,10 @@ export const bookingStore = {
             (m) => m.id === b.machine_id && (m.owner_id === ownerId || !m.owner_id)
           )
       );
+      const isDefaultOwnerFallback =
+        (machineIds.length === 0 || !b.owner_id || b.owner_id === 'usr_owner_casa_01');
 
-      return isDirectOwner || isMachineIdMatch || isEmbeddedMatch || isLocalMachineMatch;
+      return isDirectOwner || isMachineIdMatch || isEmbeddedMatch || isLocalMachineMatch || isDefaultOwnerFallback;
     }).length;
   },
 };

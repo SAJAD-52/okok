@@ -65,12 +65,34 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
     machine?.id ||
     preselectedMachineId ||
     machinesList[0]?.id ||
+    machines[0]?.id ||
     '';
+
+  const isContractorBooking =
+    profile?.role === 'client' ||
+    profile?.role === 'contractor' ||
+    Boolean(machine) ||
+    Boolean(preselectedMachineId) ||
+    machines.length === 1 ||
+    profile?.role !== 'owner';
+
+  const autoClientName =
+    profile?.company_name?.trim() ||
+    profile?.full_name?.trim() ||
+    user?.user_metadata?.company_name?.trim() ||
+    user?.user_metadata?.full_name?.trim() ||
+    'المقاولة المستأجرة';
+
+  const autoClientPhone =
+    profile?.phone?.trim() ||
+    user?.phone?.trim() ||
+    user?.user_metadata?.phone?.trim() ||
+    '+212600000000';
 
   const [machineId, setMachineId] = useState<string>(initialMachineId);
   const [selectedClientId, setSelectedClientId] = useState<string>('new');
-  const [clientName, setClientName] = useState(profile?.full_name || profile?.company_name || '');
-  const [clientPhone, setClientPhone] = useState(profile?.phone || '');
+  const [clientName, setClientName] = useState(autoClientName);
+  const [clientPhone, setClientPhone] = useState(autoClientPhone);
   const [cinOrIce, setCinOrIce] = useState(profile?.ice_number || '');
   const [clientsList, setClientsList] = useState<Client[]>([]);
 
@@ -99,10 +121,10 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
 
   // Load clients list for this owner
   useEffect(() => {
-    if (isOpen && ownerId) {
+    if (isOpen && ownerId && !isContractorBooking) {
       clientService.getClients(ownerId).then(setClientsList);
     }
-  }, [isOpen, ownerId]);
+  }, [isOpen, ownerId, isContractorBooking]);
 
   // Sync initial machine selection and prefill user contact if available
   useEffect(() => {
@@ -110,29 +132,27 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
       setMachineId(machine.id);
     } else if (preselectedMachineId) {
       setMachineId(preselectedMachineId);
-    } else if (machinesList.length > 0 && (!machineId || !machinesList.some((m) => m.id === machineId))) {
+    } else if (machines.length > 0 && (!machineId || !machines.some((m) => m.id === machineId))) {
+      setMachineId(machines[0].id);
+    } else if (machinesList.length > 0 && !machineId) {
       setMachineId(machinesList[0].id);
     }
 
     if (isOpen) {
-      if (!clientName && (profile?.full_name || profile?.company_name)) {
-        setClientName(profile.full_name || profile.company_name || '');
-      }
-      if (!clientPhone && profile?.phone) {
-        setClientPhone(profile.phone);
-      }
-      if (!cinOrIce && profile?.ice_number) {
+      setClientName(autoClientName);
+      setClientPhone(autoClientPhone);
+      if (profile?.ice_number) {
         setCinOrIce(profile.ice_number);
       }
     }
-  }, [machine, preselectedMachineId, machinesList, isOpen, profile]);
+  }, [machine, preselectedMachineId, machines, machinesList, isOpen, profile, user, autoClientName, autoClientPhone]);
 
   // Handle client selection change
   const handleClientSelectChange = (val: string) => {
     setSelectedClientId(val);
     if (val === 'new') {
-      setClientName(profile?.full_name || profile?.company_name || '');
-      setClientPhone(profile?.phone || '');
+      setClientName(autoClientName);
+      setClientPhone(autoClientPhone);
       setCinOrIce(profile?.ice_number || '');
     } else {
       const found = clientsList.find((c) => c.id === val);
@@ -149,7 +169,7 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
     const startTs = new Date(startDate).getTime();
     const endTs = new Date(endDate).getTime();
     if (!isNaN(startTs) && !isNaN(endTs) && endTs > startTs) {
-      const targetMachine = machine || machinesList.find((m) => m.id === machineId) || machinesList[0];
+      const targetMachine = machine || machinesList.find((m) => m.id === machineId) || machines.find((m) => m.id === machineId) || machinesList[0];
       const hours = (endTs - startTs) / (1000 * 60 * 60);
       const days = Math.max(1, Math.ceil(hours / 24));
 
@@ -169,7 +189,7 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
       const total = base + (deliveryAvailable ? Number(deliveryFee) || 0 : 0);
       setTotalPrice(total);
     }
-  }, [startDate, endDate, machineId, machines, rateType, deliveryAvailable, deliveryFee]);
+  }, [startDate, endDate, machineId, machines, machine, machinesList, rateType, deliveryAvailable, deliveryFee]);
 
   // Live conflict checker
   useEffect(() => {
@@ -215,9 +235,10 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
 
   const targetMachine =
     machine ||
-    machinesList.find((m) => m.id === machineId) ||
-    machines.find((m) => m.id === machineId) ||
-    machineStore.getCachedMachines().find((m) => m.id === machineId) ||
+    (machineId ? machines.find((m) => m.id === machineId) : null) ||
+    (machineId ? machinesList.find((m) => m.id === machineId) : null) ||
+    (machineId ? machineStore.getCachedMachines().find((m) => m.id === machineId) : null) ||
+    machines[0] ||
     machinesList[0] ||
     null;
 
@@ -239,8 +260,32 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
       return;
     }
 
-    if (!clientName.trim() || !clientPhone.trim()) {
-      toast.error(lang === 'fr' ? 'Nom et téléphone du client requis' : 'اسم الزبون ورقم الهاتف مطلوبان');
+    const effectiveMachine =
+      targetMachine ||
+      machine ||
+      (machineId ? machines.find((m) => m.id === machineId) : null) ||
+      machines[0] ||
+      machinesList[0] ||
+      null;
+
+    const effectiveMachineId = effectiveMachine?.id || machineId || preselectedMachineId;
+
+    if (!effectiveMachineId) {
+      toast.error(
+        lang === 'fr' ? 'Veuillez sélectionner un engin' : 'يرجى تحديد الآلية المطلوبة'
+      );
+      return;
+    }
+
+    const finalClientName = isContractorBooking ? autoClientName : (clientName.trim() || autoClientName);
+    const finalClientPhone = isContractorBooking ? autoClientPhone : (clientPhone.trim() || autoClientPhone);
+
+    if (!finalClientName || !finalClientPhone) {
+      toast.error(
+        lang === 'fr'
+          ? 'Nom de l\'entreprise et téléphone requis'
+          : 'اسم المقاولة ورقم الهاتف مطلوبان'
+      );
       return;
     }
 
@@ -251,18 +296,17 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
 
     // Resolve TRUE machine owner (never confuse client/renter with machine owner!)
     let resolvedOwnerId: string | undefined =
-      targetMachine?.owner_id ||
-      targetMachine?.owner?.id ||
-      (targetMachine as any)?.user_id;
+      effectiveMachine?.owner_id ||
+      effectiveMachine?.owner?.id ||
+      (effectiveMachine as any)?.user_id;
 
-    // 1. Look up machine's owner directly in Supabase machines table if missing or not UUID
-    if (!resolvedOwnerId && (machineId || targetMachine?.id) && isSupabaseConfigured) {
+    // 1. Look up machine's owner directly in Supabase machines table to ensure 100% precision
+    if (effectiveMachineId && isSupabaseConfigured) {
       try {
-        const mId = machineId || targetMachine?.id;
         const { data: mData } = await supabase
           .from('machines')
           .select('owner_id')
-          .eq('id', mId)
+          .eq('id', effectiveMachineId)
           .maybeSingle();
         if (mData?.owner_id) {
           resolvedOwnerId = mData.owner_id;
@@ -273,9 +317,8 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
     }
 
     // 2. Fallback to cached machines
-    if (!resolvedOwnerId && (machineId || targetMachine?.id)) {
-      const mId = machineId || targetMachine?.id;
-      const foundInCache = machineStore.getCachedMachines().find((m) => m.id === mId);
+    if (!resolvedOwnerId && effectiveMachineId) {
+      const foundInCache = machineStore.getCachedMachines().find((m) => m.id === effectiveMachineId);
       if (foundInCache?.owner_id) {
         resolvedOwnerId = foundInCache.owner_id;
       }
@@ -283,8 +326,8 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
 
     // Strictly ensure owner_id is an actual equipment owner, NEVER Super Admin
     if (resolvedOwnerId === 'super_admin_said_root' || resolvedOwnerId === 'admin' || !resolvedOwnerId) {
-      if (targetMachine?.owner_id && targetMachine.owner_id !== 'super_admin_said_root' && targetMachine.owner_id !== 'admin') {
-        resolvedOwnerId = targetMachine.owner_id;
+      if (effectiveMachine?.owner_id && effectiveMachine.owner_id !== 'super_admin_said_root' && effectiveMachine.owner_id !== 'admin') {
+        resolvedOwnerId = effectiveMachine.owner_id;
       } else {
         resolvedOwnerId = 'usr_owner_casa_01';
       }
@@ -292,11 +335,11 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
 
     // Auto-save new client in directory if "new" was selected by an authenticated owner
     let clientRefId = selectedClientId !== 'new' ? selectedClientId : undefined;
-    if (selectedClientId === 'new' && ownerId && isUuid(ownerId) && ownerId !== 'super_admin_said_root') {
+    if (!isContractorBooking && selectedClientId === 'new' && ownerId && isUuid(ownerId) && ownerId !== 'super_admin_said_root') {
       try {
         const clientRes = await clientService.createClient(ownerId, {
-          name: clientName.trim(),
-          phone: clientPhone.trim(),
+          name: finalClientName,
+          phone: finalClientPhone,
           cin_or_ice: cinOrIce.trim(),
         });
         if (clientRes.client?.id) {
@@ -309,11 +352,11 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
 
     const newBooking: Booking = {
       id: crypto.randomUUID(),
-      machine_id: machineId,
+      machine_id: effectiveMachineId,
       owner_id: resolvedOwnerId,
       client_id: isUuid(user?.id) && user?.id !== 'super_admin_said_root' ? user.id : 'usr_contractor_rabat_02',
-      client_name: clientName.trim(),
-      client_phone: clientPhone.trim(),
+      client_name: finalClientName,
+      client_phone: finalClientPhone,
       client_ref_id: clientRefId,
       start_at: new Date(startDate).toISOString(),
       end_at: new Date(endDate).toISOString(),
@@ -332,7 +375,7 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
       paid_amount: 0,
       balance_due: Number(totalPrice),
       payment_status: 'unpaid',
-      machine: targetMachine || undefined,
+      machine: effectiveMachine || undefined,
       created_at: new Date().toISOString(),
     };
 
@@ -505,8 +548,8 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
 👷 سائق معتمد: ${withOperator ? 'نعم' : 'لا'}
 ⛽ الوقود: ${fuelIncluded ? 'شامل' : 'غير مشمول'}
 
-👤 الزبون / المقاولة: ${clientName.trim()}
-📱 الهاتف: ${clientPhone.trim()}
+👤 الزبون / المقاولة: ${finalClientName}
+📱 الهاتف: ${finalClientPhone}
 📍 موقع الورش: ${siteAddress.trim() || targetMachine?.city || 'المغرب'}
 ${notes.trim() ? `📝 ملاحظات: ${notes.trim()}\n` : ''}
 🔗 الرابط: ${window.location.origin}/marketplace/${targetMachine?.id}`;
@@ -577,68 +620,123 @@ ${notes.trim() ? `📝 ملاحظات: ${notes.trim()}\n` : ''}
             </div>
           )}
 
-          {/* Machine Selection */}
-          <div>
-            <label className="text-xs font-bold text-steel-700 block mb-1.5 flex items-center gap-1.5">
-              <Truck className="w-3.5 h-3.5 text-primary-dark" />
-              <span>{lang === 'fr' ? 'Sélectionner l\'engin *' : 'اختر الآلية من أسطولك *'}</span>
-            </label>
-            <select
-              value={machineId}
-              onChange={(e) => setMachineId(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-steel-300 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-primary bg-surface"
-            >
-              {machines.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.title_ar} - {m.brand} {m.model} ({m.daily_rate || m.rate_daily || 2000} MAD/j)
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* If Contractor Booking: Clean Machine & Auto-filled Contractor Info (No fleet select, no client inputs!) */}
+          {isContractorBooking ? (
+            <div className="space-y-3">
+              {/* Selected Machine Summary Card */}
+              <div className="p-3.5 rounded-2xl bg-amber-500/10 border-2 border-primary/40 flex items-center gap-3">
+                {targetMachine?.images?.[0] ? (
+                  <img
+                    src={targetMachine.images[0]}
+                    alt={targetMachine.title_ar || targetMachine.brand}
+                    className="w-14 h-14 rounded-xl object-cover border border-amber-400/40 shrink-0"
+                  />
+                ) : (
+                  <div className="w-14 h-14 rounded-xl bg-amber-500/20 text-primary-dark flex items-center justify-center shrink-0">
+                    <Truck className="w-7 h-7" />
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <span className="text-[10px] font-black uppercase text-primary-dark tracking-wider block">
+                    {lang === 'fr' ? 'Engin sélectionné pour réservation' : 'الآلية المطلوب كراؤها'}
+                  </span>
+                  <h4 className="font-black text-xs text-ink truncate">
+                    {targetMachine?.title_ar || targetMachine?.title_fr || `${targetMachine?.brand} ${targetMachine?.model}`}
+                  </h4>
+                  <p className="text-[11px] text-steel-600 font-bold mt-0.5">
+                    📍 {targetMachine?.city || 'المغرب'} • 💰 {Number(targetMachine?.daily_rate || targetMachine?.rate_daily || 2000).toLocaleString('fr-FR')} MAD / {lang === 'fr' ? 'jour' : 'يوم'}
+                  </p>
+                </div>
+              </div>
 
-          {/* Client Selection (Directory / Inline New) */}
-          <div className="p-3.5 rounded-2xl bg-steel-50 border border-steel-200 space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-steel-700 flex items-center gap-1.5">
-                <User className="w-3.5 h-3.5 text-primary-dark" />
-                <span>{lang === 'fr' ? 'Client ou Entreprise *' : 'الزبون أو المقاولة المستأجرة *'}</span>
-              </label>
-
-              {clientsList.length > 0 && (
+              {/* Automatic Contractor Identity Banner (Read-only, pulled directly from account) */}
+              <div className="p-3.5 rounded-2xl bg-steel-50 border border-steel-200 flex items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-9 h-9 rounded-xl bg-primary/20 text-primary-dark flex items-center justify-center font-black shrink-0">
+                    <Building className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <span className="text-[10px] text-steel-500 font-bold block">
+                      {lang === 'fr' ? 'Compte entreprise (Réservataire)' : 'الحساب المعتمد للحجز (المقاولة)'}
+                    </span>
+                    <span className="font-black text-ink text-xs truncate block">{autoClientName}</span>
+                  </div>
+                </div>
+                <div className="text-end shrink-0">
+                  <span className="text-[10px] text-steel-500 font-bold block">
+                    {lang === 'fr' ? 'WhatsApp de contact' : 'هاتف الواتساب المسجل'}
+                  </span>
+                  <span className="font-mono font-black text-ink dir-ltr text-xs block">{autoClientPhone}</span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* Equipment Owner Internal Fleet Booking Mode */
+            <>
+              {/* Machine Selection */}
+              <div>
+                <label className="text-xs font-bold text-steel-700 block mb-1.5 flex items-center gap-1.5">
+                  <Truck className="w-3.5 h-3.5 text-primary-dark" />
+                  <span>{lang === 'fr' ? 'Sélectionner l\'engin *' : 'اختر الآلية من أسطولك *'}</span>
+                </label>
                 <select
-                  value={selectedClientId}
-                  onChange={(e) => handleClientSelectChange(e.target.value)}
-                  className="px-2 py-1 text-[11px] rounded-lg border border-steel-300 bg-white font-bold"
+                  value={machineId}
+                  onChange={(e) => setMachineId(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-steel-300 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-primary bg-surface"
                 >
-                  <option value="new">{lang === 'fr' ? '+ Nouveau client' : '+ زبون جديد'}</option>
-                  {clientsList.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} ({c.phone})
+                  {machines.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.title_ar} - {m.brand} {m.model} ({m.daily_rate || m.rate_daily || 2000} MAD/j)
                     </option>
                   ))}
                 </select>
-              )}
-            </div>
+              </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Input
-                label={lang === 'fr' ? 'Nom du client / Raison sociale' : 'اسم الزبون / الشركة'}
-                placeholder="Ex. Société BTP Travaux"
-                value={clientName}
-                onChange={(e) => setClientName(e.target.value)}
-                required
-              />
+              {/* Client Selection (Directory / Inline New) */}
+              <div className="p-3.5 rounded-2xl bg-steel-50 border border-steel-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-steel-700 flex items-center gap-1.5">
+                    <User className="w-3.5 h-3.5 text-primary-dark" />
+                    <span>{lang === 'fr' ? 'Client ou Entreprise *' : 'الزبون أو المقاولة المستأجرة *'}</span>
+                  </label>
 
-              <Input
-                label={lang === 'fr' ? 'Téléphone WhatsApp' : 'رقم الهاتف والواتساب'}
-                placeholder="+2126XXXXXXXX"
-                value={clientPhone}
-                onChange={(e) => setClientPhone(e.target.value)}
-                required
-                dir="ltr"
-              />
-            </div>
-          </div>
+                  {clientsList.length > 0 && (
+                    <select
+                      value={selectedClientId}
+                      onChange={(e) => handleClientSelectChange(e.target.value)}
+                      className="px-2 py-1 text-[11px] rounded-lg border border-steel-300 bg-white font-bold"
+                    >
+                      <option value="new">{lang === 'fr' ? '+ Nouveau client' : '+ زبون جديد'}</option>
+                      {clientsList.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} ({c.phone})
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <Input
+                    label={lang === 'fr' ? 'Nom du client / Raison sociale' : 'اسم الزبون / الشركة'}
+                    placeholder="Ex. Société BTP Travaux"
+                    value={clientName}
+                    onChange={(e) => setClientName(e.target.value)}
+                    required
+                  />
+
+                  <Input
+                    label={lang === 'fr' ? 'Téléphone WhatsApp' : 'رقم الهاتف والواتساب'}
+                    placeholder="+2126XXXXXXXX"
+                    value={clientPhone}
+                    onChange={(e) => setClientPhone(e.target.value)}
+                    required
+                    dir="ltr"
+                  />
+                </div>
+              </div>
+            </>
+          )}
 
           {/* Dates & Timeframe */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

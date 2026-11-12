@@ -852,7 +852,9 @@ export const SiteRadarMapPage: React.FC = () => {
         <CreateBookingModal
           isOpen={isBookingModalOpen}
           onClose={() => setIsBookingModalOpen(false)}
+          machine={selectedMachine}
           machines={[selectedMachine]}
+          preselectedMachineId={selectedMachine.id}
           existingBookings={[]}
           onBookingCreated={() => {
             setIsBookingModalOpen(false);

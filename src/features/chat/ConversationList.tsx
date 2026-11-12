@@ -112,7 +112,7 @@ export const ConversationList: React.FC<ConversationListProps> = ({
 
       {/* 2. Scrollable List of Conversations */}
       <div className="flex-1 overflow-y-auto divide-y divide-steel-100">
-        {isLoading ? (
+        {isLoading && filteredConversations.length === 0 ? (
           <div className="p-6 space-y-4">
             {[1, 2, 3, 4].map((i) => (
               <div key={i} className="flex items-center gap-3 animate-pulse">

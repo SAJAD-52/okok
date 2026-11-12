@@ -1,5 +1,7 @@
 // ============================================================================
-// JADIJCB: Real-Time Chat Hook with Supabase Realtime & Resilient Store
+// JADIJCB: Real-Time Chat Hook with Direct Supabase Realtime
+// Smooth, zero-flicker messaging between Machinery Owners & Contractors
+// ZERO mock data, ZERO polling loops, Instant Realtime WebSockets
 // ============================================================================
 
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -10,7 +12,7 @@ import { chatStore } from '../../lib/chatStore';
 
 export function useChatRealtime(activeConversation: ChatConversationItem | null) {
   const { user, profile } = useAuth();
-  const currentUserId = user?.id || profile?.id || 'current-user-demo';
+  const currentUserId = user?.id || profile?.id || '';
 
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
   const [isPeerTyping, setIsPeerTyping] = useState<boolean>(false);
@@ -19,102 +21,96 @@ export function useChatRealtime(activeConversation: ChatConversationItem | null)
   const channelRef = useRef<any>(null);
   const presenceChannelRef = useRef<any>(null);
   const typingTimeoutRef = useRef<any>(null);
+  const loadedConvIdRef = useRef<string | null>(null);
 
-  // 1. Load Initial Messages for Active Conversation
-  const loadMessages = useCallback(async () => {
-    if (!activeConversation) {
-      setMessages([]);
-      return;
-    }
-
-    setIsLoadingMessages(true);
-    const convId = activeConversation.id;
-
-    try {
-      // 1. Load from chatStore local cache first (immediate UI render)
-      const cached = await chatStore.getMessages(convId);
-      if (cached && cached.length > 0) {
-        setMessages(cached);
+  // 1. Load Messages for Active Conversation
+  const loadMessages = useCallback(
+    async (silent: boolean = false) => {
+      if (!activeConversation) {
+        setMessages([]);
+        loadedConvIdRef.current = null;
+        return;
       }
 
-      // 2. Fetch fresh from Supabase if configured and valid UUID
-      if (isSupabaseConfigured && !convId.startsWith('conv_seed_') && !convId.startsWith('conv_new_')) {
-        const { data, error } = await supabase
-          .from('messages')
-          .select('*')
-          .eq('conversation_id', convId)
-          .order('created_at', { ascending: true });
+      const convId = activeConversation.id;
 
-        if (!error && data && data.length > 0) {
-          const mapped: ChatMessageItem[] = data.map((m: any) => ({
-            id: m.id,
-            conversation_id: m.conversation_id,
-            sender_id: m.sender_id,
-            body: m.body || m.content || m.message || m.text || '',
-            read_at: m.read_at,
-            created_at: m.created_at,
-          }));
+      // Only show spinner when opening a DIFFERENT conversation for the first time
+      if (!silent && loadedConvIdRef.current !== convId) {
+        setIsLoadingMessages(true);
+      }
 
-          setMessages(mapped);
-
-          // Mark incoming unread messages as read
-          const unreadIds = data
-            .filter((m: any) => m.sender_id !== currentUserId && !m.read_at)
-            .map((m: any) => m.id);
-
-          if (unreadIds.length > 0) {
-            await supabase
-              .from('messages')
-              .update({ read_at: new Date().toISOString() })
-              .in('id', unreadIds);
-          }
+      try {
+        // 1. Check local cache first for immediate render
+        const cached = await chatStore.getMessages(convId);
+        if (cached && cached.length > 0 && loadedConvIdRef.current !== convId) {
+          setMessages(cached);
         }
+
+        // 2. Fetch authoritative list from Supabase
+        if (isSupabaseConfigured && !convId.startsWith('conv_')) {
+          const { data, error } = await supabase
+            .from('messages')
+            .select('*')
+            .eq('conversation_id', convId)
+            .order('created_at', { ascending: true });
+
+          if (!error && data) {
+            const mapped: ChatMessageItem[] = data.map((m: any) => ({
+              id: m.id,
+              conversation_id: m.conversation_id,
+              sender_id: m.sender_id,
+              body: m.content || m.body || m.message || m.text || '',
+              content: m.content || m.body || '',
+              read_at: m.read_at,
+              created_at: m.created_at,
+            }));
+
+            setMessages(mapped);
+            chatStore.setMessages(convId, mapped);
+            loadedConvIdRef.current = convId;
+
+            // Mark incoming unread messages as read in Supabase
+            const unreadIds = data
+              .filter((m: any) => m.sender_id !== currentUserId && !m.read_at)
+              .map((m: any) => m.id);
+
+            if (unreadIds.length > 0) {
+              await supabase
+                .from('messages')
+                .update({ read_at: new Date().toISOString() })
+                .in('id', unreadIds);
+            }
+          }
+        } else if (cached) {
+          setMessages(cached);
+          loadedConvIdRef.current = convId;
+        }
+
+        // Mark as read in store
+        chatStore.markAsRead(convId, currentUserId);
+      } catch (err) {
+        console.warn('Messages load notice:', err);
+      } finally {
+        setIsLoadingMessages(false);
       }
+    },
+    [activeConversation?.id, currentUserId]
+  );
 
-      // Mark as read in store
-      chatStore.markAsRead(convId, currentUserId);
-    } catch (err) {
-      console.warn('Realtime messages load notice:', err);
-    } finally {
-      setIsLoadingMessages(false);
-    }
-  }, [activeConversation?.id, currentUserId]);
-
+  // Initial load when activeConversation changes
   useEffect(() => {
-    loadMessages();
+    loadMessages(false);
 
-    // 1. Heartbeat poll every 2.5s to ensure messages arrive even if Realtime WebSockets are pending/unreplicated
-    const pollTimer = setInterval(() => {
-      loadMessages();
-    }, 2500);
-
-    // 2. Window custom chat event
-    const handleChatEvent = () => {
-      loadMessages();
-    };
-    window.addEventListener('jadijcb_chat_event', handleChatEvent);
-
-    // 3. Local typing indicator event
-    const handleTypingEvent = (e: any) => {
-      if (e.detail?.conversationId === activeConversation?.id) {
-        setIsPeerTyping(Boolean(e.detail?.isTyping));
+    // Refresh silently when tab regains focus
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && activeConversation) {
+        loadMessages(true);
       }
     };
-    window.addEventListener('jadijcb_typing_event', handleTypingEvent);
-
-    // 4. Cross-tab storage event
-    const handleStorageEvent = (e: StorageEvent) => {
-      if (e.key === 'jadijcb_chat_messages' || e.key === 'jadijcb_chat_conversations') {
-        loadMessages();
-      }
-    };
-    window.addEventListener('storage', handleStorageEvent);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
-      clearInterval(pollTimer);
-      window.removeEventListener('jadijcb_chat_event', handleChatEvent);
-      window.removeEventListener('jadijcb_typing_event', handleTypingEvent);
-      window.removeEventListener('storage', handleStorageEvent);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [loadMessages, activeConversation?.id]);
 
@@ -124,7 +120,7 @@ export function useChatRealtime(activeConversation: ChatConversationItem | null)
 
     const convId = activeConversation.id;
 
-    // Realtime postgres_changes subscription on messages
+    // Realtime postgres_changes subscription on messages table
     const messageChannel = supabase
       .channel(`chat:conv:${convId}`)
       .on(
@@ -137,8 +133,8 @@ export function useChatRealtime(activeConversation: ChatConversationItem | null)
         },
         async (payload: any) => {
           const bodyText =
-            payload.new.body ||
             payload.new.content ||
+            payload.new.body ||
             payload.new.message ||
             payload.new.text ||
             '';
@@ -148,24 +144,37 @@ export function useChatRealtime(activeConversation: ChatConversationItem | null)
             conversation_id: payload.new.conversation_id,
             sender_id: payload.new.sender_id,
             body: bodyText,
+            content: bodyText,
             read_at: payload.new.read_at,
             created_at: payload.new.created_at,
           };
 
           // Mark as read immediately if it's from the other participant
           if (newMsg.sender_id !== currentUserId) {
-            await supabase
-              .from('messages')
-              .update({ read_at: new Date().toISOString() })
-              .eq('id', newMsg.id);
+            try {
+              await supabase
+                .from('messages')
+                .update({ read_at: new Date().toISOString() })
+                .eq('id', newMsg.id);
+            } catch {
+              // Ignore background mark as read error
+            }
             newMsg.read_at = new Date().toISOString();
           }
 
           setMessages((prev) => {
+            // If message already exists by id, ignore
             const exists = prev.some((m) => m.id === newMsg.id);
             if (exists) return prev;
+
+            // Replace optimistic version if exists
             const filtered = prev.filter(
-              (m) => !(m.is_optimistic && m.body === newMsg.body && m.sender_id === newMsg.sender_id)
+              (m) =>
+                !(
+                  m.is_optimistic &&
+                  m.body === newMsg.body &&
+                  m.sender_id === newMsg.sender_id
+                )
             );
             return [...filtered, newMsg];
           });
@@ -264,7 +273,7 @@ export function useChatRealtime(activeConversation: ChatConversationItem | null)
       const trimmed = text.trim();
       const otherId = activeConversation.other_participant.id;
 
-      // 1. Send via central chatStore (handles local sync, events, and DB persistence)
+      // 1. Send via central chatStore
       const sentMsg = await chatStore.sendMessage(
         activeConversation.id,
         currentUserId,
@@ -272,7 +281,7 @@ export function useChatRealtime(activeConversation: ChatConversationItem | null)
         otherId
       );
 
-      // 2. Update local state
+      // 2. Update local state optimistically
       setMessages((prev) => {
         if (prev.some((m) => m.id === sentMsg.id)) return prev;
         return [...prev, sentMsg];

@@ -77,7 +77,9 @@ export const DashboardLayout: React.FC = () => {
           const { data: convs } = await supabase
             .from('conversations')
             .select('id')
-            .or(`participant_a.eq.${profile.id},participant_b.eq.${profile.id}`);
+            .or(
+              `participant_a.eq.${profile.id},participant_b.eq.${profile.id},participant_one.eq.${profile.id},participant_two.eq.${profile.id}`
+            );
 
           if (convs && convs.length > 0) {
             const convIds = convs.map((c: any) => c.id);
@@ -91,23 +93,25 @@ export const DashboardLayout: React.FC = () => {
             if (typeof dbCount === 'number') {
               count = dbCount;
             }
+          } else {
+            count = 0;
           }
         } catch {
           // Fallback to local store count
         }
+      } else {
+        count = chatStore.getTotalUnread(profile.id);
       }
 
-      setUnreadMessagesCount(count);
+      setUnreadMessagesCount((prev) => (prev === count ? prev : count));
     };
 
     updateUnread();
-    const interval = setInterval(updateUnread, 4000);
-    window.addEventListener('jadijcb_chat_event', updateUnread);
+    const interval = setInterval(updateUnread, 15000);
     window.addEventListener('storage', updateUnread);
 
     return () => {
       clearInterval(interval);
-      window.removeEventListener('jadijcb_chat_event', updateUnread);
       window.removeEventListener('storage', updateUnread);
     };
   }, [profile?.id, isSuperAdmin, isImpersonating]);

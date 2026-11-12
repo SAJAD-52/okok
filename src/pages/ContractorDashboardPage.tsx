@@ -356,7 +356,9 @@ export const ContractorDashboardPage: React.FC = () => {
                       type="button"
                       variant="outline"
                       size="sm"
-                      onClick={() => navigate(`/app/messages?target=${b.owner_id}`)}
+                      onClick={() =>
+                        navigate(`/entreprise/messages?target=${b.owner_id}&machine=${b.machine_id}`)
+                      }
                       leftIcon={<MessageSquare className="w-3.5 h-3.5" />}
                       className="text-xs"
                     >

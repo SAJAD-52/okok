@@ -66,14 +66,15 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
         '🤝 تم تأكيد الحجز وجدولة الآلية لكم',
       ];
 
-  // Auto-scroll to bottom on messages change
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
+  // Auto-scroll to bottom only when a new message actually arrives
+  const lastMsgIdRef = useRef<string | null>(null);
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, isPeerTyping]);
+    const latestId = messages[messages.length - 1]?.id;
+    if (latestId && latestId !== lastMsgIdRef.current) {
+      lastMsgIdRef.current = latestId;
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setInputMessage(e.target.value);

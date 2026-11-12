@@ -1,10 +1,12 @@
 // ============================================================================
 // JADIJCB: Real-Time Messages Page (Dual-Sided: Owners ↔ Contractors)
+// 100% Real Supabase Architecture
+// ZERO mock messages, ZERO reload loops, ZERO flickering
 // ============================================================================
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
-import { MessageSquare, Sparkles, Truck, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { MessageSquare, Sparkles, Truck, ShieldCheck } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
 import { useLanguage } from '../hooks/useLanguage';
@@ -12,179 +14,197 @@ import { ChatConversationItem, ChatParticipant } from '../types/chat';
 import { Machine } from '../types/database';
 import { chatStore } from '../lib/chatStore';
 import { machineStore } from '../lib/machineStore';
-import { serverApi } from '../lib/serverApi';
 import { ConversationList } from '../features/chat/ConversationList';
 import { ChatThread } from '../features/chat/ChatThread';
 
 export const Messages: React.FC = () => {
-  const { t, lang, isRTL } = useLanguage();
+  const { t, lang } = useLanguage();
   const { user, profile } = useAuth();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
-  const currentUserId = user?.id || profile?.id || 'current-user-demo';
+  const currentUserId = user?.id || profile?.id || '';
 
   const [conversations, setConversations] = useState<ChatConversationItem[]>([]);
   const [activeConversation, setActiveConversation] = useState<ChatConversationItem | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // 1. Fetch Conversations from chatStore and Supabase
-  const loadConversations = useCallback(async () => {
-    setIsLoading(true);
+  const initialParsedRef = useRef<boolean>(false);
+  const activeConvIdRef = useRef<string | null>(null);
 
-    try {
-      // Load from chatStore
-      const storeList = await chatStore.getConversationsForUser(currentUserId);
-      let combined: ChatConversationItem[] = [...storeList];
+  // Keep activeConvIdRef in sync
+  useEffect(() => {
+    activeConvIdRef.current = activeConversation?.id || null;
+  }, [activeConversation]);
 
-      // Pull from server SQLite database
-      try {
-        const sConvs = await serverApi.getConversations(currentUserId);
-        if (sConvs && sConvs.length > 0) {
-          for (const sc of sConvs) {
-            const existingIdx = combined.findIndex((x) => x.id === sc.id);
-            const otherId = sc.participant_a === currentUserId ? sc.participant_b : sc.participant_a;
-            const item: ChatConversationItem = {
-              id: sc.id,
-              machine_id: sc.machine_id,
-              participant_a: sc.participant_a,
-              participant_b: sc.participant_b,
-              last_message_at: sc.last_message_at || new Date().toISOString(),
-              unread_count: 0,
-              last_message: sc.last_message || '',
-              other_participant: sc.target_profile || {
-                id: otherId,
-                full_name: 'شريك JADIJCB',
-                phone: '+212600000000',
-                role: 'owner',
-                city: 'المغرب',
-              },
-              machine: sc.machine,
-            };
-            if (existingIdx >= 0) {
-              combined[existingIdx] = { ...combined[existingIdx], ...item };
-            } else {
-              combined.unshift(item);
-            }
-          }
-        }
-      } catch {
-        // Ignore server fallback error
+  // 1. Fetch Conversations from Supabase (Batched, robust, no flickering)
+  const loadConversations = useCallback(
+    async (silent: boolean = false): Promise<ChatConversationItem[]> => {
+      if (!currentUserId) {
+        setIsLoading(false);
+        return [];
       }
 
-      // Pull from Supabase if configured
-      if (isSupabaseConfigured && currentUserId) {
-        try {
+      if (!silent && !initialParsedRef.current) {
+        setIsLoading(true);
+      }
+
+      try {
+        let resultList: ChatConversationItem[] = [];
+
+        if (isSupabaseConfigured) {
+          // Supports both participant_a/b and participant_one/two
           const { data: convData, error: convError } = await supabase
             .from('conversations')
-            .select('id, machine_id, participant_a, participant_b, last_message_at')
-            .or(`participant_a.eq.${currentUserId},participant_b.eq.${currentUserId}`)
+            .select('id, machine_id, participant_a, participant_b, participant_one, participant_two, last_message_at')
+            .or(
+              `participant_a.eq.${currentUserId},participant_b.eq.${currentUserId},participant_one.eq.${currentUserId},participant_two.eq.${currentUserId}`
+            )
             .order('last_message_at', { ascending: false });
 
           if (!convError && convData && convData.length > 0) {
-            const mapped: ChatConversationItem[] = await Promise.all(
-              convData.map(async (c: any) => {
-                const otherId = c.participant_a === currentUserId ? c.participant_b : c.participant_a;
-
-                const { data: otherProfile } = await supabase
-                  .from('profiles')
-                  .select('*')
-                  .eq('id', otherId)
-                  .maybeSingle();
-
-                let machineData: Machine | undefined = undefined;
-                if (c.machine_id) {
-                  try {
-                    const { data: mData } = await supabase
-                      .from('machines')
-                      .select('*')
-                      .eq('id', c.machine_id)
-                      .maybeSingle();
-                    if (mData) {
-                      machineData = mData as Machine;
-                    }
-                  } catch (e) {
-                    // Ignore machine fetch error
-                  }
-                }
-
-                const { data: msgList } = await supabase
-                  .from('messages')
-                  .select('*')
-                  .eq('conversation_id', c.id)
-                  .order('created_at', { ascending: false })
-                  .limit(1);
-
-                const { count: unreadCount } = await supabase
-                  .from('messages')
-                  .select('*', { count: 'exact', head: true })
-                  .eq('conversation_id', c.id)
-                  .eq('sender_id', otherId)
-                  .is('read_at', null);
-
-                const otherParticipant: ChatParticipant = {
-                  id: otherId,
-                  phone: otherProfile?.phone || otherProfile?.phone_number || '+212600000000',
-                  full_name: otherProfile?.full_name || 'شريك JADIJCB',
-                  company_name: otherProfile?.company_name,
-                  role: otherProfile?.role || 'owner',
-                  city: otherProfile?.city || 'المغرب',
-                  avatar_url: otherProfile?.avatar_url,
-                };
-
-                const latestMsg =
-                  msgList?.[0]?.body ||
-                  msgList?.[0]?.content ||
-                  msgList?.[0]?.message ||
-                  msgList?.[0]?.text ||
-                  '';
-
-                return {
-                  id: c.id,
-                  machine_id: c.machine_id,
-                  participant_a: c.participant_a,
-                  participant_b: c.participant_b,
-                  last_message_at: c.last_message_at || new Date().toISOString(),
-                  other_participant: otherParticipant,
-                  machine: machineData,
-                  unread_count: unreadCount || 0,
-                  last_message: latestMsg,
-                };
-              })
+            // Collect other participants IDs
+            const otherIds = Array.from(
+              new Set(
+                convData
+                  .map((c: any) => {
+                    const pA = c.participant_a || c.participant_one;
+                    const pB = c.participant_b || c.participant_two;
+                    return pA === currentUserId ? pB : pA;
+                  })
+                  .filter(Boolean)
+              )
             );
 
-            for (const item of mapped) {
-              const existingIdx = combined.findIndex((x) => x.id === item.id);
-              if (existingIdx >= 0) {
-                combined[existingIdx] = item;
-              } else {
-                combined.unshift(item);
+            // Collect machine IDs
+            const machineIds = Array.from(
+              new Set(convData.map((c: any) => c.machine_id).filter(Boolean))
+            );
+
+            const convIds = convData.map((c: any) => c.id);
+
+            // Parallel batch queries for profiles, machines, latest messages, and unread counts
+            const [profilesRes, machinesRes, messagesRes, unreadRes] = await Promise.all([
+              otherIds.length > 0
+                ? supabase.from('profiles').select('*').in('id', otherIds)
+                : Promise.resolve({ data: [] }),
+              machineIds.length > 0
+                ? supabase.from('machines').select('*').in('id', machineIds)
+                : Promise.resolve({ data: [] }),
+              convIds.length > 0
+                ? supabase
+                    .from('messages')
+                    .select('conversation_id, content, body, created_at')
+                    .in('conversation_id', convIds)
+                    .order('created_at', { ascending: false })
+                : Promise.resolve({ data: [] }),
+              convIds.length > 0
+                ? supabase
+                    .from('messages')
+                    .select('conversation_id')
+                    .in('conversation_id', convIds)
+                    .neq('sender_id', currentUserId)
+                    .is('read_at', null)
+                : Promise.resolve({ data: [] }),
+            ]);
+
+            const profilesMap = new Map<string, any>();
+            (profilesRes.data || []).forEach((p: any) => profilesMap.set(p.id, p));
+
+            const machinesMap = new Map<string, any>();
+            (machinesRes.data || []).forEach((m: any) => machinesMap.set(m.id, m));
+
+            const latestMessageMap = new Map<string, string>();
+            (messagesRes.data || []).forEach((m: any) => {
+              if (!latestMessageMap.has(m.conversation_id)) {
+                latestMessageMap.set(m.conversation_id, m.content || m.body || '');
               }
-            }
+            });
+
+            const unreadCounts = new Map<string, number>();
+            (unreadRes.data || []).forEach((m: any) => {
+              unreadCounts.set(m.conversation_id, (unreadCounts.get(m.conversation_id) || 0) + 1);
+            });
+
+            resultList = convData.map((c: any) => {
+              const pA = c.participant_a || c.participant_one;
+              const pB = c.participant_b || c.participant_two;
+              const otherId = pA === currentUserId ? pB : pA;
+
+              const otherProfile = profilesMap.get(otherId);
+              const machineData = c.machine_id ? machinesMap.get(c.machine_id) : undefined;
+              const unreadCount = unreadCounts.get(c.id) || 0;
+              const lastMsgText = latestMessageMap.get(c.id) || '';
+
+              const otherParticipant: ChatParticipant = {
+                id: otherId,
+                phone: otherProfile?.phone || otherProfile?.phone_number || '',
+                full_name:
+                  otherProfile?.full_name ||
+                  otherProfile?.company_name ||
+                  (otherProfile?.role === 'owner' ? 'مالك الآلية' : 'مقاولة البناء'),
+                company_name: otherProfile?.company_name,
+                role: otherProfile?.role || 'owner',
+                city: otherProfile?.city || 'المغرب',
+                avatar_url: otherProfile?.avatar_url,
+              };
+
+              return {
+                id: c.id,
+                machine_id: c.machine_id,
+                participant_a: pA,
+                participant_b: pB,
+                last_message_at: c.last_message_at || new Date().toISOString(),
+                other_participant: otherParticipant,
+                machine: machineData as Machine,
+                unread_count: unreadCount,
+                last_message: lastMsgText,
+              };
+            });
           }
-        } catch (dbErr) {
-          console.warn('Realtime Supabase conversations notice:', dbErr);
         }
+
+        // Offline fallback
+        if (resultList.length === 0) {
+          resultList = await chatStore.getConversationsForUser(currentUserId);
+        } else {
+          chatStore.setConversations(resultList);
+        }
+
+        setConversations(resultList);
+
+        // Keep active conversation reference in sync if already selected
+        if (activeConvIdRef.current) {
+          const updatedActive = resultList.find((c) => c.id === activeConvIdRef.current);
+          if (updatedActive) {
+            setActiveConversation((prev) =>
+              prev ? { ...prev, ...updatedActive, unread_count: 0 } : updatedActive
+            );
+          }
+        }
+
+        return resultList;
+      } catch (err) {
+        console.warn('Failed to load conversations:', err);
+        return [];
+      } finally {
+        setIsLoading(false);
       }
+    },
+    [currentUserId]
+  );
 
-      setConversations(combined);
-      return combined;
-    } catch (err) {
-      console.warn('Failed to load conversations:', err);
-      return [];
-    } finally {
-      setIsLoading(false);
-    }
-  }, [currentUserId]);
-
+  // 2. Initial Mount Setup (Runs strictly ONCE per userId, NEVER in a loop)
   useEffect(() => {
     let isMounted = true;
 
     async function initSelection() {
-      const loaded = await loadConversations();
+      if (!currentUserId) return;
+
+      const loaded = await loadConversations(false);
       if (!isMounted) return;
 
-      // Extract all possible query parameters
+      initialParsedRef.current = true;
+
       const urlConvId = searchParams.get('conversationId') || searchParams.get('conv');
       const urlMachineId =
         searchParams.get('machine_id') ||
@@ -198,7 +218,7 @@ export const Messages: React.FC = () => {
         searchParams.get('client_id') ||
         searchParams.get('owner_id');
 
-      // 1. Direct conversation ID
+      // 1. Direct conversation ID match
       if (urlConvId) {
         const found = loaded.find((c) => c.id === urlConvId);
         if (found) {
@@ -207,9 +227,8 @@ export const Messages: React.FC = () => {
         }
       }
 
-      // 2. Direct Target User or Machine context
+      // 2. Target user or machine context navigation
       if (targetUserId || urlMachineId) {
-        // Look for matching conversation in loaded list
         const matching = loaded.find(
           (c) =>
             (targetUserId &&
@@ -228,64 +247,62 @@ export const Messages: React.FC = () => {
         let targetMachine: any = null;
         let targetProfile: any = null;
 
-        if (urlMachineId) {
-          if (isSupabaseConfigured) {
-            try {
-              const { data: mData } = await supabase
-                .from('machines')
-                .select('*, profiles(*)')
-                .eq('id', urlMachineId)
-                .maybeSingle();
-              if (mData) {
-                targetMachine = mData;
-                targetProfile = mData.profiles;
-              }
-            } catch (e) {
-              console.warn('Machine fetch error:', e);
+        if (urlMachineId && isSupabaseConfigured) {
+          try {
+            const { data: mData } = await supabase
+              .from('machines')
+              .select('*')
+              .eq('id', urlMachineId)
+              .maybeSingle();
+            if (mData) {
+              targetMachine = mData;
             }
+          } catch (e) {
+            console.warn('Machine fetch error:', e);
           }
 
           if (!targetMachine) {
-            const cachedM = machineStore.getCachedMachines().find((m) => m.id === urlMachineId);
-            if (cachedM) {
-              targetMachine = cachedM;
-              targetProfile = cachedM.owner;
-            }
+            targetMachine = machineStore.getCachedMachines().find((m) => m.id === urlMachineId);
           }
         }
 
-        if (targetUserId && !targetProfile && isSupabaseConfigured) {
-          try {
-            const { data: pData } = await supabase
-              .from('profiles')
-              .select('*')
-              .eq('id', targetUserId)
-              .maybeSingle();
-            if (pData) {
-              targetProfile = pData;
+        const effectiveTargetId = targetUserId || targetMachine?.owner_id;
+
+        if (effectiveTargetId && effectiveTargetId !== currentUserId) {
+          if (isSupabaseConfigured) {
+            try {
+              const { data: pData } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', effectiveTargetId)
+                .maybeSingle();
+              if (pData) {
+                targetProfile = pData;
+              }
+            } catch (e) {
+              console.warn('Profile fetch error:', e);
             }
-          } catch (e) {
-            console.warn('Profile fetch error:', e);
           }
+
+          const newConv = await chatStore.getOrCreateConversation(
+            currentUserId,
+            effectiveTargetId,
+            targetMachine,
+            targetProfile
+          );
+
+          if (isMounted) {
+            setConversations((prev) => {
+              if (prev.some((c) => c.id === newConv.id)) return prev;
+              return [newConv, ...prev];
+            });
+            setActiveConversation(newConv);
+          }
+          return;
         }
-
-        const effectiveTargetId = targetUserId || targetMachine?.owner_id || 'partner_user';
-        const newConv = await chatStore.getOrCreateConversation(
-          currentUserId,
-          effectiveTargetId,
-          targetMachine,
-          targetProfile
-        );
-
-        setConversations((prev) => {
-          if (prev.some((c) => c.id === newConv.id)) return prev;
-          return [newConv, ...prev];
-        });
-        setActiveConversation(newConv);
-        return;
       }
 
-      // 3. Desktop default: select first conversation if available
+      // 3. Desktop default: select first conversation if none selected
       if (window.innerWidth >= 768 && loaded.length > 0 && !activeConversation) {
         setActiveConversation(loaded[0]);
       }
@@ -293,39 +310,26 @@ export const Messages: React.FC = () => {
 
     initSelection();
 
-    // Heartbeat poll for conversations every 3s
-    const pollInterval = setInterval(() => {
-      loadConversations();
-    }, 3000);
-
-    // Listen to local chat events
-    const handleChatEvent = () => {
-      loadConversations();
-    };
-    window.addEventListener('jadijcb_chat_event', handleChatEvent);
-
-    // Cross-tab storage sync
-    const handleStorageEvent = (e: StorageEvent) => {
-      if (e.key === 'jadijcb_chat_messages' || e.key === 'jadijcb_chat_conversations') {
-        loadConversations();
+    // Re-sync silently only when tab visibility changes
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        loadConversations(true);
       }
     };
-    window.addEventListener('storage', handleStorageEvent);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       isMounted = false;
-      clearInterval(pollInterval);
-      window.removeEventListener('jadijcb_chat_event', handleChatEvent);
-      window.removeEventListener('storage', handleStorageEvent);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [loadConversations, searchParams, currentUserId]);
+  }, [currentUserId]);
 
-  // Global Realtime Subscription on Conversations table
+  // 3. Supabase Realtime Subscriptions on Conversations & Messages
   useEffect(() => {
-    if (!isSupabaseConfigured) return;
+    if (!isSupabaseConfigured || !currentUserId) return;
 
     const channel = supabase
-      .channel('chat:global_conversations')
+      .channel('chat:realtime_hub')
       .on(
         'postgres_changes',
         {
@@ -333,8 +337,51 @@ export const Messages: React.FC = () => {
           schema: 'public',
           table: 'conversations',
         },
-        () => {
-          loadConversations();
+        (payload: any) => {
+          const row = payload.new || payload.old;
+          if (
+            row &&
+            (row.participant_a === currentUserId ||
+              row.participant_b === currentUserId ||
+              row.participant_one === currentUserId ||
+              row.participant_two === currentUserId)
+          ) {
+            loadConversations(true);
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+        },
+        (payload: any) => {
+          const newMsg = payload.new;
+          if (!newMsg?.conversation_id) return;
+
+          // In-memory update of snippet and counter (instant, zero reload)
+          setConversations((prev) =>
+            prev.map((c) => {
+              if (c.id === newMsg.conversation_id) {
+                const isFromOther = newMsg.sender_id !== currentUserId;
+                const isCurrentlyActive = activeConvIdRef.current === c.id;
+                return {
+                  ...c,
+                  last_message: newMsg.content || newMsg.body || c.last_message,
+                  last_message_at: newMsg.created_at || new Date().toISOString(),
+                  unread_count:
+                    isFromOther && !isCurrentlyActive
+                      ? (c.unread_count || 0) + 1
+                      : isCurrentlyActive
+                      ? 0
+                      : c.unread_count,
+                };
+              }
+              return c;
+            })
+          );
         }
       )
       .subscribe();
@@ -342,13 +389,25 @@ export const Messages: React.FC = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [loadConversations]);
+  }, [currentUserId, loadConversations]);
 
-  // Handle selecting conversation
+  // Handle selecting conversation without triggering router reload loop
   const handleSelectConversation = (conv: ChatConversationItem) => {
     setActiveConversation(conv);
-    setSearchParams({ conversationId: conv.id });
     chatStore.markAsRead(conv.id, currentUserId);
+
+    // Update URL silently without React Router reload
+    try {
+      const newUrl = new URL(window.location.href);
+      newUrl.searchParams.set('conversationId', conv.id);
+      newUrl.searchParams.delete('target');
+      newUrl.searchParams.delete('target_user');
+      newUrl.searchParams.delete('machine');
+      newUrl.searchParams.delete('machine_id');
+      window.history.replaceState({}, '', newUrl.toString());
+    } catch {
+      // Ignore
+    }
 
     setConversations((prev) =>
       prev.map((c) => (c.id === conv.id ? { ...c, unread_count: 0 } : c))
@@ -357,7 +416,13 @@ export const Messages: React.FC = () => {
 
   const handleBackToList = () => {
     setActiveConversation(null);
-    setSearchParams({});
+    try {
+      const newUrl = new URL(window.location.href);
+      newUrl.searchParams.delete('conversationId');
+      window.history.replaceState({}, '', newUrl.toString());
+    } catch {
+      // Ignore
+    }
   };
 
   return (

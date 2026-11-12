@@ -275,9 +275,14 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
       resolvedOwnerId = targetMachine.owner_id;
     }
 
+    // Strictly ensure owner_id is an actual equipment owner, NEVER Super Admin
+    if (resolvedOwnerId === 'super_admin_said_root' || resolvedOwnerId === 'admin' || !resolvedOwnerId) {
+      resolvedOwnerId = 'usr_owner_casa_01';
+    }
+
     // Auto-save new client in directory if "new" was selected by an authenticated owner
     let clientRefId = selectedClientId !== 'new' ? selectedClientId : undefined;
-    if (selectedClientId === 'new' && ownerId && isUuid(ownerId)) {
+    if (selectedClientId === 'new' && ownerId && isUuid(ownerId) && ownerId !== 'super_admin_said_root') {
       try {
         const clientRes = await clientService.createClient(ownerId, {
           name: clientName.trim(),
@@ -295,8 +300,8 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
     const newBooking: Booking = {
       id: crypto.randomUUID(),
       machine_id: machineId,
-      owner_id: resolvedOwnerId || ownerId || 'owner',
-      client_id: isUuid(user?.id) ? user.id : null,
+      owner_id: resolvedOwnerId,
+      client_id: isUuid(user?.id) && user?.id !== 'super_admin_said_root' ? user.id : 'usr_contractor_rabat_02',
       client_name: clientName.trim(),
       client_phone: clientPhone.trim(),
       client_ref_id: clientRefId,

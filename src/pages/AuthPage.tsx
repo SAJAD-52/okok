@@ -44,7 +44,7 @@ export const AuthPage: React.FC = () => {
   const { t, lang } = useLanguage();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { loginWithPhone, signupWithPhone, updateProfile } = useAuth();
+  const { loginWithPhone, signupWithPhone, updateProfile, profile, isSuperAdmin } = useAuth();
 
   const isSignupParam =
     searchParams.get('mode') === 'signup' || searchParams.get('mode') === 'register';
@@ -98,6 +98,10 @@ export const AuthPage: React.FC = () => {
         toast.success(
           lang === 'fr' ? 'Connexion réussie !' : 'تم تسجيل الدخول بنجاح!'
         );
+        if (profile?.role === 'admin' || isSuperAdmin) {
+          navigate('/admin');
+          return;
+        }
         const isClient = role === 'client';
         navigate(isClient ? '/entreprise' : '/owner');
       } else {

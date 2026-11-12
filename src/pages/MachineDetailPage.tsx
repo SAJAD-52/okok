@@ -57,7 +57,7 @@ export const MachineDetailPage: React.FC = () => {
   const navigate = useNavigate();
   const { t, lang, isRTL } = useLanguage();
   const { isFavorite, toggleFavorite } = useFavorites();
-  const { user, profile } = useAuth();
+  const { user, profile, isSuperAdmin } = useAuth();
 
   const [machine, setMachine] = useState<Machine | null>(null);
   const [similarMachines, setSimilarMachines] = useState<Machine[]>([]);
@@ -257,6 +257,7 @@ export const MachineDetailPage: React.FC = () => {
   // Check if current user owns this machine (cannot book own machines)
   const currentUserId = user?.id || profile?.id;
   const isOwnMachine = Boolean(
+    !isSuperAdmin &&
     currentUserId &&
     machine?.owner_id &&
     (machine.owner_id === currentUserId || (profile && machine.owner_id === profile.id))

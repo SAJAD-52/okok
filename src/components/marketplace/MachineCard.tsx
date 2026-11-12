@@ -36,7 +36,7 @@ export const MachineCard: React.FC<MachineCardProps> = ({ machine, onBookClick }
   const { t, lang, isRTL } = useLanguage();
   const navigate = useNavigate();
   const { isFavorite, toggleFavorite } = useFavorites();
-  const { user, profile } = useAuth();
+  const { user, profile, isSuperAdmin } = useAuth();
 
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
@@ -71,6 +71,7 @@ export const MachineCard: React.FC<MachineCardProps> = ({ machine, onBookClick }
   // Check if current user is the owner of this machine (cannot book own machines)
   const currentUserId = user?.id || profile?.id;
   const isOwnMachine = Boolean(
+    !isSuperAdmin &&
     currentUserId &&
     machine.owner_id &&
     (machine.owner_id === currentUserId || (profile && machine.owner_id === profile.id))

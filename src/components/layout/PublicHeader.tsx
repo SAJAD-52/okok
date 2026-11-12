@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, Link, useNavigate } from 'react-router-dom';
-import { PlusCircle, User, Menu, X, Compass, Wrench, MapPin, Building2, HardHat } from 'lucide-react';
+import { PlusCircle, User, Menu, X, Compass, Wrench, MapPin, Building2, HardHat, ShieldCheck } from 'lucide-react';
 import { Logo } from '../ui/Logo';
 import { LanguageSwitcher } from '../ui/LanguageSwitcher';
 import { Button } from '../ui/Button';
@@ -15,7 +15,12 @@ export const PublicHeader: React.FC = () => {
 
   const isContractor = profile?.role === 'client' || profile?.role === 'contractor';
 
-  const baseLinks = isContractor
+  const navLinks = isSuperAdmin
+    ? [
+        { to: '/marketplace', label: t('nav.marketplace'), icon: <Compass className="w-4 h-4" /> },
+        { to: '/admin', label: '👑 Super Admin' },
+      ]
+    : isContractor
     ? [
         { to: '/marketplace', label: t('nav.marketplace'), icon: <Compass className="w-4 h-4" /> },
         { to: '/entreprise/map', label: lang === 'fr' ? 'Radar Chantiers' : 'رادار الأوراش 📍', icon: <MapPin className="w-4 h-4" /> },
@@ -27,10 +32,6 @@ export const PublicHeader: React.FC = () => {
         { to: '/owner/machines', label: t('nav.machines'), icon: <Wrench className="w-4 h-4" /> },
         { to: '/owner', label: t('nav.dashboard') },
       ];
-
-  const navLinks = isSuperAdmin
-    ? [...baseLinks, { to: '/admin', label: '👑 Super Admin' }]
-    : baseLinks;
 
   return (
     <header className="sticky top-0 z-40 w-full bg-white/90 backdrop-blur-md border-b border-steel-200/80 transition-shadow">
@@ -65,10 +66,12 @@ export const PublicHeader: React.FC = () => {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => navigate(isContractor ? '/entreprise' : '/owner')}
+              onClick={() => navigate(isSuperAdmin ? '/admin' : isContractor ? '/entreprise' : '/owner')}
               className="hidden sm:inline-flex text-xs font-bold items-center gap-2"
               leftIcon={
-                profile?.avatar_url ? (
+                isSuperAdmin ? (
+                  <ShieldCheck className="w-4 h-4 text-amber-500" />
+                ) : profile?.avatar_url ? (
                   <img
                     src={profile.avatar_url}
                     alt={profile.full_name || 'avatar'}
@@ -81,7 +84,9 @@ export const PublicHeader: React.FC = () => {
                 )
               }
             >
-              {isContractor
+              {isSuperAdmin
+                ? '👑 Super Admin'
+                : isContractor
                 ? (profile?.company_name || (lang === 'fr' ? 'Mon Entreprise' : 'حساب المقاولة'))
                 : (profile?.company_name || profile?.full_name || t('nav.dashboard'))}
             </Button>
@@ -97,7 +102,17 @@ export const PublicHeader: React.FC = () => {
             </Button>
           )}
 
-          {isContractor ? (
+          {isSuperAdmin ? (
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={() => navigate('/admin')}
+              className="hidden sm:inline-flex font-black text-xs"
+              leftIcon={<ShieldCheck className="w-4 h-4 text-ink" />}
+            >
+              {lang === 'fr' ? 'Console Admin' : 'لوحة الإدارة 👑'}
+            </Button>
+          ) : isContractor ? (
             <Button
               size="sm"
               variant="primary"
@@ -150,7 +165,20 @@ export const PublicHeader: React.FC = () => {
           </nav>
 
           <div className="pt-3 border-t border-steel-100 flex flex-col gap-2.5">
-            {isContractor ? (
+            {isSuperAdmin ? (
+              <Button
+                size="md"
+                variant="primary"
+                className="w-full justify-center font-black"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  navigate('/admin');
+                }}
+                leftIcon={<ShieldCheck className="w-4 h-4" />}
+              >
+                {lang === 'fr' ? 'Console Super Admin' : 'لوحة الإدارة (Super Admin) 👑'}
+              </Button>
+            ) : isContractor ? (
               <Button
                 size="md"
                 variant="primary"
@@ -184,12 +212,12 @@ export const PublicHeader: React.FC = () => {
               className="w-full justify-center"
               onClick={() => {
                 setMobileMenuOpen(false);
-                navigate(user ? (isContractor ? '/entreprise' : '/owner') : '/auth');
+                navigate(user ? (isSuperAdmin ? '/admin' : isContractor ? '/entreprise' : '/owner') : '/auth');
               }}
-              leftIcon={<User className="w-4 h-4" />}
+              leftIcon={isSuperAdmin ? <ShieldCheck className="w-4 h-4 text-amber-500" /> : <User className="w-4 h-4" />}
             >
               {user
-                ? (isContractor ? (lang === 'fr' ? 'Mon Entreprise' : 'بوابة المقاولة') : t('nav.dashboard'))
+                ? (isSuperAdmin ? '👑 Super Admin' : isContractor ? (lang === 'fr' ? 'Mon Entreprise' : 'بوابة المقاولة') : t('nav.dashboard'))
                 : t('nav.login')}
             </Button>
           </div>

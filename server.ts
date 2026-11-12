@@ -367,9 +367,13 @@ app.post('/api/bookings', (req, res) => {
       }
     }
 
-    // 3. Fallback to passed owner_id if machine had no specific owner
-    if (!resolvedOwnerId) {
-      resolvedOwnerId = b.owner_id || '';
+    // 3. Fallback to passed owner_id if machine had no specific owner (NEVER to super admin)
+    if (!resolvedOwnerId || resolvedOwnerId === 'super_admin_said_root' || resolvedOwnerId === 'admin') {
+      if (b.owner_id && b.owner_id !== 'super_admin_said_root' && b.owner_id !== 'admin') {
+        resolvedOwnerId = b.owner_id;
+      } else {
+        resolvedOwnerId = 'usr_owner_casa_01';
+      }
     }
 
     const insertStmt = db.prepare(`

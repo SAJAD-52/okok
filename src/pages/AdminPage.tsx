@@ -498,24 +498,6 @@ export const AdminPage: React.FC = () => {
           >
             تحديث البيانات
           </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => navigate('/owner')}
-            className="text-xs font-bold bg-steel-900 border-steel-700 text-steel-300 hover:text-white"
-          >
-            فضاء الملاك
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => navigate('/entreprise')}
-            className="text-xs font-bold bg-steel-900 border-steel-700 text-steel-300 hover:text-white"
-          >
-            بوابة المقاولات
-          </Button>
         </div>
       </div>
 

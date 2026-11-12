@@ -58,7 +58,7 @@ type TabFilter = 'all' | 'pending' | 'active' | 'completed' | 'cancelled' | 'due
 
 export const BookingsPage: React.FC = () => {
   const { t, lang, isRTL } = useLanguage();
-  const { user, profile, isSuperAdmin } = useAuth();
+  const { user, profile, isSuperAdmin, isImpersonating } = useAuth();
   const navigate = useNavigate();
 
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -92,10 +92,12 @@ export const BookingsPage: React.FC = () => {
   // Calendar month state
   const [calendarDate, setCalendarDate] = useState(() => new Date());
 
-  const ownerId = user?.id || profile?.id;
+  const ownerId = isImpersonating ? profile?.id : isSuperAdmin ? null : (user?.id || profile?.id);
 
   const loadData = useCallback(async () => {
-    if (!ownerId && !isSuperAdmin) {
+    if (!ownerId) {
+      setBookings([]);
+      setMachines([]);
       setIsLoading(false);
       return;
     }
@@ -107,7 +109,7 @@ export const BookingsPage: React.FC = () => {
       let mList: Machine[] = [];
       if (isSupabaseConfigured) {
         let mQuery = supabase.from('machines').select('*');
-        if (!isSuperAdmin && ownerId) {
+        if (ownerId) {
           mQuery = mQuery.eq('owner_id', ownerId);
         }
         const { data: mData } = await mQuery;
@@ -148,17 +150,7 @@ export const BookingsPage: React.FC = () => {
         try {
           const fetchedMap = new Map<string, any>();
 
-          if (isSuperAdmin) {
-            // Super Admin can see all bookings
-            const { data: allData, error: allErr } = await supabase
-              .from('bookings')
-              .select('*, machines(*)')
-              .order('start_at', { ascending: false });
-            if (!allErr && allData) {
-              for (const row of allData) fetchedMap.set(row.id, row);
-            }
-          } else {
-            // 1. Fetch bookings where user is directly the owner
+          // 1. Fetch bookings where user is directly the owner
             if (ownerId) {
               const { data: ownerData } = await supabase
                 .from('bookings')
@@ -192,7 +184,6 @@ export const BookingsPage: React.FC = () => {
                 for (const row of rlsData) fetchedMap.set(row.id, row);
               }
             }
-          }
 
           if (fetchedMap.size > 0) {
             bList = Array.from(fetchedMap.values()).map((b: any) => ({

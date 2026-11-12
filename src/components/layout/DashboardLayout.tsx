@@ -65,7 +65,7 @@ export const DashboardLayout: React.FC = () => {
 
   useEffect(() => {
     const updateUnread = async () => {
-      if (!profile?.id) {
+      if (!profile?.id || (isSuperAdmin && !isImpersonating)) {
         setUnreadMessagesCount(0);
         return;
       }
@@ -110,11 +110,11 @@ export const DashboardLayout: React.FC = () => {
       window.removeEventListener('jadijcb_chat_event', updateUnread);
       window.removeEventListener('storage', updateUnread);
     };
-  }, [profile?.id]);
+  }, [profile?.id, isSuperAdmin, isImpersonating]);
 
   // Sync pending bookings for owner notification badge with real-time updates
   useEffect(() => {
-    if (!profile?.id || isContractor) return;
+    if (!profile?.id || isContractor || (isSuperAdmin && !isImpersonating)) return;
 
     let previousCount = -1;
 

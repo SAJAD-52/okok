@@ -127,11 +127,10 @@ export const bookingStore = {
     const allLocalMachines = machineStore.getCachedMachines();
 
     const matchingCached = cached.filter((b) => {
-      if (isSuperAdmin) return true;
-      if (!ownerId) return true;
+      if (isSuperAdmin && !ownerId) return false;
+      if (!ownerId) return false;
       const isOwner =
         b.owner_id === ownerId ||
-        !b.owner_id ||
         b.owner_id === 'owner' ||
         b.owner_id === 'demo-owner';
       const isMachineOwner = Boolean(b.machine_id && ownerMachineIds.includes(b.machine_id));
@@ -206,11 +205,10 @@ export const bookingStore = {
     const cached = this.getCachedBookings();
     return cached.filter((b) => {
       if (b.status !== 'pending') return false;
-      if (isSuperAdmin) return true;
-      if (!ownerId) return true;
+      if (isSuperAdmin && !ownerId) return false;
+      if (!ownerId) return false;
       return (
         b.owner_id === ownerId ||
-        !b.owner_id ||
         b.owner_id === 'owner' ||
         b.owner_id === 'demo-owner' ||
         (b.machine_id && machineIds.includes(b.machine_id))

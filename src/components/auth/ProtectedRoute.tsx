@@ -16,7 +16,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   children,
   requiredRole,
 }) => {
-  const { isAuthenticated, isLoading, profile, isSuperAdmin } = useAuth();
+  const { isAuthenticated, isLoading, profile, isSuperAdmin, isImpersonating } = useAuth();
   const location = useLocation();
 
   // 1. Wait for auth initialization to complete
@@ -39,7 +39,20 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     return <Navigate to="/auth" state={{ from: location }} replace />;
   }
 
-  // 3. Super Admin has full authority and access to every single route in the system
+  // 3. Super Admin when not impersonating belongs strictly in /admin (never intercept owner/entreprise portals)
+  if ((isSuperAdmin || profile?.role === 'admin') && !isImpersonating) {
+    if (
+      location.pathname.startsWith('/owner') ||
+      location.pathname.startsWith('/entreprise') ||
+      location.pathname === '/app' ||
+      location.pathname.startsWith('/app/')
+    ) {
+      return <Navigate to="/admin" replace />;
+    }
+    return children;
+  }
+
+  // 4. Super Admin when impersonating has access to the target role view
   if (isSuperAdmin || profile?.role === 'admin') {
     return children;
   }

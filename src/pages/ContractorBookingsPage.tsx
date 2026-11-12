@@ -61,7 +61,6 @@ export const ContractorBookingsPage: React.FC = () => {
       return;
     }
 
-    setIsLoading(true);
     setIsError(false);
 
     try {
@@ -132,9 +131,8 @@ export const ContractorBookingsPage: React.FC = () => {
         console.warn('Contractor Supabase query failed:', qErr);
       }
 
-      // Merge with bookingStore local cache
-      const merged = bookingStore.mergeContractorBookings(mapped, user.id, userPhone);
-      setBookings(merged);
+      // Supabase is the single source of truth (no stale local cache)
+      setBookings(mapped);
     } catch (err) {
       console.warn('Contractor bookings load exception:', err);
       const userPhone = profile?.phone || user.user_metadata?.phone;
@@ -150,7 +148,17 @@ export const ContractorBookingsPage: React.FC = () => {
 
     const handleEvent = () => loadContractorBookings();
     window.addEventListener('jadijcb_booking_event', handleEvent);
-    return () => window.removeEventListener('jadijcb_booking_event', handleEvent);
+    // Auto-refresh so owner approval shows up without reloading the page
+    const poll = setInterval(loadContractorBookings, 8000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') loadContractorBookings();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('jadijcb_booking_event', handleEvent);
+      clearInterval(poll);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [loadContractorBookings]);
 
   // Filter bookings

@@ -40,6 +40,7 @@ interface CreateBookingModalProps {
   machine?: Machine | null;
   existingBookings?: Booking[];
   preselectedMachineId?: string;
+  initialStartDate?: string;
   onBookingCreated?: (booking: Booking) => void;
 }
 
@@ -50,6 +51,7 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
   machine,
   existingBookings = [],
   preselectedMachineId,
+  initialStartDate,
   onBookingCreated,
 }) => {
   const { t, lang, isRTL } = useLanguage();
@@ -96,12 +98,17 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
   const [cinOrIce, setCinOrIce] = useState(profile?.ice_number || '');
   const [clientsList, setClientsList] = useState<Client[]>([]);
 
-  const [startDate, setStartDate] = useState(
-    new Date(Date.now() + 24 * 3600 * 1000).toISOString().slice(0, 16)
-  );
-  const [endDate, setEndDate] = useState(
-    new Date(Date.now() + 5 * 24 * 3600 * 1000).toISOString().slice(0, 16)
-  );
+  const [startDate, setStartDate] = useState(() => {
+    if (initialStartDate) return initialStartDate.slice(0, 16);
+    return new Date(Date.now() + 24 * 3600 * 1000).toISOString().slice(0, 16);
+  });
+  const [endDate, setEndDate] = useState(() => {
+    if (initialStartDate) {
+      const startMs = new Date(initialStartDate).getTime();
+      return new Date(startMs + 4 * 24 * 3600 * 1000).toISOString().slice(0, 16);
+    }
+    return new Date(Date.now() + 5 * 24 * 3600 * 1000).toISOString().slice(0, 16);
+  });
 
   const [rateType, setRateType] = useState<'hourly' | 'daily' | 'weekly'>('daily');
   const [totalPrice, setTotalPrice] = useState<number>(10000);

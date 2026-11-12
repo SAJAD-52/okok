@@ -34,6 +34,7 @@ import {
   AlertCircle,
   RotateCcw,
   CalendarCheck,
+  Store,
 } from 'lucide-react';
 import { PublicHeader } from '../components/layout/PublicHeader';
 import { Footer } from '../components/layout/Footer';
@@ -50,7 +51,10 @@ import { MachineCard } from '../components/marketplace/MachineCard';
 import { CreateBookingModal } from '../components/bookings/CreateBookingModal';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { machineStore } from '../lib/machineStore';
-import { Machine } from '../types/database';
+import { loadStorefrontByOwner } from '../lib/storefrontService';
+import { serverApi } from '../lib/serverApi';
+import { bookingStore } from '../lib/bookingStore';
+import { Machine, Booking } from '../types/database';
 
 export const MachineDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -61,6 +65,15 @@ export const MachineDetailPage: React.FC = () => {
 
   const [machine, setMachine] = useState<Machine | null>(null);
   const [similarMachines, setSimilarMachines] = useState<Machine[]>([]);
+  const [ownerMachines, setOwnerMachines] = useState<Machine[]>([]);
+  const [ownerStorefrontSlug, setOwnerStorefrontSlug] = useState<string>('');
+  const [activeBooking, setActiveBooking] = useState<{
+    status: string;
+    start_at?: string;
+    end_at?: string;
+    start_date?: string;
+    end_date?: string;
+  } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isError, setIsError] = useState(false);
 
@@ -238,6 +251,150 @@ export const MachineDetailPage: React.FC = () => {
           );
         }
       }
+
+      // 3. Fetch Owner Storefront & Slug
+      let sfSlug = '';
+      if (data.owner_id) {
+        try {
+          const sf = await loadStorefrontByOwner(data.owner_id);
+          if (sf?.slug) sfSlug = sf.slug;
+        } catch {
+          // ignore
+        }
+        if (!sfSlug) {
+          const localSlug = localStorage.getItem('jadijcb_owner_storefront_slug');
+          sfSlug = localSlug || data.owner_id || 'store';
+        }
+      }
+      setOwnerStorefrontSlug(sfSlug);
+
+      // 4. Fetch Other Machines from this Owner's Storefront
+      if (data.owner_id) {
+        let oList: Machine[] = [];
+        if (isSupabaseConfigured) {
+          try {
+            const { data: oData } = await supabase
+              .from('machines')
+              .select('*')
+              .eq('owner_id', data.owner_id)
+              .neq('id', data.id)
+              .limit(6);
+            if (oData && oData.length > 0) {
+              oList = oData.map((m: any) => ({
+                id: m.id,
+                owner_id: m.owner_id,
+                title_ar: m.title_ar,
+                title_fr: m.title_fr,
+                description_ar: m.description_ar,
+                description_fr: m.description_fr,
+                category: m.category,
+                category_id: m.category,
+                brand: m.brand,
+                model: m.model,
+                year: m.year,
+                listing_mode: m.listing_mode,
+                condition: m.condition || 'good',
+                city: m.city,
+                city_id: m.city,
+                lat: m.lat,
+                lng: m.lng,
+                location_lat: m.lat,
+                location_lng: m.lng,
+                rate_hourly: Number(m.hourly_rate) || 0,
+                rate_daily: Number(m.daily_rate) || 0,
+                rate_weekly: Number(m.weekly_rate) || 0,
+                sale_price: Number(m.sale_price) || 0,
+                currency: 'MAD',
+                with_operator: Boolean(m.with_operator),
+                fuel_included: Boolean(m.fuel_included),
+                delivery_available: Boolean(m.delivery_available),
+                status: 'available',
+                images: m.images || [],
+                specs: m.specs || {},
+                views_count: m.views_count || 0,
+                rating_avg: m.rating_avg || 0,
+                reviews_count: m.reviews_count || 0,
+                created_at: m.created_at,
+                updated_at: m.created_at,
+              }));
+            }
+          } catch (oErr) {
+            console.warn('Owner machines fetch error:', oErr);
+          }
+        }
+        if (oList.length === 0) {
+          oList = machineStore
+            .getCachedMachines()
+            .filter((m) => m.id !== id && (m.owner_id === data.owner_id || !m.owner_id))
+            .slice(0, 3);
+        }
+        setOwnerMachines(oList);
+      }
+
+      // 5. Check Active Booking & Real-World Machine Availability
+      let currentBooking: any = null;
+      const todayIso = new Date().toISOString().split('T')[0];
+
+      // 5a. Check Supabase active bookings
+      if (isSupabaseConfigured) {
+        try {
+          const { data: bData } = await supabase
+            .from('bookings')
+            .select('*')
+            .eq('machine_id', id)
+            .in('status', ['active', 'pending'])
+            .order('end_at', { ascending: false });
+
+          if (bData && bData.length > 0) {
+            const found = bData.find((b: any) => {
+              const end = b.end_at || b.end_date;
+              return end && end.split('T')[0] >= todayIso;
+            });
+            if (found) currentBooking = found;
+          }
+        } catch (bErr) {
+          console.warn('Booking availability check notice:', bErr);
+        }
+      }
+
+      // 5b. Check SQLite serverApi bookings
+      if (!currentBooking) {
+        try {
+          const sBookings = await serverApi.getBookings({ machine_id: id });
+          const found = sBookings.find((b) => {
+            const end = b.end_at || b.end_date;
+            const isLive = b.status === 'active' || b.status === 'pending';
+            return isLive && end && end.split('T')[0] >= todayIso;
+          });
+          if (found) currentBooking = found;
+        } catch {
+          // ignore
+        }
+      }
+
+      // 5c. Check local cached bookings
+      if (!currentBooking) {
+        const cachedList = bookingStore.getCachedBookings().filter((b) => b.machine_id === id);
+        const found = cachedList.find((b) => {
+          const end = b.end_at || b.end_date;
+          return (b.status === 'active' || b.status === 'pending') && end && end.split('T')[0] >= todayIso;
+        });
+        if (found) currentBooking = found;
+      }
+
+      // 5d. Also check if machine is flagged as rented or query flag ?booked=true
+      const urlParams = new URLSearchParams(window.location.search);
+      const forceBooked = urlParams.get('booked') === 'true' || urlParams.get('rented') === 'true';
+      if (!currentBooking && (data.status === 'rented' || (data as any).is_rented || forceBooked)) {
+        const futureDate = new Date(Date.now() + 5 * 24 * 3600 * 1000).toISOString().split('T')[0];
+        currentBooking = {
+          status: 'active',
+          start_at: new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString().split('T')[0],
+          end_at: futureDate,
+        };
+      }
+
+      setActiveBooking(currentBooking);
     } catch (err) {
       setIsError(true);
     } finally {
@@ -408,6 +565,43 @@ export const MachineDetailPage: React.FC = () => {
     return (machine.rate_daily || 2800) * selectedDuration;
   };
 
+  const isBooked = Boolean(
+    activeBooking ||
+    (machine && (machine.status === 'rented' || (machine as any).is_rented))
+  );
+
+  const availableDateRaw = activeBooking?.end_at || activeBooking?.end_date || (
+    isBooked ? new Date(Date.now() + 5 * 24 * 3600 * 1000).toISOString().split('T')[0] : null
+  );
+
+  const availableDateObj = availableDateRaw ? new Date(availableDateRaw) : null;
+
+  const formattedAvailableDate = availableDateObj
+    ? availableDateObj.toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'ar-MA', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      })
+    : '';
+
+  const shortAvailableDate = availableDateObj
+    ? availableDateObj.toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'ar-MA', {
+        day: 'numeric',
+        month: 'short',
+      })
+    : '';
+
+  const daysRemaining = availableDateObj
+    ? Math.max(0, Math.ceil((new Date(availableDateObj).setHours(0,0,0,0) - new Date().setHours(0,0,0,0)) / (1000 * 60 * 60 * 24)))
+    : 0;
+
+  const initialPreselectedStartDate = availableDateObj
+    ? new Date(availableDateObj.getTime() + 24 * 3600 * 1000).toISOString().slice(0, 16)
+    : undefined;
+
+  const ownerSlug = ownerStorefrontSlug || machine.owner_id || 'store';
+
   const handleStartChat = async () => {
     if (!user) {
       toast.info(lang === 'fr' ? 'Veuillez vous connecter pour discuter avec le propriétaire' : 'يرجى تسجيل الدخول أولاً للتواصل المباشر مع المالك');
@@ -453,13 +647,19 @@ export const MachineDetailPage: React.FC = () => {
                 />
 
                 {/* Overlaid Badges */}
-                <div className="absolute top-4 start-4 flex items-center gap-2">
+                <div className="absolute top-4 start-4 flex items-center gap-2 flex-wrap max-w-[85%]">
                   <Badge variant={isRent ? 'warning' : 'neutral'} size="md">
                     {isRent ? t('machines.mode_rent_option') : t('machines.mode_sale_option')}
                   </Badge>
                   <span className="bg-ink/80 backdrop-blur text-white text-xs font-bold px-3 py-1 rounded-full border border-white/20">
                     {machine.brand} {machine.model}
                   </span>
+                  {isBooked && (
+                    <span className="bg-amber-500 text-ink text-xs font-black px-3 py-1 rounded-full border border-amber-600 shadow-md flex items-center gap-1.5 animate-pulse">
+                      <Clock className="w-3.5 h-3.5" />
+                      <span>{lang === 'fr' ? `Louée jusqu'au ${shortAvailableDate}` : `محجوزة حتى ${shortAvailableDate}`}</span>
+                    </span>
+                  )}
                 </div>
 
                 {/* Action Floating Buttons */}
@@ -540,6 +740,82 @@ export const MachineDetailPage: React.FC = () => {
                 </div>
               )}
             </div>
+
+            {/* Elegant Graphic: Booked Status & Availability Date */}
+            {isBooked && (
+              <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-amber-50 via-yellow-50 to-amber-100/70 border-2 border-amber-400 p-5 sm:p-6 shadow-sm space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="space-y-1.5 text-start">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500 text-ink font-black text-xs shadow-xs">
+                        <Clock className="w-3.5 h-3.5" />
+                        <span>{lang === 'fr' ? 'Engin actuellement en location' : 'الآلية محجوزة بالورش حالياً'}</span>
+                      </span>
+                      {daysRemaining > 0 && (
+                        <span className="px-2.5 py-0.5 rounded-full bg-white text-amber-900 border border-amber-300 text-[11px] font-extrabold shadow-2xs">
+                          {lang === 'fr' ? `Libération dans ${daysRemaining} jours` : `متبقي ${daysRemaining} أيام على الإتاحة`}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-steel-600">
+                      {lang === 'fr'
+                        ? 'Cette machine est actuellement mobilisée sur un chantier BTP partenaire.'
+                        : 'هذه الآلية تعمل حالياً ضمن مشروع لعميل شريك، وتم تحديد موعد انتهاء الكراء بدقة.'}
+                    </p>
+                  </div>
+
+                  {/* Date Target Highlight Card */}
+                  <div className="bg-white rounded-2xl p-3.5 sm:p-4 border border-amber-300 shadow-xs flex items-center gap-3 shrink-0">
+                    <div className="w-11 h-11 rounded-xl bg-amber-100 text-amber-900 flex items-center justify-center shrink-0 shadow-inner">
+                      <CalendarCheck className="w-6 h-6 text-amber-700" />
+                    </div>
+                    <div className="text-start">
+                      <span className="text-[10px] text-steel-500 font-bold block uppercase tracking-wider">
+                        {lang === 'fr' ? 'Disponible pour votre chantier dès :' : 'متاحة لورشك ابتداءً من:'}
+                      </span>
+                      <span className="text-sm sm:text-base font-black text-ink block font-mono">
+                        {formattedAvailableDate}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Graphic Visual Progress & Timeline */}
+                <div className="pt-3.5 border-t border-amber-200/80">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-steel-600 mb-2">
+                    <span className="flex items-center gap-1.5 text-amber-900 font-bold">
+                      <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                      <span>{lang === 'fr' ? 'Période occupée en cours' : 'فترة الكراء الحالية بالورش'}</span>
+                    </span>
+                    <span className="flex items-center gap-1.5 text-emerald-800 font-bold">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                      <span>{lang === 'fr' ? 'Créneau libre pour réservation' : 'جاهزة للحجز المسبق'}</span>
+                    </span>
+                  </div>
+
+                  {/* Graphic Progress Bar */}
+                  <div className="h-4 w-full rounded-full bg-steel-200/80 p-0.5 overflow-hidden flex shadow-inner">
+                    <div
+                      className="h-full rounded-s-full bg-amber-400 bg-[linear-gradient(45deg,rgba(0,0,0,0.08)_25%,transparent_25%,transparent_50%,rgba(0,0,0,0.08)_50%,rgba(0,0,0,0.08)_75%,transparent_75%,transparent)] bg-[length:14px_14px]"
+                      style={{ width: '65%' }}
+                    />
+                    <div
+                      className="h-full rounded-e-full bg-emerald-500 flex-1 flex items-center justify-center text-[9px] font-black text-white"
+                    >
+                      {lang === 'fr' ? 'DISPONIBLE' : 'متاح'}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] text-steel-500 font-mono mt-2">
+                    <span>{lang === 'fr' ? 'Activité chantier en cours' : 'العمل جاري بالموقع'}</span>
+                    <span className="font-bold text-emerald-700 flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>{lang === 'fr' ? `Libre dès le ${shortAvailableDate}` : `متاحة ابتداءً من ${shortAvailableDate}`}</span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Description Card */}
             <Card className="p-6 bg-white border border-steel-200 shadow-soft">
@@ -634,25 +910,57 @@ export const MachineDetailPage: React.FC = () => {
                     <p className="text-xs text-steel-500 mt-0.5">
                       {lang === 'fr'
                         ? 'Consultez les créneaux libres pour réserver sans attente'
-                        : 'فترات العمل المتاحة للحجز الفوري'}
+                        : 'فترات العمل المتاحة للحجز الفوري والمسبق'}
                     </p>
                   </div>
-                  <span className="flex items-center gap-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>{lang === 'fr' ? 'Disponible maintenant' : 'متاحة فوراً'}</span>
-                  </span>
+
+                  {isBooked ? (
+                    <span className="flex items-center gap-1.5 text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 px-3 py-1 rounded-full">
+                      <Clock className="w-3.5 h-3.5 text-amber-600" />
+                      <span>{lang === 'fr' ? `Libre le ${shortAvailableDate}` : `متاحة في ${shortAvailableDate}`}</span>
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>{lang === 'fr' ? 'Disponible maintenant' : 'متاحة فوراً'}</span>
+                    </span>
+                  )}
                 </div>
 
-                <div className="p-4 rounded-xl bg-surface border border-steel-200 text-xs text-steel-600 flex items-center justify-between">
-                  <span className="font-bold">
-                    {lang === 'fr'
-                      ? 'Aucune réservation bloquante sur les 30 prochains jours.'
-                      : 'لا توجد حجوزات متعارضة خلال الـ 30 يوماً القادمة.'}
-                  </span>
-                  <span className="font-mono text-[11px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded">
-                    100% libre
-                  </span>
-                </div>
+                {isBooked ? (
+                  <div className="p-4 rounded-2xl bg-amber-50/70 border border-amber-200 text-xs text-amber-950 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <AlertCircle className="w-4.5 h-4.5 text-amber-700 shrink-0" />
+                        <span className="font-extrabold text-xs">
+                          {lang === 'fr'
+                            ? `Actuellement mobilisée sur chantier. Libération programmée le ${formattedAvailableDate}.`
+                            : `الآلية قيد العمل حالياً بالورش. موعد الإتاحة المؤكد هو ${formattedAvailableDate}.`}
+                        </span>
+                      </div>
+                      <span className="font-mono text-[11px] bg-amber-200 text-amber-900 font-black px-2.5 py-0.5 rounded-lg shrink-0">
+                        {lang === 'fr' ? `J-${daysRemaining}` : `بعد ${daysRemaining} يوم`}
+                      </span>
+                    </div>
+
+                    <p className="text-[11px] text-steel-600 leading-relaxed">
+                      {lang === 'fr'
+                        ? 'Vous pouvez soumettre une demande de pré-réservation pour garantir la mise à disposition de cette machine à cette date précise.'
+                        : 'لتثبيت أولوية حجز الآلية لورشك فور الانتهاء من العمل الحالي، يمكنك تقديم طلب حجز مسبق الآن.'}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="p-4 rounded-xl bg-surface border border-steel-200 text-xs text-steel-600 flex items-center justify-between">
+                    <span className="font-bold">
+                      {lang === 'fr'
+                        ? 'Aucune réservation bloquante sur les 30 prochains jours.'
+                        : 'لا توجد حجوزات متعارضة خلال الـ 30 يوماً القادمة.'}
+                    </span>
+                    <span className="font-mono text-[11px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded">
+                      100% libre
+                    </span>
+                  </div>
+                )}
               </Card>
             )}
           </div>
@@ -763,6 +1071,26 @@ export const MachineDetailPage: React.FC = () => {
 
               {/* CTAs: Booking, WhatsApp + Real-time Chat */}
               <div className="space-y-2.5 pt-3">
+                {/* Booked notice chip in sticky column */}
+                {isBooked && (
+                  <div className="p-3.5 rounded-2xl bg-amber-50/90 border border-amber-300 text-xs text-amber-950 space-y-1.5 shadow-2xs">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 font-black text-amber-900 text-xs">
+                        <Clock className="w-4 h-4 text-amber-600 shrink-0" />
+                        <span>{lang === 'fr' ? 'Actuellement sur chantier' : 'الآلية محجوزة بالورش حالياً'}</span>
+                      </div>
+                      <span className="font-mono text-[10px] bg-amber-200 text-amber-900 font-black px-2 py-0.5 rounded-md">
+                        {lang === 'fr' ? `J-${daysRemaining}` : `خلال ${daysRemaining} يوم`}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-amber-800 leading-snug">
+                      {lang === 'fr'
+                        ? `Disponible à partir du ${formattedAvailableDate}. Vous pouvez soumettre une pré-réservation pour bloquer cette date.`
+                        : `تصبح شاغرة ابتداءً من ${formattedAvailableDate}. يمكنك تقديم طلب حجز مسبق لتأكيد أولوية ورشك.`}
+                    </p>
+                  </div>
+                )}
+
                 {isOwnMachine ? (
                   <div className="space-y-2">
                     <div className="w-full py-3 px-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-bold text-center flex items-center justify-center gap-2 shadow-2xs">
@@ -793,7 +1121,11 @@ export const MachineDetailPage: React.FC = () => {
                     leftIcon={<CalendarCheck className="w-4 h-4" />}
                     className="w-full justify-center font-black text-xs sm:text-sm min-h-[48px] shadow-md"
                   >
-                    {lang === 'fr' ? 'Demande de réservation immédiate' : 'طلب كراء الآلية الآن'}
+                    {isBooked
+                      ? (lang === 'fr'
+                          ? `Pré-réserver (Libre dès le ${shortAvailableDate})`
+                          : `طلب حجز مسبق (متاحة في ${shortAvailableDate})`)
+                      : (lang === 'fr' ? 'Demande de réservation immédiate' : 'طلب كراء الآلية الآن')}
                   </Button>
                 ) : null}
 
@@ -820,29 +1152,80 @@ export const MachineDetailPage: React.FC = () => {
               </div>
             </Card>
 
-            {/* Owner Card */}
-            <Card className="p-5 bg-white border border-steel-200 shadow-soft rounded-2xl space-y-3">
-              <h3 className="text-xs font-black text-ink uppercase tracking-wider">
-                {t('machine_detail.owner_info')}
-              </h3>
-
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl bg-ink text-primary font-black text-base flex items-center justify-center shrink-0">
-                  {machine.owner?.company_name?.slice(0, 2).toUpperCase() || 'JB'}
-                </div>
-                <div>
-                  <h4 className="font-black text-xs text-ink">
-                    {machine.owner?.company_name || 'Entreprise Partenaire'}
-                  </h4>
-                  <p className="text-[11px] text-steel-500">
-                    {machine.owner?.full_name || 'Responsable Parc'}
-                  </p>
-                  <span className="text-[10px] text-emerald-700 font-bold flex items-center gap-1 mt-0.5">
-                    <ShieldCheck className="w-3 h-3" />
-                    <span>{t('machine_detail.verified_owner')}</span>
-                  </span>
-                </div>
+            {/* Owner Card with Storefront Link Button */}
+            <Card className="p-5 bg-white border border-steel-200 shadow-soft rounded-2xl space-y-3.5">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-black text-ink uppercase tracking-wider">
+                  {t('machine_detail.owner_info')}
+                </h3>
+                {ownerSlug && (
+                  <Link
+                    to={`/s/${ownerSlug}`}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-black bg-primary/20 hover:bg-primary text-ink border border-primary/40 transition-all cursor-pointer shadow-2xs"
+                  >
+                    <Store className="w-3.5 h-3.5 text-ink" />
+                    <span>{lang === 'fr' ? 'Vitrine du loueur' : 'متجر المالك'}</span>
+                  </Link>
+                )}
               </div>
+
+              <div className="flex items-center justify-between gap-3">
+                <Link
+                  to={ownerSlug ? `/s/${ownerSlug}` : '#'}
+                  className="flex items-center gap-3 group flex-1 min-w-0"
+                >
+                  <div className="relative shrink-0">
+                    <div className="w-12 h-12 rounded-xl bg-ink text-primary font-black text-base flex items-center justify-center group-hover:ring-2 group-hover:ring-primary transition-all shadow-xs">
+                      {machine.owner?.company_name?.slice(0, 2).toUpperCase() || 'JB'}
+                    </div>
+                    {ownerSlug && (
+                      <span className="absolute -bottom-1 -end-1 bg-primary text-ink rounded-full p-1 border-2 border-white shadow-xs">
+                        <Store className="w-2.5 h-2.5" />
+                      </span>
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <h4 className="font-black text-xs text-ink truncate group-hover:text-primary-dark transition-colors">
+                      {machine.owner?.company_name || 'Entreprise Partenaire'}
+                    </h4>
+                    <p className="text-[11px] text-steel-500 truncate">
+                      {machine.owner?.full_name || 'Responsable Parc'}
+                    </p>
+                    <span className="text-[10px] text-emerald-700 font-bold flex items-center gap-1 mt-0.5">
+                      <ShieldCheck className="w-3 h-3 shrink-0" />
+                      <span>{t('machine_detail.verified_owner')}</span>
+                    </span>
+                  </div>
+                </Link>
+
+                {/* Direct icon button to owner's storefront next to owner profile */}
+                {ownerSlug && (
+                  <Link
+                    to={`/s/${ownerSlug}`}
+                    title={lang === 'fr' ? 'Ouvrir la vitrine du propriétaire' : 'فتح صفحة متجر المالك'}
+                    className="p-2.5 rounded-xl bg-surface hover:bg-primary/25 text-ink border border-steel-200 hover:border-primary/50 transition-all cursor-pointer shrink-0 shadow-2xs hover:scale-105"
+                    aria-label="Owner Storefront"
+                  >
+                    <Store className="w-4 h-4 text-primary-dark" />
+                  </Link>
+                )}
+              </div>
+
+              {/* Full button to view owner's storefront & fleet */}
+              {ownerSlug && (
+                <Link
+                  to={`/s/${ownerSlug}`}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-surface hover:bg-amber-50/80 border border-steel-200 hover:border-primary/50 text-xs font-black text-ink transition-all cursor-pointer shadow-2xs"
+                >
+                  <Store className="w-4 h-4 text-primary-dark" />
+                  <span>
+                    {lang === 'fr'
+                      ? 'Consulter le catalogue complet de ce loueur'
+                      : 'زيارة متجر المالك وتصفح كامل الأسطول'}
+                  </span>
+                  <ArrowRight className="w-3.5 h-3.5 rtl:rotate-180 text-steel-400" />
+                </Link>
+              )}
             </Card>
           </div>
         </div>
@@ -863,6 +1246,55 @@ export const MachineDetailPage: React.FC = () => {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
               {similarMachines.map((m) => (
+                <MachineCard
+                  key={m.id}
+                  machine={m}
+                  onBookClick={(target) => {
+                    setModalMachine(target);
+                    setIsBookingModalOpen(true);
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Owner Storefront Fleet Section (Directly Below Similar Machines) */}
+        {ownerMachines.length > 0 && (
+          <div className="mt-14 pt-10 border-t border-steel-200">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="p-1.5 rounded-lg bg-primary/20 text-ink">
+                    <Store className="w-4 h-4 text-primary-dark" />
+                  </span>
+                  <h2 className="text-xl sm:text-2xl font-black text-ink">
+                    {lang === 'fr'
+                      ? `Autres engins de la vitrine de ${machine.owner?.company_name || 'ce partenaire'}`
+                      : `آليات أخرى من متجر المالك (${machine.owner?.company_name || 'هذا الشريك'})`}
+                  </h2>
+                </div>
+                <p className="text-xs text-steel-500">
+                  {lang === 'fr'
+                    ? 'Découvrez les autres équipements et engins proposés par le même propriétaire'
+                    : 'استكشف المعدات والشاحنات الأخرى المتوفرة لدى نفس المالك في متجره المعتمد'}
+                </p>
+              </div>
+
+              {ownerSlug && (
+                <Link
+                  to={`/s/${ownerSlug}`}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black bg-ink hover:bg-steel-800 text-primary transition-all cursor-pointer shadow-sm shrink-0 self-start sm:self-center"
+                >
+                  <Store className="w-4 h-4 text-primary" />
+                  <span>{lang === 'fr' ? 'Voir toute la vitrine' : 'زيارة متجر المالك الكامل'}</span>
+                  <ArrowRight className="w-3.5 h-3.5 rtl:rotate-180" />
+                </Link>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              {ownerMachines.slice(0, 3).map((m) => (
                 <MachineCard
                   key={m.id}
                   machine={m}
@@ -924,6 +1356,7 @@ export const MachineDetailPage: React.FC = () => {
             setModalMachine(null);
           }}
           machine={modalMachine || machine}
+          initialStartDate={initialPreselectedStartDate}
         />
       )}
 

@@ -398,7 +398,7 @@ class ChatStore {
     }
 
     // Schedule realistic Moroccan auto-response after 1.5s for seamless interactive experience
-    this.scheduleAutoReply(conversationId, senderId, trimmed, otherParticipantId);
+    //this.scheduleAutoReply(conversationId, senderId, trimmed, otherParticipantId);
 
     return newMsg;
   }

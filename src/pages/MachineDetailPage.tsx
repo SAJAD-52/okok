@@ -566,8 +566,10 @@ export const MachineDetailPage: React.FC = () => {
   };
 
   const isBooked = Boolean(
-    activeBooking ||
-    (machine && (machine.status === 'rented' || (machine as any).is_rented))
+    isRent && (
+      activeBooking ||
+      (machine && (machine.status === 'rented' || (machine as any).is_rented))
+    )
   );
 
   const availableDateRaw = activeBooking?.end_at || activeBooking?.end_date || (

@@ -18,6 +18,7 @@ import {
   CalendarCheck,
   MessageCircle,
   MessageSquare,
+  Wrench,
 } from 'lucide-react';
 import { Machine } from '../../types/database';
 import { Card } from '../ui/Card';
@@ -66,7 +67,8 @@ export const MachineCard: React.FC<MachineCardProps> = ({ machine, onBookClick }
   };
 
   const title = lang === 'fr' ? machine.title_fr : machine.title_ar;
-  const isRent = machine.listing_mode !== 'sale';
+  const isSparePart = machine.category === 'spare-parts' || machine.category_id === 'spare-parts';
+  const isRent = !isSparePart && machine.listing_mode !== 'sale';
 
   // Check if current user is the owner of this machine (cannot book own machines)
   const currentUserId = user?.id || profile?.id;
@@ -87,8 +89,12 @@ export const MachineCard: React.FC<MachineCardProps> = ({ machine, onBookClick }
   const machineTitle = (lang === 'fr' ? machine.title_fr : machine.title_ar) || `${machine.brand} ${machine.model}`;
   const whatsappMsg = encodeURIComponent(
     lang === 'fr'
-      ? `Bonjour, je souhaite réserver l'engin "${machineTitle}" (${machine.city || 'Maroc'}) proposé à ${machine.rate_daily?.toLocaleString('fr-FR')} MAD/jour sur JADIJCB.\nLien: ${typeof window !== 'undefined' ? window.location.origin : ''}/marketplace/${machine.id}`
-      : `السلام عليكم، أرغب في حجز الآلية "${machineTitle}" (${machine.city || 'المغرب'}) المعروضة بسعر ${machine.rate_daily?.toLocaleString('fr-FR')} د.م/يوم على منصة JADIJCB.\nالرابط: ${typeof window !== 'undefined' ? window.location.origin : ''}/marketplace/${machine.id}`
+      ? (isSparePart
+          ? `Bonjour, je souhaite acheter la pièce détachée "${machineTitle}" (${machine.city || 'Maroc'}) proposée à ${machine.sale_price?.toLocaleString('fr-FR')} MAD sur JADIJCB.\nLien: ${typeof window !== 'undefined' ? window.location.origin : ''}/marketplace/${machine.id}`
+          : `Bonjour, je souhaite réserver l'engin "${machineTitle}" (${machine.city || 'Maroc'}) proposé à ${machine.rate_daily?.toLocaleString('fr-FR')} MAD/jour sur JADIJCB.\nLien: ${typeof window !== 'undefined' ? window.location.origin : ''}/marketplace/${machine.id}`)
+      : (isSparePart
+          ? `السلام عليكم، أرغب في شراء قطعة الغيار "${machineTitle}" (${machine.city || 'المغرب'}) المعروضة بسعر ${machine.sale_price?.toLocaleString('fr-FR')} د.م على منصة JADIJCB.\nالرابط: ${typeof window !== 'undefined' ? window.location.origin : ''}/marketplace/${machine.id}`
+          : `السلام عليكم، أرغب في حجز الآلية "${machineTitle}" (${machine.city || 'المغرب'}) المعروضة بسعر ${machine.rate_daily?.toLocaleString('fr-FR')} د.م/يوم على منصة JADIJCB.\nالرابط: ${typeof window !== 'undefined' ? window.location.origin : ''}/marketplace/${machine.id}`)
   );
   const whatsappLink = `https://wa.me/${ownerPhone}?text=${whatsappMsg}`;
 
@@ -128,19 +134,24 @@ export const MachineCard: React.FC<MachineCardProps> = ({ machine, onBookClick }
           {/* Mode Badge (Top Start) */}
           <div className="absolute top-3 start-3 z-10">
             <span
-              className={`px-2.5 py-1 rounded-lg text-xs font-black shadow-md ${
-                isRent
+              className={`px-2.5 py-1 rounded-lg text-xs font-black shadow-md flex items-center gap-1.5 ${
+                isSparePart
+                  ? 'bg-amber-500 text-ink'
+                  : isRent
                   ? 'bg-primary text-ink'
                   : 'bg-ink text-white'
               }`}
             >
-              {isRent
-                ? lang === 'fr'
-                  ? 'Location'
-                  : 'للكراء'
-                : lang === 'fr'
-                ? 'À vendre'
-                : 'للبيع'}
+              {isSparePart ? (
+                <>
+                  <Wrench className="w-3 h-3" />
+                  <span>{lang === 'fr' ? 'Pièce à vendre' : 'قطعة غيار للبيع'}</span>
+                </>
+              ) : isRent ? (
+                lang === 'fr' ? 'Location' : 'للكراء'
+              ) : (
+                lang === 'fr' ? 'À vendre' : 'للبيع'
+              )}
             </span>
           </div>
 
@@ -216,14 +227,19 @@ export const MachineCard: React.FC<MachineCardProps> = ({ machine, onBookClick }
 
           {/* Equipment Highlights / Features */}
           <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-steel-600 pt-1">
-            {machine.with_operator && (
+            {!isSparePart && machine.with_operator && (
               <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 font-bold border border-emerald-200">
                 {lang === 'fr' ? 'Chauffeur inclus' : 'مع سائق'}
               </span>
             )}
-            {machine.fuel_included && (
+            {!isSparePart && machine.fuel_included && (
               <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 font-bold border border-amber-200">
                 {lang === 'fr' ? 'Carburant inclus' : 'المازوت مشمول'}
+              </span>
+            )}
+            {isSparePart && (
+              <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-900 font-bold border border-amber-300">
+                {lang === 'fr' ? 'Achat direct' : 'بيع وشراء'}
               </span>
             )}
             {machine.delivery_available && (
@@ -322,8 +338,14 @@ export const MachineCard: React.FC<MachineCardProps> = ({ machine, onBookClick }
               }}
               className="flex-1 py-2 px-2.5 rounded-xl bg-ink hover:bg-black text-primary text-xs font-black shadow-xs transition-all flex items-center justify-center gap-1 cursor-pointer truncate"
             >
-              <Truck className="w-3.5 h-3.5 text-primary shrink-0" />
-              <span className="truncate">{lang === 'fr' ? 'Détails & Achat' : 'معاينة الشراء'}</span>
+              {isSparePart ? (
+                <Wrench className="w-3.5 h-3.5 text-primary shrink-0" />
+              ) : (
+                <Truck className="w-3.5 h-3.5 text-primary shrink-0" />
+              )}
+              <span className="truncate">
+                {lang === 'fr' ? 'Détails & Achat' : isSparePart ? 'شراء قطعة الغيار' : 'معاينة الشراء'}
+              </span>
             </button>
 
             <button

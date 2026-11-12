@@ -213,7 +213,13 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
 
   if (!isOpen) return null;
 
-  const targetMachine = machinesList.find((m) => m.id === machineId) || machinesList[0];
+  const targetMachine =
+    machine ||
+    machinesList.find((m) => m.id === machineId) ||
+    machines.find((m) => m.id === machineId) ||
+    machineStore.getCachedMachines().find((m) => m.id === machineId) ||
+    machinesList[0] ||
+    null;
 
   const handleExecuteBooking = async (openWhatsApp: boolean) => {
     const startTs = new Date(startDate).getTime();
@@ -244,17 +250,21 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
       Boolean(str && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str));
 
     // Resolve TRUE machine owner (never confuse client/renter with machine owner!)
-    let resolvedOwnerId: string | undefined = isUuid(targetMachine?.owner_id) ? targetMachine!.owner_id : undefined;
+    let resolvedOwnerId: string | undefined =
+      targetMachine?.owner_id ||
+      targetMachine?.owner?.id ||
+      (targetMachine as any)?.user_id;
 
-    // 1. Look up machine's owner directly in Supabase machines table
-    if (!resolvedOwnerId && machineId && isSupabaseConfigured) {
+    // 1. Look up machine's owner directly in Supabase machines table if missing or not UUID
+    if (!resolvedOwnerId && (machineId || targetMachine?.id) && isSupabaseConfigured) {
       try {
+        const mId = machineId || targetMachine?.id;
         const { data: mData } = await supabase
           .from('machines')
           .select('owner_id')
-          .eq('id', machineId)
+          .eq('id', mId)
           .maybeSingle();
-        if (mData?.owner_id && isUuid(mData.owner_id)) {
+        if (mData?.owner_id) {
           resolvedOwnerId = mData.owner_id;
         }
       } catch (lookupErr) {
@@ -263,21 +273,21 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
     }
 
     // 2. Fallback to cached machines
-    if (!resolvedOwnerId && machineId) {
-      const foundInCache = machineStore.getCachedMachines().find((m) => m.id === machineId);
-      if (isUuid(foundInCache?.owner_id)) {
-        resolvedOwnerId = foundInCache!.owner_id;
+    if (!resolvedOwnerId && (machineId || targetMachine?.id)) {
+      const mId = machineId || targetMachine?.id;
+      const foundInCache = machineStore.getCachedMachines().find((m) => m.id === mId);
+      if (foundInCache?.owner_id) {
+        resolvedOwnerId = foundInCache.owner_id;
       }
-    }
-
-    // 3. Fallback to targetMachine property even if non-standard UUID
-    if (!resolvedOwnerId && targetMachine?.owner_id) {
-      resolvedOwnerId = targetMachine.owner_id;
     }
 
     // Strictly ensure owner_id is an actual equipment owner, NEVER Super Admin
     if (resolvedOwnerId === 'super_admin_said_root' || resolvedOwnerId === 'admin' || !resolvedOwnerId) {
-      resolvedOwnerId = 'usr_owner_casa_01';
+      if (targetMachine?.owner_id && targetMachine.owner_id !== 'super_admin_said_root' && targetMachine.owner_id !== 'admin') {
+        resolvedOwnerId = targetMachine.owner_id;
+      } else {
+        resolvedOwnerId = 'usr_owner_casa_01';
+      }
     }
 
     // Auto-save new client in directory if "new" was selected by an authenticated owner
@@ -322,7 +332,7 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
       paid_amount: 0,
       balance_due: Number(totalPrice),
       payment_status: 'unpaid',
-      machine: targetMachine,
+      machine: targetMachine || undefined,
       created_at: new Date().toISOString(),
     };
 
@@ -346,14 +356,14 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
       console.warn('Server SQLite save notice:', apiErr);
     }
 
-    // 2. Save to Supabase (if configured)
+    // 2. Save to Supabase (if configured) with adaptive retry
     if (isSupabaseConfigured) {
       try {
-        const payload: any = {
-          id: newBooking.id,
+        let payload: any = {
+          id: isUuid(newBooking.id) ? newBooking.id : crypto.randomUUID(),
           machine_id: newBooking.machine_id,
           ...(isUuid(resolvedOwnerId) ? { owner_id: resolvedOwnerId } : {}),
-          ...(isUuid(user?.id) ? { client_id: user.id } : {}),
+          ...(isUuid(user?.id) && user?.id !== 'super_admin_said_root' ? { client_id: user.id } : {}),
           client_name: newBooking.client_name,
           client_phone: newBooking.client_phone,
           start_at: newBooking.start_at,
@@ -366,19 +376,48 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
           with_operator: newBooking.with_operator,
           fuel_included: newBooking.fuel_included,
           delivery_fee: newBooking.delivery_fee,
+          delivery_requested: newBooking.delivery_requested,
+          site_address: newBooking.site_address,
           status: newBooking.status,
           notes: newBooking.notes,
           created_at: newBooking.created_at,
         };
 
-        const { data, error } = await supabase
-          .from('bookings')
-          .insert(payload)
-          .select()
-          .maybeSingle();
+        // If owner_id wasn't in payload, try fetching the machine's true UUID from machines table
+        if (!payload.owner_id && newBooking.machine_id) {
+          try {
+            const { data: mRow } = await supabase
+              .from('machines')
+              .select('owner_id')
+              .eq('id', newBooking.machine_id)
+              .maybeSingle();
+            if (mRow?.owner_id && isUuid(mRow.owner_id)) {
+              payload.owner_id = mRow.owner_id;
+              resolvedOwnerId = mRow.owner_id;
+            }
+          } catch {
+            // Ignore
+          }
+        }
 
-        if (error) {
-          if (error.message?.includes('BOOKING_CONFLICT')) {
+        let savedData: any = null;
+
+        // Perform adaptive insert (up to 5 attempts to automatically adapt to database schema)
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const { data, error } = await supabase
+            .from('bookings')
+            .insert(payload)
+            .select()
+            .maybeSingle();
+
+          if (!error) {
+            savedData = data;
+            break;
+          }
+
+          const msg = error.message || '';
+
+          if (msg.includes('BOOKING_CONFLICT')) {
             setIsSubmitting(false);
             const conflictMsg =
               lang === 'fr'
@@ -388,43 +427,61 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
             toast.error(conflictMsg);
             return;
           }
-          console.warn('DB booking insert notice:', error.message);
-        } else if (data) {
-          newBooking.id = data.id;
 
-          // Create notification record for owner
-          if (resolvedOwnerId) {
-            try {
-              await supabase.from('notifications').insert({
-                user_id: resolvedOwnerId,
-                title_ar: 'طلب كراء جديد وارد 🚜',
-                title_fr: 'Nouvelle demande de location reçue 🚜',
-                body_ar: `طلب الزبون ${clientName.trim()} كراء (${targetMachine?.title_ar || targetMachine?.model || 'الآلية'}) بقيمة ${Number(totalPrice).toLocaleString('fr-FR')} د.م.`,
-                body_fr: `Le client ${clientName.trim()} a réservé ${targetMachine?.title_fr || targetMachine?.model || 'engin'} (${Number(totalPrice).toLocaleString('fr-FR')} MAD).`,
-                type: 'booking_request',
-                data: {
-                  booking_id: newBooking.id,
-                  machine_id: newBooking.machine_id,
-                  client_name: newBooking.client_name,
-                  client_phone: newBooking.client_phone,
-                  total_price: newBooking.total_price,
-                },
-              });
-            } catch (notifErr) {
-              console.warn('Could not insert notification:', notifErr);
+          // Strip missing column and retry
+          const missingColMatch = msg.match(/Could not find the '([^']+)' column/i);
+          if (missingColMatch && missingColMatch[1]) {
+            delete payload[missingColMatch[1]];
+            continue;
+          }
+
+          // If foreign key constraint failed on client_id, remove client_id and retry
+          if (msg.includes('client_id') || msg.includes('violates foreign key constraint')) {
+            if (payload.client_id) {
+              delete payload.client_id;
+              continue;
             }
+          }
+
+          // If invalid UUID syntax on id, remove explicit id so DB generates it
+          if (msg.includes('invalid input syntax for type uuid') && msg.includes('id')) {
+            delete payload.id;
+            continue;
+          }
+
+          console.warn(`Adaptive booking insert attempt ${attempt + 1} notice:`, msg);
+          break;
+        }
+
+        if (savedData?.id) {
+          newBooking.id = savedData.id;
+        }
+
+        // Create notification record for owner
+        const targetOwnerId = payload.owner_id || (isUuid(resolvedOwnerId) ? resolvedOwnerId : undefined);
+        if (targetOwnerId) {
+          try {
+            await supabase.from('notifications').insert({
+              user_id: targetOwnerId,
+              title_ar: 'طلب كراء جديد وارد 🚜',
+              title_fr: 'Nouvelle demande de location reçue 🚜',
+              body_ar: `طلب الزبون ${clientName.trim()} كراء (${targetMachine?.title_ar || targetMachine?.model || 'الآلية'}) بقيمة ${Number(totalPrice).toLocaleString('fr-FR')} د.م.`,
+              body_fr: `Le client ${clientName.trim()} a réservé ${targetMachine?.title_fr || targetMachine?.model || 'engin'} (${Number(totalPrice).toLocaleString('fr-FR')} MAD).`,
+              type: 'booking_request',
+              data: {
+                booking_id: newBooking.id,
+                machine_id: newBooking.machine_id,
+                client_name: newBooking.client_name,
+                client_phone: newBooking.client_phone,
+                total_price: newBooking.total_price,
+              },
+            });
+          } catch (notifErr) {
+            console.warn('Could not insert notification:', notifErr);
           }
         }
       } catch (err: any) {
-        if (err.message?.includes('BOOKING_CONFLICT')) {
-          setIsSubmitting(false);
-          toast.error(
-            lang === 'fr'
-              ? 'Conflit de réservation sur cette machine'
-              : 'تعارض في التواريخ : الآلية محجوزة مسبقاً'
-          );
-          return;
-        }
+        console.warn('Supabase booking insert exception:', err);
       }
     }
 

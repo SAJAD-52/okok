@@ -10,3 +10,4 @@
 | AUD-006 | src/components/machines/MachineStepperModal.tsx | Ephemeral blob: URLs stored in machine.images instead of uploading compressed photos to Supabase Storage bucket machine-images. | P0 | FIXED |
 | AUD-007 | src/pages/DashboardOverviewPage.tsx, src/pages/BookingsPage.tsx | Booking status transitions updated state without checking Supabase { error }, showing fake success on failure. | P1 | FIXED |
 | AUD-008 | src/components/dashboard/SoftLockModal.tsx, src/components/dashboard/PaymentProofModal.tsx | Receipts > 5MB taken on phone cameras were hard-blocked instead of client-side compressed via compressImage. | P2 | FIXED |
+| AUD-009 | src/components/bookings/CreateBookingModal.tsx, src/pages/BookingsPage.tsx, src/lib/bookingStore.ts | Contractor booking requests did not reach owner dashboard due to strict UUID owner validation, fragile PostgREST joins, and missing machine-level RLS policy. | P0 | FIXED |

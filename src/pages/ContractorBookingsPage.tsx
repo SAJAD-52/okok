@@ -71,7 +71,7 @@ export const ContractorBookingsPage: React.FC = () => {
       try {
         let query = supabase
           .from('bookings')
-          .select('*, machines(*)');
+          .select('*');
 
         if (userPhone) {
           query = query.or(`client_id.eq.${user.id},client_phone.eq.${userPhone}`);
@@ -86,7 +86,7 @@ export const ContractorBookingsPage: React.FC = () => {
           // Try simpler query fallback
           const fallbackRes = await supabase
             .from('bookings')
-            .select('*, machines(*)')
+            .select('*')
             .eq('client_id', user.id);
           if (fallbackRes.data) {
             mapped = fallbackRes.data.map((b: any) => ({
@@ -96,15 +96,15 @@ export const ContractorBookingsPage: React.FC = () => {
               client_id: b.client_id,
               client_name: b.client_name,
               client_phone: b.client_phone,
-              start_at: b.start_at,
-              end_at: b.end_at,
-              start_date: b.start_at,
-              end_date: b.end_at,
+              start_at: b.start_at || b.start_date,
+              end_at: b.end_at || b.end_date,
+              start_date: b.start_date || b.start_at,
+              end_date: b.end_date || b.end_at,
               total_price: Number(b.total_price) || 0,
               status: b.status,
               notes: b.notes,
               created_at: b.created_at,
-              machine: b.machines,
+              machine: b.machines || b.machine,
               with_operator: Boolean(b.with_operator ?? true),
             }));
           }
@@ -116,15 +116,15 @@ export const ContractorBookingsPage: React.FC = () => {
             client_id: b.client_id,
             client_name: b.client_name,
             client_phone: b.client_phone,
-            start_at: b.start_at,
-            end_at: b.end_at,
-            start_date: b.start_at,
-            end_date: b.end_at,
+            start_at: b.start_at || b.start_date,
+            end_at: b.end_at || b.end_date,
+            start_date: b.start_date || b.start_at,
+            end_date: b.end_date || b.end_at,
             total_price: Number(b.total_price) || 0,
             status: b.status,
             notes: b.notes,
             created_at: b.created_at,
-            machine: b.machines,
+            machine: b.machines || b.machine,
             with_operator: Boolean(b.with_operator ?? true),
           }));
         }

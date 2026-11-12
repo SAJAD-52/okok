@@ -376,6 +376,37 @@ app.post('/api/bookings', (req, res) => {
       }
     }
 
+    // Auto sync machine into SQLite if machine object provided
+    if (b.machine && typeof b.machine === 'object' && b.machine.id) {
+      try {
+        db.prepare(`
+          INSERT INTO machines (id, owner_id, title_ar, title_fr, brand, model, category, city, daily_rate, hourly_rate, is_published, data_json, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET
+            owner_id = COALESCE(excluded.owner_id, machines.owner_id),
+            title_ar = excluded.title_ar,
+            title_fr = excluded.title_fr,
+            data_json = excluded.data_json
+        `).run(
+          b.machine.id,
+          b.machine.owner_id || resolvedOwnerId || null,
+          b.machine.title_ar || b.machine.brand || 'الآلية',
+          b.machine.title_fr || b.machine.brand || 'Engin',
+          b.machine.brand || '',
+          b.machine.model || '',
+          b.machine.category || 'excavator',
+          b.machine.city || 'الدار البيضاء',
+          Number(b.machine.daily_rate) || 2000,
+          Number(b.machine.hourly_rate) || 350,
+          1,
+          JSON.stringify(b.machine),
+          now
+        );
+      } catch {
+        // ignore
+      }
+    }
+
     const insertStmt = db.prepare(`
       INSERT INTO bookings (
         id, machine_id, owner_id, client_id, client_name, client_phone, client_ref_id,

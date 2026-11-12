@@ -144,7 +144,7 @@ export const DashboardOverviewPage: React.FC = () => {
             // Super Admin can see all bookings
             const { data: allData, error: allErr } = await supabase
               .from('bookings')
-              .select('*, machines(*)')
+              .select('*')
               .order('start_at', { ascending: false });
             if (!allErr && allData) {
               for (const row of allData) fetchedMap.set(row.id, row);
@@ -152,33 +152,33 @@ export const DashboardOverviewPage: React.FC = () => {
           } else {
             // 1. Fetch bookings where user is directly the owner
             if (userId) {
-              const { data: ownerData } = await supabase
+              const { data: ownerData, error: ownerErr } = await supabase
                 .from('bookings')
-                .select('*, machines(*)')
+                .select('*')
                 .eq('owner_id', userId)
                 .order('start_at', { ascending: false });
-              if (ownerData) {
+              if (!ownerErr && ownerData) {
                 for (const row of ownerData) fetchedMap.set(row.id, row);
               }
             }
 
             // 2. Fetch bookings where machine belongs to user's fleet (catches guest/external bookings)
             if (ownerMachineIds.length > 0) {
-              const { data: machineData } = await supabase
+              const { data: machineData, error: mErr } = await supabase
                 .from('bookings')
-                .select('*, machines(*)')
+                .select('*')
                 .in('machine_id', ownerMachineIds)
                 .order('start_at', { ascending: false });
-              if (machineData) {
+              if (!mErr && machineData) {
                 for (const row of machineData) fetchedMap.set(row.id, row);
               }
             }
 
-            // 3. Fallback: query without filter since Supabase RLS restricts to owner's bookings
+            // 3. Fallback: query without filter since Supabase RLS restricts to authorized bookings
             if (fetchedMap.size === 0) {
               const { data: rlsData } = await supabase
                 .from('bookings')
-                .select('*, machines(*)')
+                .select('*')
                 .order('start_at', { ascending: false });
               if (rlsData) {
                 for (const row of rlsData) fetchedMap.set(row.id, row);
@@ -187,21 +187,28 @@ export const DashboardOverviewPage: React.FC = () => {
           }
 
           if (fetchedMap.size > 0) {
-            bList = Array.from(fetchedMap.values()).map((b: any) => ({
-              id: b.id,
-              machine_id: b.machine_id,
-              owner_id: b.owner_id,
-              client_name: b.client_name,
-              client_phone: b.client_phone,
-              start_at: b.start_at || b.start_date,
-              end_at: b.end_at || b.end_date,
-              total_price: Number(b.total_price) || 0,
-              deposit_amount: Number(b.deposit_amount) || 0,
-              status: b.status,
-              with_operator: Boolean(b.with_operator ?? true),
-              created_at: b.created_at,
-              machine: b.machines,
-            }));
+            bList = Array.from(fetchedMap.values()).map((b: any) => {
+              const matchedMachine =
+                realMachines.find((m) => m.id === b.machine_id) ||
+                machineStore.getCachedMachines().find((m) => m.id === b.machine_id) ||
+                b.machines ||
+                b.machine;
+              return {
+                id: b.id,
+                machine_id: b.machine_id,
+                owner_id: b.owner_id,
+                client_name: b.client_name,
+                client_phone: b.client_phone,
+                start_at: b.start_at || b.start_date,
+                end_at: b.end_at || b.end_date,
+                total_price: Number(b.total_price) || 0,
+                deposit_amount: Number(b.deposit_amount) || 0,
+                status: b.status,
+                with_operator: Boolean(b.with_operator ?? true),
+                created_at: b.created_at,
+                machine: matchedMachine,
+              };
+            });
           }
         } catch (e) {
           console.warn('Dashboard bookings load exception:', e);

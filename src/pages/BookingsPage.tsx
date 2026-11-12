@@ -151,58 +151,65 @@ export const BookingsPage: React.FC = () => {
           const fetchedMap = new Map<string, any>();
 
           // 1. Fetch bookings where user is directly the owner
-            if (ownerId) {
-              const { data: ownerData } = await supabase
-                .from('bookings')
-                .select('*, machines(*)')
-                .eq('owner_id', ownerId)
-                .order('start_at', { ascending: false });
-              if (ownerData) {
-                for (const row of ownerData) fetchedMap.set(row.id, row);
-              }
+          if (ownerId) {
+            const { data: ownerData, error: ownerErr } = await supabase
+              .from('bookings')
+              .select('*')
+              .eq('owner_id', ownerId)
+              .order('start_at', { ascending: false });
+            if (!ownerErr && ownerData) {
+              for (const row of ownerData) fetchedMap.set(row.id, row);
             }
+          }
 
-            // 2. Fetch bookings where machine belongs to user's fleet (catches guest/external bookings)
-            if (ownerMachineIds.length > 0) {
-              const { data: machineData } = await supabase
-                .from('bookings')
-                .select('*, machines(*)')
-                .in('machine_id', ownerMachineIds)
-                .order('start_at', { ascending: false });
-              if (machineData) {
-                for (const row of machineData) fetchedMap.set(row.id, row);
-              }
+          // 2. Fetch bookings where machine belongs to user's fleet (catches guest/external bookings)
+          if (ownerMachineIds.length > 0) {
+            const { data: machineData, error: mErr } = await supabase
+              .from('bookings')
+              .select('*')
+              .in('machine_id', ownerMachineIds)
+              .order('start_at', { ascending: false });
+            if (!mErr && machineData) {
+              for (const row of machineData) fetchedMap.set(row.id, row);
             }
+          }
 
-            // 3. Fallback: query without filter since Supabase RLS restricts to owner's bookings
-            if (fetchedMap.size === 0) {
-              const { data: rlsData } = await supabase
-                .from('bookings')
-                .select('*, machines(*)')
-                .order('start_at', { ascending: false });
-              if (rlsData) {
-                for (const row of rlsData) fetchedMap.set(row.id, row);
-              }
+          // 3. Fallback: query without filter since Supabase RLS restricts to authorized bookings
+          if (fetchedMap.size === 0) {
+            const { data: rlsData } = await supabase
+              .from('bookings')
+              .select('*')
+              .order('start_at', { ascending: false });
+            if (rlsData) {
+              for (const row of rlsData) fetchedMap.set(row.id, row);
             }
+          }
 
           if (fetchedMap.size > 0) {
-            bList = Array.from(fetchedMap.values()).map((b: any) => ({
-              id: b.id,
-              machine_id: b.machine_id,
-              owner_id: b.owner_id,
-              client_name: b.client_name,
-              client_phone: b.client_phone,
-              start_at: b.start_at || b.start_date,
-              end_at: b.end_at || b.end_date,
-              total_price: Number(b.total_price) || 0,
-              deposit_amount: Number(b.deposit_amount) || 0,
-              rate_type: b.rate_type || 'daily',
-              status: b.status,
-              notes: b.notes,
-              created_at: b.created_at,
-              machine: b.machines,
-              with_operator: Boolean(b.with_operator),
-            }));
+            bList = Array.from(fetchedMap.values()).map((b: any) => {
+              const matchedMachine =
+                mergedMachines.find((m) => m.id === b.machine_id) ||
+                machineStore.getCachedMachines().find((m) => m.id === b.machine_id) ||
+                b.machines ||
+                b.machine;
+              return {
+                id: b.id,
+                machine_id: b.machine_id,
+                owner_id: b.owner_id,
+                client_name: b.client_name,
+                client_phone: b.client_phone,
+                start_at: b.start_at || b.start_date,
+                end_at: b.end_at || b.end_date,
+                total_price: Number(b.total_price) || 0,
+                deposit_amount: Number(b.deposit_amount) || 0,
+                rate_type: b.rate_type || 'daily',
+                status: b.status,
+                notes: b.notes,
+                created_at: b.created_at,
+                machine: matchedMachine,
+                with_operator: Boolean(b.with_operator),
+              };
+            });
           }
         } catch (e) {
           console.warn('Bookings load exception:', e);

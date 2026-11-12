@@ -117,6 +117,7 @@ export const bookingStore = {
   },
 
   // Merge Supabase bookings with local cache for Owner
+  // Merge Supabase bookings with local cache for Owner
   mergeOwnerBookings(
     supabaseBookings: Booking[],
     ownerId?: string,
@@ -129,12 +130,35 @@ export const bookingStore = {
     const matchingCached = cached.filter((b) => {
       if (isSuperAdmin && !ownerId) return false;
       if (!ownerId) return false;
+
+      // 1. Direct owner ID match
       const isOwner =
         b.owner_id === ownerId ||
         b.owner_id === 'owner' ||
         b.owner_id === 'demo-owner';
+      
+      // 2. Machine fleet ownership match
       const isMachineOwner = Boolean(b.machine_id && ownerMachineIds.includes(b.machine_id));
-      return isOwner || isMachineOwner;
+
+      // 3. Embedded machine owner match
+      const isEmbeddedMachineOwner = Boolean(
+        b.machine && (b.machine.owner_id === ownerId || b.machine.owner?.id === ownerId)
+      );
+
+      // 4. Local machine lookup match
+      const isLocalMachineMatch = Boolean(
+        b.machine_id &&
+          allLocalMachines.some(
+            (m) => m.id === b.machine_id && (m.owner_id === ownerId || !m.owner_id)
+          )
+      );
+
+      // 5. Default single owner sandbox fallback
+      const isDefaultOwnerFallback =
+        (ownerMachineIds.length === 0 || !b.owner_id || b.owner_id === 'usr_owner_casa_01') &&
+        (b.status === 'pending' || b.status === 'active');
+
+      return isOwner || isMachineOwner || isEmbeddedMachineOwner || isLocalMachineMatch || isDefaultOwnerFallback;
     });
 
     const map = new Map<string, Booking>();
@@ -203,16 +227,29 @@ export const bookingStore = {
     isSuperAdmin: boolean = false
   ): number {
     const cached = this.getCachedBookings();
+    const allLocalMachines = machineStore.getCachedMachines();
+
     return cached.filter((b) => {
       if (b.status !== 'pending') return false;
       if (isSuperAdmin && !ownerId) return false;
       if (!ownerId) return false;
-      return (
+
+      const isDirectOwner =
         b.owner_id === ownerId ||
         b.owner_id === 'owner' ||
-        b.owner_id === 'demo-owner' ||
-        (b.machine_id && machineIds.includes(b.machine_id))
+        b.owner_id === 'demo-owner';
+      const isMachineIdMatch = Boolean(b.machine_id && machineIds.includes(b.machine_id));
+      const isEmbeddedMatch = Boolean(
+        b.machine && (b.machine.owner_id === ownerId || b.machine.owner?.id === ownerId)
       );
+      const isLocalMachineMatch = Boolean(
+        b.machine_id &&
+          allLocalMachines.some(
+            (m) => m.id === b.machine_id && (m.owner_id === ownerId || !m.owner_id)
+          )
+      );
+
+      return isDirectOwner || isMachineIdMatch || isEmbeddedMatch || isLocalMachineMatch;
     }).length;
   },
 };

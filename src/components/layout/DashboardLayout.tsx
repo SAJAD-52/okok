@@ -169,45 +169,45 @@ export const DashboardLayout: React.FC = () => {
 
             if (isSuperAdmin) {
               // Super admin sees all pending bookings
-              const { data: allData } = await supabase
+              const { data: allData, error: allErr } = await supabase
                 .from('bookings')
-                .select('*, machines(*)')
+                .select('*')
                 .eq('status', 'pending');
-              if (allData) {
+              if (!allErr && allData) {
                 for (const row of allData) fetchedMap.set(row.id, row);
               }
             } else {
               // 1. Pending bookings where user is directly the booking owner
               if (profile.id) {
-                const { data: ownerData } = await supabase
+                const { data: ownerData, error: ownerErr } = await supabase
                   .from('bookings')
-                  .select('*, machines(*)')
+                  .select('*')
                   .eq('status', 'pending')
                   .eq('owner_id', profile.id);
-                if (ownerData) {
+                if (!ownerErr && ownerData) {
                   for (const row of ownerData) fetchedMap.set(row.id, row);
                 }
               }
 
               // 2. Pending bookings for machines belonging to the owner's fleet
               if (ownerMachineIds.length > 0) {
-                const { data: machineData } = await supabase
+                const { data: machineData, error: mErr } = await supabase
                   .from('bookings')
-                  .select('*, machines(*)')
+                  .select('*')
                   .eq('status', 'pending')
                   .in('machine_id', ownerMachineIds);
-                if (machineData) {
+                if (!mErr && machineData) {
                   for (const row of machineData) fetchedMap.set(row.id, row);
                 }
               }
 
               // 3. Fallback: query without where clause (Supabase RLS secures records to owner)
               if (fetchedMap.size === 0) {
-                const { data: rlsData } = await supabase
+                const { data: rlsData, error: rlsErr } = await supabase
                   .from('bookings')
-                  .select('*, machines(*)')
+                  .select('*')
                   .eq('status', 'pending');
-                if (rlsData) {
+                if (!rlsErr && rlsData) {
                   for (const row of rlsData) fetchedMap.set(row.id, row);
                 }
               }

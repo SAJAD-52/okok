@@ -58,6 +58,25 @@ CREATE TRIGGER trg_sync_message_columns
   BEFORE INSERT OR UPDATE ON public.messages
   FOR EACH ROW EXECUTE FUNCTION public.sync_message_columns();
 
+-- ---------- admin helper (self-contained; does not depend on public.is_admin) ----------
+CREATE OR REPLACE FUNCTION public.chat_is_admin()
+RETURNS boolean LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  BEGIN
+    IF EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role::text = 'admin') THEN
+      RETURN true;
+    END IF;
+  EXCEPTION WHEN OTHERS THEN NULL;
+  END;
+  BEGIN
+    IF EXISTS (SELECT 1 FROM public.profiles WHERE auth_user_id = auth.uid() AND role::text = 'admin') THEN
+      RETURN true;
+    END IF;
+  EXCEPTION WHEN OTHERS THEN NULL;
+  END;
+  RETURN false;
+END; $$;
+
 -- ---------- RLS: replace all existing policies on both tables ----------
 ALTER TABLE public.conversations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
@@ -73,20 +92,20 @@ BEGIN
 END $$;
 
 CREATE POLICY "conv_select" ON public.conversations FOR SELECT
-  USING (auth.uid() IN (participant_a, participant_b, participant_one, participant_two) OR public.is_admin());
+  USING (auth.uid() IN (participant_a, participant_b, participant_one, participant_two) OR public.chat_is_admin());
 CREATE POLICY "conv_insert" ON public.conversations FOR INSERT
   WITH CHECK (auth.uid() IN (participant_a, participant_b, participant_one, participant_two));
 CREATE POLICY "conv_update" ON public.conversations FOR UPDATE
-  USING (auth.uid() IN (participant_a, participant_b, participant_one, participant_two) OR public.is_admin());
+  USING (auth.uid() IN (participant_a, participant_b, participant_one, participant_two) OR public.chat_is_admin());
 CREATE POLICY "conv_delete" ON public.conversations FOR DELETE
-  USING (public.is_admin());
+  USING (public.chat_is_admin());
 
 CREATE POLICY "msg_select" ON public.messages FOR SELECT
   USING (
     EXISTS (SELECT 1 FROM public.conversations c
             WHERE c.id = messages.conversation_id
               AND auth.uid() IN (c.participant_a, c.participant_b, c.participant_one, c.participant_two))
-    OR public.is_admin());
+    OR public.chat_is_admin());
 CREATE POLICY "msg_insert" ON public.messages FOR INSERT
   WITH CHECK (
     sender_id = auth.uid()
@@ -99,7 +118,7 @@ CREATE POLICY "msg_update" ON public.messages FOR UPDATE
             WHERE c.id = messages.conversation_id
               AND auth.uid() IN (c.participant_a, c.participant_b, c.participant_one, c.participant_two)));
 CREATE POLICY "msg_delete" ON public.messages FOR DELETE
-  USING (sender_id = auth.uid() OR public.is_admin());
+  USING (sender_id = auth.uid() OR public.chat_is_admin());
 
 -- ---------- realtime ----------
 DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.messages;

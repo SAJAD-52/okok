@@ -23,13 +23,23 @@ export function useSubscription(): SubscriptionInfo {
   const { profile, user } = useAuth();
   const [now, setNow] = useState<number>(Date.now());
 
-  // Update clock every second for live countdown
+  // Update clock every minute (or on tab focus) to prevent constant re-renders across DashboardLayout
   useEffect(() => {
     const timer = setInterval(() => {
       setNow(Date.now());
-    }, 1000);
+    }, 60000);
 
-    return () => clearInterval(timer);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        setNow(Date.now());
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
 
   return useMemo(() => {

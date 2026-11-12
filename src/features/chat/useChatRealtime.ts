@@ -65,7 +65,15 @@ export function useChatRealtime(activeConversation: ChatConversationItem | null)
               created_at: m.created_at,
             }));
 
-            setMessages(mapped);
+            setMessages((prev) => {
+              if (
+                prev.length === mapped.length &&
+                prev.every((m, i) => m.id === mapped[i]?.id && m.read_at === mapped[i]?.read_at)
+              ) {
+                return prev;
+              }
+              return mapped;
+            });
             chatStore.setMessages(convId, mapped);
             loadedConvIdRef.current = convId;
 

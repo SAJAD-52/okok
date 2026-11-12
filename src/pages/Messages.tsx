@@ -170,15 +170,36 @@ export const Messages: React.FC = () => {
           chatStore.setConversations(resultList);
         }
 
-        setConversations(resultList);
+        setConversations((prev) => {
+          if (
+            prev.length === resultList.length &&
+            prev.every(
+              (c, i) =>
+                c.id === resultList[i]?.id &&
+                c.last_message === resultList[i]?.last_message &&
+                c.unread_count === resultList[i]?.unread_count
+            )
+          ) {
+            return prev;
+          }
+          return resultList;
+        });
 
         // Keep active conversation reference in sync if already selected
         if (activeConvIdRef.current) {
           const updatedActive = resultList.find((c) => c.id === activeConvIdRef.current);
           if (updatedActive) {
-            setActiveConversation((prev) =>
-              prev ? { ...prev, ...updatedActive, unread_count: 0 } : updatedActive
-            );
+            setActiveConversation((prev) => {
+              if (
+                prev &&
+                prev.id === updatedActive.id &&
+                prev.last_message === updatedActive.last_message &&
+                prev.unread_count === 0
+              ) {
+                return prev;
+              }
+              return prev ? { ...prev, ...updatedActive, unread_count: 0 } : updatedActive;
+            });
           }
         }
 

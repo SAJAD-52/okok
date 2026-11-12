@@ -4,7 +4,7 @@
 // New Leads, First-Run Activation Checklist, and PWA Install Prompt
 // ============================================================================
 
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
   Truck,
@@ -91,10 +91,16 @@ export const DashboardOverviewPage: React.FC = () => {
   }, [profile, navigate]);
 
   // Load live data
-  const loadDashboardData = useCallback(async () => {
+  const initialLoadedRef = useRef(false);
+
+  const loadDashboardData = useCallback(async (silent: boolean = false) => {
     if (!userId) {
       setIsLoading(false);
       return;
+    }
+
+    if (!silent && !initialLoadedRef.current) {
+      setIsLoading(true);
     }
 
     try {
@@ -119,29 +125,18 @@ export const DashboardOverviewPage: React.FC = () => {
           } as Machine));
         }
       }
-      const realMachines = machineStore.mergeMachines(mList, userId);
+      const realMachines = mList.length > 0 ? mList : machineStore.mergeMachines([], userId);
       setMachines(realMachines);
 
-      // 2. Bookings (Matches owner_id OR machine ownership)
+      // 2. Bookings (Matches owner_id OR machine ownership directly from Supabase)
       let bList: Booking[] = [];
       const ownerMachineIds = realMachines.map((m) => m.id).filter(Boolean);
-
-      // Load from Server SQLite Database (shared across all devices & users)
-      try {
-        const serverBookings = await serverApi.getBookings({ owner_id: userId });
-        if (serverBookings && serverBookings.length > 0) {
-          bList = serverBookings;
-        }
-      } catch (serverErr) {
-        console.warn('Server SQLite bookings load notice:', serverErr);
-      }
 
       if (isSupabaseConfigured) {
         try {
           const fetchedMap = new Map<string, any>();
 
           if (isSuperAdmin) {
-            // Super Admin can see all bookings
             const { data: allData, error: allErr } = await supabase
               .from('bookings')
               .select('*')
@@ -162,7 +157,7 @@ export const DashboardOverviewPage: React.FC = () => {
               }
             }
 
-            // 2. Fetch bookings where machine belongs to user's fleet (catches guest/external bookings)
+            // 2. Fetch bookings where machine belongs to user's fleet
             if (ownerMachineIds.length > 0) {
               const { data: machineData, error: mErr } = await supabase
                 .from('bookings')
@@ -171,17 +166,6 @@ export const DashboardOverviewPage: React.FC = () => {
                 .order('start_at', { ascending: false });
               if (!mErr && machineData) {
                 for (const row of machineData) fetchedMap.set(row.id, row);
-              }
-            }
-
-            // 3. Fallback: query without filter since Supabase RLS restricts to authorized bookings
-            if (fetchedMap.size === 0) {
-              const { data: rlsData } = await supabase
-                .from('bookings')
-                .select('*')
-                .order('start_at', { ascending: false });
-              if (rlsData) {
-                for (const row of rlsData) fetchedMap.set(row.id, row);
               }
             }
           }
@@ -215,13 +199,16 @@ export const DashboardOverviewPage: React.FC = () => {
         }
       }
 
-      const mergedBookings = bookingStore.mergeOwnerBookings(
-        bList,
-        userId,
-        ownerMachineIds,
-        isSuperAdmin
-      );
-      setBookings(mergedBookings);
+      setBookings((prev) => {
+        if (
+          prev.length === bList.length &&
+          prev.every((b, i) => b.id === bList[i]?.id && b.status === bList[i]?.status)
+        ) {
+          return prev;
+        }
+        return bList;
+      });
+      initialLoadedRef.current = true;
 
       // 3. Leads
       const loadedLeads = await leadService.getLeadsForOwner(userId);
@@ -242,9 +229,9 @@ export const DashboardOverviewPage: React.FC = () => {
   }, [userId, isSuperAdmin]);
 
   useEffect(() => {
-    loadDashboardData();
+    loadDashboardData(false);
 
-    const handleUpdate = () => loadDashboardData();
+    const handleUpdate = () => loadDashboardData(true);
     window.addEventListener('jadijcb_machines_updated', handleUpdate);
     window.addEventListener('jadijcb_booking_event', handleUpdate);
     window.addEventListener('jadijcb_leads_updated', handleUpdate);
@@ -258,15 +245,20 @@ export const DashboardOverviewPage: React.FC = () => {
         e.key === 'jadijcb_last_booking_event' ||
         e.key === 'jadijcb_user_machines'
       ) {
-        loadDashboardData();
+        loadDashboardData(true);
       }
     };
     window.addEventListener('storage', handleStorage);
 
-    // Periodic polling every 4 seconds to catch new bookings from other browsers
+    // Silent background auto-refresh (30s)
     const pollInterval = setInterval(() => {
-      loadDashboardData();
-    }, 4000);
+      loadDashboardData(true);
+    }, 30000);
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') loadDashboardData(true);
+    };
+    document.addEventListener('visibilitychange', onVisible);
 
     return () => {
       window.removeEventListener('jadijcb_machines_updated', handleUpdate);
@@ -276,6 +268,7 @@ export const DashboardOverviewPage: React.FC = () => {
       window.removeEventListener('jadijcb_business_profile_updated', handleUpdate);
       window.removeEventListener('storage', handleStorage);
       clearInterval(pollInterval);
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, [loadDashboardData]);
 

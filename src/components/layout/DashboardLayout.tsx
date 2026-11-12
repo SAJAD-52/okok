@@ -107,11 +107,16 @@ export const DashboardLayout: React.FC = () => {
     };
 
     updateUnread();
-    const interval = setInterval(updateUnread, 15000);
+    const interval = setInterval(updateUnread, 30000);
+    const onVisibleUnread = () => {
+      if (document.visibilityState === 'visible') updateUnread();
+    };
+    document.addEventListener('visibilitychange', onVisibleUnread);
     window.addEventListener('storage', updateUnread);
 
     return () => {
       clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibleUnread);
       window.removeEventListener('storage', updateUnread);
     };
   }, [profile?.id, isSuperAdmin, isImpersonating]);
@@ -123,6 +128,9 @@ export const DashboardLayout: React.FC = () => {
     let previousCount = -1;
 
     const checkPending = async () => {
+      // Avoid interrupting the active chat experience with background booking polling
+      if (location.pathname.includes('/messages')) return;
+
       try {
         let ownerMachineIds = machineStore
           .getCachedMachines()
@@ -159,8 +167,17 @@ export const DashboardLayout: React.FC = () => {
           }
 
           const notifRes = await serverApi.getNotifications({ user_id: profile.id });
-          if (notifRes.notifications) {
-            setSystemNotifications(notifRes.notifications);
+          if (notifRes.notifications && Array.isArray(notifRes.notifications)) {
+            const incoming = notifRes.notifications;
+            setSystemNotifications((prev) => {
+              if (
+                prev.length === incoming.length &&
+                prev.every((n, i) => n.id === incoming[i]?.id && n.read === incoming[i]?.read)
+              ) {
+                return prev;
+              }
+              return incoming;
+            });
           }
         } catch (serverErr) {
           console.warn('Server SQLite pending load notice:', serverErr);
@@ -241,13 +258,19 @@ export const DashboardLayout: React.FC = () => {
           }
         }
 
-        const merged = bookingStore
-          .mergeOwnerBookings(dbBookings, profile.id, ownerMachineIds, isSuperAdmin)
-          .filter((b) => b.status === 'pending');
+        const pendingList = dbBookings.filter((b) => b.status === 'pending');
+        const count = pendingList.length;
 
-        setPendingBookingsList(merged);
-        const count = merged.length;
-        setPendingBookingsCount(count);
+        setPendingBookingsCount((prev) => (prev === count ? prev : count));
+        setPendingBookingsList((prev) => {
+          if (
+            prev.length === count &&
+            prev.every((b, i) => b.id === pendingList[i]?.id)
+          ) {
+            return prev;
+          }
+          return pendingList;
+        });
 
         // Notify user if a new booking just arrived
         if (previousCount >= 0 && count > previousCount) {
@@ -259,8 +282,7 @@ export const DashboardLayout: React.FC = () => {
         }
         previousCount = count;
       } catch {
-        const c = bookingStore.getPendingCountForOwner(profile.id, [], isSuperAdmin);
-        setPendingBookingsCount(c);
+        // Ignore background pending check errors
       }
     };
 
@@ -279,14 +301,19 @@ export const DashboardLayout: React.FC = () => {
     };
     window.addEventListener('storage', handleStorage);
 
-    // 3. Periodic polling every 4s to catch cross-browser bookings in real-time
-    const timer = setInterval(checkPending, 4000);
+    // 3. Relaxed silent refresh (30s) with tab visibility listener
+    const timer = setInterval(checkPending, 30000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') checkPending();
+    };
+    document.addEventListener('visibilitychange', onVisible);
 
     return () => {
       window.removeEventListener('jadijcb_booking_event', handleEvent);
       window.removeEventListener('jadijcb_bookings_updated', handleEvent);
       window.removeEventListener('storage', handleStorage);
       clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, [profile?.id, isContractor, lang]);
 

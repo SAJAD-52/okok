@@ -153,12 +153,7 @@ export const bookingStore = {
           )
       );
 
-      // 5. Default single owner sandbox fallback
-      const isDefaultOwnerFallback =
-        (ownerMachineIds.length === 0 || !b.owner_id || b.owner_id === 'usr_owner_casa_01') &&
-        (b.status === 'pending' || b.status === 'active');
-
-      return isOwner || isMachineOwner || isEmbeddedMachineOwner || isLocalMachineMatch || isDefaultOwnerFallback;
+      return isOwner || isMachineOwner || isEmbeddedMachineOwner || isLocalMachineMatch;
     });
 
     const map = new Map<string, Booking>();
@@ -248,10 +243,7 @@ export const bookingStore = {
             (m) => m.id === b.machine_id && (m.owner_id === ownerId || !m.owner_id)
           )
       );
-      const isDefaultOwnerFallback =
-        (machineIds.length === 0 || !b.owner_id || b.owner_id === 'usr_owner_casa_01');
-
-      return isDirectOwner || isMachineIdMatch || isEmbeddedMatch || isLocalMachineMatch || isDefaultOwnerFallback;
+      return isDirectOwner || isMachineIdMatch || isEmbeddedMatch || isLocalMachineMatch;
     }).length;
   },
 };

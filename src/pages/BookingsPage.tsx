@@ -4,8 +4,8 @@
 // Partial Payments & Dues Tracker with WhatsApp Reminders, and Document Generators
 // ============================================================================
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   CalendarCheck,
   Plus,
@@ -60,6 +60,7 @@ export const BookingsPage: React.FC = () => {
   const { t, lang, isRTL } = useLanguage();
   const { user, profile, isSuperAdmin, isImpersonating } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [machines, setMachines] = useState<Machine[]>([]);
@@ -77,11 +78,11 @@ export const BookingsPage: React.FC = () => {
 
   // Sync tab if URL search changes
   useEffect(() => {
-    const p = new URLSearchParams(window.location.search).get('tab') as TabFilter | null;
+    const p = new URLSearchParams(location.search).get('tab') as TabFilter | null;
     if (p && ['all', 'pending', 'active', 'completed', 'cancelled', 'dues'].includes(p)) {
       setActiveTab(p);
     }
-  }, [window.location.search]);
+  }, [location.search]);
 
   // Selected Booking for Payment Recording
   const [paymentTargetBooking, setPaymentTargetBooking] = useState<{
@@ -94,7 +95,9 @@ export const BookingsPage: React.FC = () => {
 
   const ownerId = isImpersonating ? profile?.id : isSuperAdmin ? null : (user?.id || profile?.id);
 
-  const loadData = useCallback(async () => {
+  const isInitialLoadDoneRef = useRef(false);
+
+  const loadData = useCallback(async (silent: boolean = false) => {
     if (!ownerId) {
       setBookings([]);
       setMachines([]);
@@ -102,7 +105,9 @@ export const BookingsPage: React.FC = () => {
       return;
     }
 
-    setIsLoading(true);
+    if (!silent && !isInitialLoadDoneRef.current) {
+      setIsLoading(true);
+    }
 
     try {
       // 1. Load machines
@@ -129,22 +134,12 @@ export const BookingsPage: React.FC = () => {
           } as Machine));
         }
       }
-      const mergedMachines = machineStore.mergeMachines(mList, ownerId);
-      setMachines(mergedMachines);
-      const ownerMachineIds = mergedMachines.map((m) => m.id).filter(Boolean);
+      const realMachines = mList.length > 0 ? mList : machineStore.mergeMachines([], ownerId);
+      setMachines(realMachines);
+      const ownerMachineIds = realMachines.map((m) => m.id).filter(Boolean);
 
-      // 2. Load bookings (matches owner_id OR machine ownership)
+      // 2. Load bookings directly from Supabase (single source of truth)
       let bList: Booking[] = [];
-
-      // Query Server SQLite Database first
-      try {
-        const serverBookings = await serverApi.getBookings({ owner_id: ownerId });
-        if (serverBookings && serverBookings.length > 0) {
-          bList = serverBookings;
-        }
-      } catch (err) {
-        console.warn('Server SQLite bookings load notice:', err);
-      }
 
       if (isSupabaseConfigured) {
         try {
@@ -174,21 +169,10 @@ export const BookingsPage: React.FC = () => {
             }
           }
 
-          // 3. Fallback: query without filter since Supabase RLS restricts to authorized bookings
-          if (fetchedMap.size === 0) {
-            const { data: rlsData } = await supabase
-              .from('bookings')
-              .select('*')
-              .order('start_at', { ascending: false });
-            if (rlsData) {
-              for (const row of rlsData) fetchedMap.set(row.id, row);
-            }
-          }
-
           if (fetchedMap.size > 0) {
             bList = Array.from(fetchedMap.values()).map((b: any) => {
               const matchedMachine =
-                mergedMachines.find((m) => m.id === b.machine_id) ||
+                realMachines.find((m) => m.id === b.machine_id) ||
                 machineStore.getCachedMachines().find((m) => m.id === b.machine_id) ||
                 b.machines ||
                 b.machine;
@@ -216,14 +200,22 @@ export const BookingsPage: React.FC = () => {
         }
       }
 
-      // Merge with local booking store (including machines match and super admin)
-      const mergedBookings = bookingStore.mergeOwnerBookings(
-        bList,
-        ownerId,
-        ownerMachineIds,
-        isSuperAdmin
-      );
-      setBookings(mergedBookings);
+      // Supabase is single source of truth (no stale local cache)
+      setBookings((prev) => {
+        if (
+          prev.length === bList.length &&
+          prev.every(
+            (b, i) =>
+              b.id === bList[i]?.id &&
+              b.status === bList[i]?.status &&
+              b.total_price === bList[i]?.total_price
+          )
+        ) {
+          return prev;
+        }
+        return bList;
+      });
+      isInitialLoadDoneRef.current = true;
 
       // 3. Load payments
       if (ownerId) {
@@ -238,9 +230,9 @@ export const BookingsPage: React.FC = () => {
   }, [ownerId, isSuperAdmin]);
 
   useEffect(() => {
-    loadData();
+    loadData(false);
 
-    const handleUpdate = () => loadData();
+    const handleUpdate = () => loadData(true);
     window.addEventListener('jadijcb_booking_event', handleUpdate);
     window.addEventListener('jadijcb_payments_updated', handleUpdate);
     window.addEventListener('jadijcb_machines_updated', handleUpdate);
@@ -252,7 +244,7 @@ export const BookingsPage: React.FC = () => {
         e.key === 'jadijcb_last_booking_event' ||
         e.key === 'jadijcb_payments'
       ) {
-        loadData();
+        loadData(true);
       }
     };
     window.addEventListener('storage', handleStorage);
@@ -266,7 +258,7 @@ export const BookingsPage: React.FC = () => {
           .on(
             'postgres_changes',
             { event: '*', schema: 'public', table: 'bookings', filter: `owner_id=eq.${ownerId}` },
-            () => loadData()
+            () => loadData(true)
           )
           .subscribe();
       } catch {
@@ -274,10 +266,15 @@ export const BookingsPage: React.FC = () => {
       }
     }
 
-    // Periodic polling every 4 seconds to catch new bookings from other browsers
+    // Auto-refresh silently (30s) so approval shows up without reloading
     const pollInterval = setInterval(() => {
-      loadData();
-    }, 4000);
+      loadData(true);
+    }, 30000);
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') loadData(true);
+    };
+    document.addEventListener('visibilitychange', onVisible);
 
     return () => {
       window.removeEventListener('jadijcb_booking_event', handleUpdate);
@@ -285,6 +282,7 @@ export const BookingsPage: React.FC = () => {
       window.removeEventListener('jadijcb_machines_updated', handleUpdate);
       window.removeEventListener('storage', handleStorage);
       clearInterval(pollInterval);
+      document.removeEventListener('visibilitychange', onVisible);
       if (channel) {
         supabase.removeChannel(channel);
       }

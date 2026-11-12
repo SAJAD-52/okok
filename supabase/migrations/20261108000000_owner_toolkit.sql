@@ -99,13 +99,20 @@ AS $$
 DECLARE
   conflict_record RECORD;
 BEGIN
-  -- Only block conflicts for active and pending bookings
-  IF NEW.status IN ('pending', 'active', 'confirmed') THEN
+    IF TG_OP = 'UPDATE'
+     AND NEW.machine_id IS NOT DISTINCT FROM OLD.machine_id
+     AND NEW.start_at IS NOT DISTINCT FROM OLD.start_at
+     AND NEW.end_at IS NOT DISTINCT FROM OLD.end_at
+     AND NEW.status IS NOT DISTINCT FROM OLD.status THEN
+    RETURN NEW;
+  END IF;
+
+  IF NEW.status::text IN ('pending', 'active', 'confirmed') THEN
     SELECT id, start_at, end_at, status INTO conflict_record
     FROM public.bookings
     WHERE machine_id = NEW.machine_id
       AND id <> COALESCE(NEW.id, '00000000-0000-0000-0000-000000000000'::uuid)
-      AND status IN ('pending', 'active', 'confirmed')
+      AND status::text IN ('pending', 'active', 'confirmed')
       AND tstzrange(start_at, end_at, '[)') && tstzrange(NEW.start_at, NEW.end_at, '[)')
     LIMIT 1;
 
@@ -114,7 +121,6 @@ BEGIN
         conflict_record.start_at, conflict_record.end_at, conflict_record.status;
     END IF;
   END IF;
-
   RETURN NEW;
 END;
 $$;

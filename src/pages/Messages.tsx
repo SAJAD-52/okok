@@ -250,14 +250,21 @@ export const Messages: React.FC = () => {
 
       // 2. Target user or machine context navigation
       if (targetUserId || urlMachineId) {
-        const matching = loaded.find(
-          (c) =>
-            (targetUserId &&
+        // One conversation per (machine + owner): when a machine is given, match ONLY
+        // a conversation about that same machine, never another machine of the same owner.
+        const matching = loaded.find((c) => {
+          const isSameMachine = Boolean(
+            urlMachineId && (c.machine_id === urlMachineId || c.machine?.id === urlMachineId)
+          );
+          const isSameUser = Boolean(
+            targetUserId &&
               (c.other_participant.id === targetUserId ||
                 c.participant_a === targetUserId ||
-                c.participant_b === targetUserId)) ||
-            (urlMachineId && (c.machine_id === urlMachineId || c.machine?.id === urlMachineId))
-        );
+                c.participant_b === targetUserId)
+          );
+          if (urlMachineId) return isSameMachine && (!targetUserId || isSameUser);
+          return isSameUser;
+        });
 
         if (matching) {
           setActiveConversation(matching);

@@ -216,9 +216,11 @@ class ChatStore {
     }
 
     // 1. Check in-memory list
+    const wantedMachineId = machine?.id || null;
     const existing = this.conversations.find(
       (c) =>
         !c.id.includes('seed') &&
+        (c.machine_id || null) === wantedMachineId &&
         ((c.participant_a === userAId && c.participant_b === userBId) ||
           (c.participant_a === userBId && c.participant_b === userAId))
     );
@@ -234,13 +236,20 @@ class ChatStore {
     // 2. Query Supabase (supports participant_a/b AND participant_one/two)
     if (isSupabaseConfigured) {
       try {
-        const { data: dbConv } = await supabase
+        // One conversation per machine: filter on machine_id too
+        let convQuery = supabase
           .from('conversations')
           .select('id, machine_id, participant_a, participant_b, participant_one, participant_two, last_message_at')
           .or(
             `and(participant_a.eq.${userAId},participant_b.eq.${userBId}),and(participant_a.eq.${userBId},participant_b.eq.${userAId}),and(participant_one.eq.${userAId},participant_two.eq.${userBId}),and(participant_one.eq.${userBId},participant_two.eq.${userAId})`
-          )
-          .maybeSingle();
+          );
+        convQuery = wantedMachineId
+          ? convQuery.eq('machine_id', wantedMachineId)
+          : convQuery.is('machine_id', null);
+        const { data: dbConvRows } = await convQuery
+          .order('last_message_at', { ascending: false })
+          .limit(1);
+        const dbConv = dbConvRows && dbConvRows.length > 0 ? dbConvRows[0] : null;
 
         if (dbConv) {
           const item: ChatConversationItem = {

@@ -10,6 +10,7 @@ import path from 'path';
 import fs from 'fs';
 import { DatabaseSync } from 'node:sqlite';
 import { createServer as createViteServer } from 'vite';
+import webpush from 'web-push';
 
 const app = express();
 const PRIMARY_PORT = 3000;
@@ -119,6 +120,16 @@ function createTables(database: DatabaseSync) {
       read_at TEXT,
       created_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      endpoint TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      subscription_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
 }
 
@@ -166,6 +177,44 @@ try {
 }
 
 console.log('✅ SQLite Database initialized at:', DB_PATH);
+
+// Initialize Web Push VAPID keys (from env or persisted in data/vapid.json)
+const VAPID_PATH = path.join(DATA_DIR, 'vapid.json');
+function loadOrCreateVapidKeys(): { publicKey: string; privateKey: string } {
+  const envPub = (process.env.VAPID_PUBLIC_KEY || process.env.VITE_VAPID_PUBLIC_KEY || '').trim();
+  const envPriv = (process.env.VAPID_PRIVATE_KEY || '').trim();
+  if (envPub && envPriv) {
+    return { publicKey: envPub, privateKey: envPriv };
+  }
+  try {
+    if (fs.existsSync(VAPID_PATH)) {
+      const parsed = JSON.parse(fs.readFileSync(VAPID_PATH, 'utf-8'));
+      if (parsed?.publicKey && parsed?.privateKey) {
+        return { publicKey: parsed.publicKey, privateKey: parsed.privateKey };
+      }
+    }
+  } catch {
+    // Regenerate below
+  }
+  const generated = webpush.generateVAPIDKeys();
+  try {
+    fs.writeFileSync(VAPID_PATH, JSON.stringify(generated, null, 2));
+  } catch {
+    // ignore write errors
+  }
+  return generated;
+}
+
+const vapidKeys = loadOrCreateVapidKeys();
+try {
+  webpush.setVapidDetails(
+    process.env.VAPID_SUBJECT || 'mailto:contact@jadijcb.ma',
+    vapidKeys.publicKey,
+    vapidKeys.privateKey
+  );
+} catch (err) {
+  console.warn('Web Push VAPID configuration notice:', err);
+}
 
 // Middlewares
 app.use(cors());
@@ -979,6 +1028,130 @@ app.post('/api/messages', (req, res) => {
         created_at: now,
       },
     });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 16. Web Push - Get VAPID Public Key
+app.get('/api/push/vapid-public-key', (_req, res) => {
+  res.json({ success: true, publicKey: vapidKeys.publicKey });
+});
+
+// 17. Web Push - Save User Subscription
+app.post('/api/push/subscribe', (req, res) => {
+  try {
+    const { user_id, subscription } = req.body || {};
+    if (!user_id || !subscription?.endpoint || !subscription?.keys?.p256dh || !subscription?.keys?.auth) {
+      return res.status(400).json({ success: false, error: 'Valid user_id and push subscription required' });
+    }
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO push_subscriptions (endpoint, user_id, p256dh, auth, subscription_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(endpoint) DO UPDATE SET
+        user_id = excluded.user_id,
+        p256dh = excluded.p256dh,
+        auth = excluded.auth,
+        subscription_json = excluded.subscription_json,
+        updated_at = excluded.updated_at
+    `).run(
+      String(subscription.endpoint),
+      String(user_id),
+      String(subscription.keys.p256dh),
+      String(subscription.keys.auth),
+      JSON.stringify(subscription),
+      now,
+      now
+    );
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 18. Web Push - Send Background Notification to Target Owner IDs
+app.post('/api/push/dispatch', async (req, res) => {
+  try {
+    const { owner_ids, subscriptions: externalSubs, payload } = req.body || {};
+    const targetIds: string[] = Array.isArray(owner_ids) ? owner_ids.map(String) : [];
+
+    const subsMap = new Map<string, any>();
+    if (targetIds.length > 0) {
+      const placeholders = targetIds.map(() => '?').join(',');
+      const rows = db.prepare(`SELECT * FROM push_subscriptions WHERE user_id IN (${placeholders})`).all(...targetIds);
+      for (const r of rows as any[]) {
+        try {
+          subsMap.set(r.endpoint, JSON.parse(r.subscription_json));
+        } catch {
+          subsMap.set(r.endpoint, {
+            endpoint: r.endpoint,
+            keys: { p256dh: r.p256dh, auth: r.auth },
+          });
+        }
+      }
+    }
+
+    if (Array.isArray(externalSubs)) {
+      for (const s of externalSubs) {
+        if (s?.endpoint && s?.p256dh && s?.auth) {
+          subsMap.set(s.endpoint, {
+            endpoint: s.endpoint,
+            keys: { p256dh: s.p256dh, auth: s.auth },
+          });
+        }
+      }
+    }
+
+    const bodyStr = JSON.stringify(payload || {});
+    let sent = 0;
+
+    await Promise.all(
+      Array.from(subsMap.entries()).map(async ([endpoint, sub]) => {
+        try {
+          await webpush.sendNotification(sub, bodyStr);
+          sent += 1;
+        } catch (pushErr: any) {
+          if (pushErr?.statusCode === 404 || pushErr?.statusCode === 410) {
+            try {
+              db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(endpoint);
+            } catch {}
+          }
+        }
+      })
+    );
+
+    res.json({ success: true, sent, total: subsMap.size });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 19. Machine Location Relocation (when dispatch deal accepted)
+app.patch('/api/machines/:id/location', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { lat, lng, city } = req.body || {};
+    const row: any = db.prepare('SELECT * FROM machines WHERE id = ?').get(id);
+    if (!row) {
+      return res.json({ success: true, updated: false });
+    }
+    let data: any = {};
+    try {
+      data = JSON.parse(row.data_json || '{}');
+    } catch {}
+    data.lat = Number(lat);
+    data.lng = Number(lng);
+    data.location_lat = Number(lat);
+    data.location_lng = Number(lng);
+    if (city) data.city = city;
+
+    db.prepare('UPDATE machines SET city = COALESCE(?, city), data_json = ? WHERE id = ?').run(
+      city || null,
+      JSON.stringify(data),
+      id
+    );
+    res.json({ success: true, updated: true });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }

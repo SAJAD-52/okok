@@ -45,8 +45,12 @@ import { chatStore } from '../../lib/chatStore';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { toast } from '../ui/Toast';
 import { serverApi, ServerNotification } from '../../lib/serverApi';
-import { updateDispatchNotificationStatus } from '../../lib/dispatchService';
-import { playOpportunitySound, requestNotificationPermission } from '../../lib/opportunityAudio';
+import {
+  ensureDispatchConversationLinked,
+  updateDispatchNotificationStatus,
+} from '../../lib/dispatchService';
+import { playOpportunitySound } from '../../lib/opportunityAudio';
+import { registerOwnerPushNotifications } from '../../lib/pushService';
 import { formatDistanceKm } from '../../lib/geoUtils';
 
 export const DashboardLayout: React.FC = () => {
@@ -66,6 +70,7 @@ export const DashboardLayout: React.FC = () => {
   const [notifPermission, setNotifPermission] = useState<NotificationPermission>(
     typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'denied'
   );
+  const [isPushPromptDismissed, setIsPushPromptDismissed] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
 
   const isContractor = profile?.role === 'client' || profile?.role === 'contractor';
@@ -728,16 +733,24 @@ export const DashboardLayout: React.FC = () => {
                                 <Volume2 className="w-4 h-4 text-primary-dark shrink-0" />
                                 <span className="text-[11px] font-bold text-ink truncate">
                                   {lang === 'fr'
-                                    ? 'Activer les alertes sonores mobile'
-                                    : 'فعّل إشعارات الفرص الصوتية للهاتف'}
+                                    ? 'Activer les notifications hors application'
+                                    : 'فعّل إشعارات الهاتف حتى خارج التطبيق'}
                                 </span>
                               </div>
                               <button
                                 type="button"
                                 onClick={async () => {
-                                  const perm = await requestNotificationPermission();
+                                  const ownerTargetId = profile?.id || user?.id || '';
+                                  const perm = await registerOwnerPushNotifications(ownerTargetId);
                                   setNotifPermission(perm);
-                                  playOpportunitySound();
+                                  if (perm === 'granted') {
+                                    playOpportunitySound();
+                                    toast.success(
+                                      lang === 'fr'
+                                        ? 'Notifications activées sur votre téléphone !'
+                                        : 'تم تفعيل إشعارات الهاتف بنجاح! ستصلك الفرص في شريط الإشعارات حتى خارج التطبيق.'
+                                    );
+                                  }
                                 }}
                                 className="px-2.5 py-1 rounded-lg bg-primary text-ink text-[10px] font-black shrink-0 cursor-pointer"
                               >
@@ -813,14 +826,22 @@ export const DashboardLayout: React.FC = () => {
                                     <button
                                       type="button"
                                       onClick={async () => {
-                                        await updateDispatchNotificationStatus(
-                                          opp.id,
-                                          {
-                                            is_read: true,
-                                            status: 'accepted',
-                                          },
-                                          opp.campaign_id
-                                        );
+                                        const ownerTargetId = profile?.id || user?.id || '';
+                                        await Promise.allSettled([
+                                          updateDispatchNotificationStatus(
+                                            opp.id,
+                                            {
+                                              is_read: true,
+                                              status: 'accepted',
+                                            },
+                                            opp.campaign_id
+                                          ),
+                                          ensureDispatchConversationLinked({
+                                            contractorId: opp.contractor_id,
+                                            ownerId: ownerTargetId,
+                                            notification: opp,
+                                          }),
+                                        ]);
                                         setOpportunityNotifications((prev) =>
                                           prev.map((item) =>
                                             item.id === opp.id
@@ -830,7 +851,7 @@ export const DashboardLayout: React.FC = () => {
                                         );
                                         setIsNotificationsOpen(false);
                                         navigate(
-                                          `/owner/messages?target=${opp.contractor_id}&machine=${opp.machine_id || ''}`
+                                          `/owner/messages?target=${opp.contractor_id}&machine=${opp.machine_id || ''}&campaign=${opp.campaign_id}`
                                         );
                                       }}
                                       className="px-2.5 py-1.5 rounded-lg bg-primary text-ink font-black text-[11px] hover:bg-primary-hover transition-colors cursor-pointer"
@@ -957,6 +978,55 @@ export const DashboardLayout: React.FC = () => {
               })()}
           </div>
         </header>
+
+        {/* Prominent Top Bar to Enable Background Mobile Push Notifications for Owners */}
+        {!isContractor &&
+          typeof window !== 'undefined' &&
+          'Notification' in window &&
+          notifPermission === 'default' &&
+          !isPushPromptDismissed && (
+            <div className="bg-amber-50 border-b border-amber-300 px-3 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs z-20">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="w-7 h-7 rounded-xl bg-primary text-ink flex items-center justify-center shrink-0">
+                  <Volume2 className="w-4 h-4" />
+                </span>
+                <p className="font-bold text-ink leading-snug">
+                  {lang === 'fr'
+                    ? 'Activez les notifications push pour recevoir les alertes de chantiers même quand l’application est fermée.'
+                    : 'فعّل إشعارات الهاتف لتصلك طلبات الأوراش الجديدة في شريط الإشعارات حتى عندما يكون التطبيق مغلقاً.'}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const ownerTargetId = profile?.id || user?.id || '';
+                    const perm = await registerOwnerPushNotifications(ownerTargetId);
+                    setNotifPermission(perm);
+                    if (perm === 'granted') {
+                      playOpportunitySound();
+                      toast.success(
+                        lang === 'fr'
+                          ? 'Notifications activées sur votre téléphone !'
+                          : 'تم تفعيل إشعارات الهاتف بنجاح! ستصلك التنبيهات في القائمة المنسدلة حتى خارج التطبيق.'
+                      );
+                    }
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-ink text-primary font-black text-xs hover:bg-steel-900 transition-colors cursor-pointer min-h-[38px]"
+                >
+                  {lang === 'fr' ? 'Activer les alertes 🔔' : 'تفعيل إشعارات الهاتف الآن 🔔'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsPushPromptDismissed(true)}
+                  className="p-1.5 rounded-lg text-steel-500 hover:text-ink hover:bg-amber-100 cursor-pointer"
+                  aria-label={t('common.close')}
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
 
         {/* Page Inner Content (Blurred if shouldShowLock) */}
         <main

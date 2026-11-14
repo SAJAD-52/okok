@@ -22,6 +22,8 @@ import {
   MessageSquare,
   CheckCircle2,
   XCircle,
+  Handshake,
+  CalendarCheck,
 } from 'lucide-react';
 import { ContractorSite, DispatchCampaign, MoroccanCity } from '../types/database';
 import { MOROCCAN_CITIES } from '../data/cities';
@@ -83,6 +85,18 @@ export const ContractorProjectsPage: React.FC = () => {
             event: '*',
             schema: 'public',
             table: 'dispatch_notifications',
+            filter: `contractor_id=eq.${user.id}`,
+          },
+          () => {
+            loadCampaigns();
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'dispatch_campaigns',
             filter: `contractor_id=eq.${user.id}`,
           },
           () => {
@@ -397,13 +411,16 @@ export const ContractorProjectsPage: React.FC = () => {
             {campaigns.map((camp) => {
               const acceptedNotifs = (camp.notifications || []).filter((n) => n.status === 'accepted');
               const isClosed = camp.status === 'closed';
+              const hasDealWon = Boolean(camp.won_owner_id);
 
               return (
                 <Card
                   key={camp.id}
                   className={`p-4 rounded-2xl border space-y-3 ${
-                    isClosed
-                      ? 'bg-steel-50/70 border-steel-200 opacity-85'
+                    hasDealWon
+                      ? 'bg-emerald-50/40 border-emerald-300 shadow-soft'
+                      : isClosed
+                      ? 'bg-steel-50/70 border-steel-200 opacity-90'
                       : 'bg-white border-amber-300 shadow-soft'
                   }`}
                 >
@@ -411,19 +428,30 @@ export const ContractorProjectsPage: React.FC = () => {
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span
-                          className={`px-2 py-0.5 rounded-lg text-[10px] font-black ${
-                            isClosed
+                          className={`px-2 py-0.5 rounded-lg text-[10px] font-black inline-flex items-center gap-1 ${
+                            hasDealWon
+                              ? 'bg-emerald-600 text-white'
+                              : isClosed
                               ? 'bg-steel-200 text-steel-700'
                               : 'bg-emerald-100 text-emerald-800'
                           }`}
                         >
-                          {isClosed
-                            ? lang === 'fr'
-                              ? 'Clôturée'
-                              : 'مغلقة'
-                            : lang === 'fr'
-                            ? 'En diffusion live'
-                            : 'نشطة الآن'}
+                          {hasDealWon ? (
+                            <>
+                              <Handshake className="w-3 h-3" />
+                              <span>{lang === 'fr' ? 'Accord conclu' : 'تمت الصفقة'}</span>
+                            </>
+                          ) : isClosed ? (
+                            lang === 'fr' ? (
+                              'Clôturée'
+                            ) : (
+                              'مغلقة'
+                            )
+                          ) : lang === 'fr' ? (
+                            'En diffusion live'
+                          ) : (
+                            'نشطة الآن'
+                          )}
                         </span>
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-steel-100 text-steel-700 text-[10px] font-bold tabular-nums">
                           {camp.is_nationwide ? (
@@ -456,8 +484,48 @@ export const ContractorProjectsPage: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Owner Responses */}
-                  {acceptedNotifs.length > 0 ? (
+                  {/* Deal Won Summary (Always visible in Contractor Dashboard after Campaign Closure) */}
+                  {hasDealWon ? (
+                    <div className="p-3 rounded-xl bg-white border border-emerald-200 space-y-2">
+                      <div className="flex items-center justify-between gap-2 text-xs">
+                        <span className="font-black text-emerald-800 flex items-center gap-1.5">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                          <span>
+                            {camp.won_machine_title || camp.machine_name}
+                          </span>
+                        </span>
+                        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg">
+                          {lang === 'fr' ? 'Site mis à jour' : 'تم توجيه الآلية للورش'}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          onClick={() => navigate('/entreprise/bookings')}
+                          leftIcon={<CalendarCheck className="w-3.5 h-3.5" />}
+                          className="text-[11px] min-h-[38px]"
+                        >
+                          {lang === 'fr' ? 'Voir la réservation' : 'عرض الطلب في الحجوزات'}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            navigate(
+                              `/entreprise/messages?target=${camp.won_owner_id}&machine=${camp.won_machine_id || ''}&campaign=${camp.id}`
+                            )
+                          }
+                          leftIcon={<MessageSquare className="w-3.5 h-3.5" />}
+                          className="text-[11px] min-h-[38px]"
+                        >
+                          {lang === 'fr' ? 'Chat propriétaire' : 'محادثة المالك'}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : acceptedNotifs.length > 0 ? (
                     <div className="space-y-2 pt-2 border-t border-steel-100">
                       <p className="text-[11px] font-black text-emerald-700 flex items-center gap-1.5">
                         <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
@@ -489,7 +557,7 @@ export const ContractorProjectsPage: React.FC = () => {
                             size="sm"
                             onClick={() =>
                               navigate(
-                                `/entreprise/messages?target=${n.owner_id}&machine=${n.machine_id || ''}`
+                                `/entreprise/messages?target=${n.owner_id}&machine=${n.machine_id || ''}&campaign=${camp.id}`
                               )
                             }
                             leftIcon={<MessageSquare className="w-3.5 h-3.5" />}
@@ -505,7 +573,7 @@ export const ContractorProjectsPage: React.FC = () => {
                       {camp.matched_owners_count > 0
                         ? lang === 'fr'
                           ? 'Alerte envoyée. En attente de réponse des propriétaires...'
-                          : 'تم إرسال الإشعار الصوتي للملاك داخل النطاق وفي انتظار تفاعلهم...'
+                          : 'تم إرسال الإشعار للملاك داخل النطاق وفي انتظار تفاعلهم...'
                         : lang === 'fr'
                         ? 'Aucun engin trouvé lors du lancement dans ce rayon.'
                         : 'لم يتم العثور على آليات منشورة داخل هذا القطر وقت الإرسال.'}

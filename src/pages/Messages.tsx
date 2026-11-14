@@ -433,6 +433,7 @@ export const Messages: React.FC = () => {
       newUrl.searchParams.delete('target_user');
       newUrl.searchParams.delete('machine');
       newUrl.searchParams.delete('machine_id');
+      newUrl.searchParams.delete('campaign');
       window.history.replaceState({}, '', newUrl.toString());
     } catch {
       // Ignore
@@ -448,6 +449,7 @@ export const Messages: React.FC = () => {
     try {
       const newUrl = new URL(window.location.href);
       newUrl.searchParams.delete('conversationId');
+      newUrl.searchParams.delete('campaign');
       window.history.replaceState({}, '', newUrl.toString());
     } catch {
       // Ignore

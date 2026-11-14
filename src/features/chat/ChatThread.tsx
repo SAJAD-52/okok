@@ -1,8 +1,9 @@
 // ============================================================================
-// JADIJCB: Chat Thread Component (WhatsApp-style with Realtime & Quick Chips)
+// JADIJCB: Chat Thread Component (WhatsApp-style + Mutual Dispatch Deal Bar)
 // ============================================================================
 
 import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Send,
   Phone,
@@ -16,13 +17,27 @@ import {
   Truck,
   Building2,
   MapPin,
+  Handshake,
+  Lock,
+  CheckCircle2,
+  CalendarCheck,
+  Loader2,
 } from 'lucide-react';
-import { ChatConversationItem, ChatMessageItem } from '../../types/chat';
+import { ChatConversationItem } from '../../types/chat';
+import { DispatchDealContext } from '../../types/database';
 import { useLanguage } from '../../hooks/useLanguage';
 import { useAuth } from '../../hooks/useAuth';
 import { useChatRealtime } from './useChatRealtime';
 import { ChatMachineContextCard } from './ChatMachineContextCard';
-import { stripDispatchMarker } from '../../lib/dispatchService';
+import { toast } from '../../components/ui/Toast';
+import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import {
+  acceptDispatchDealParty,
+  fetchDispatchContextForConversation,
+  relocateMachineToSite,
+  stripDispatchMarker,
+  subscribeLocalDispatchEvents,
+} from '../../lib/dispatchService';
 
 interface ChatThreadProps {
   conversation: ChatConversationItem;
@@ -35,10 +50,14 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
 }) => {
   const { t, lang, isRTL } = useLanguage();
   const { user, profile } = useAuth();
+  const navigate = useNavigate();
   const currentUserId = user?.id || profile?.id || 'current-user-demo';
 
   const [inputMessage, setInputMessage] = useState('');
+  const [dispatchDeal, setDispatchDeal] = useState<DispatchDealContext | null>(null);
+  const [isAcceptingDeal, setIsAcceptingDeal] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const relocatedCampaignRef = useRef<string | null>(null);
 
   const {
     messages,
@@ -49,6 +68,92 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
   } = useChatRealtime(conversation);
 
   const isContractor = profile?.role === 'client' || profile?.role === 'contractor';
+  const partyRole: 'contractor' | 'owner' = isContractor ? 'contractor' : 'owner';
+
+  // Read optional campaign hint from URL query params
+  const campaignHint = (() => {
+    try {
+      return new URLSearchParams(window.location.search).get('campaign');
+    } catch {
+      return null;
+    }
+  })();
+
+  // Sync mutual dispatch deal context for this conversation
+  useEffect(() => {
+    let cancelled = false;
+
+    const refreshDeal = async () => {
+      if (!currentUserId || !conversation?.other_participant?.id) return;
+      const ctx = await fetchDispatchContextForConversation({
+        currentUserId,
+        otherUserId: conversation.other_participant.id,
+        machineId: conversation.machine_id || conversation.machine?.id,
+        campaignIdHint: campaignHint,
+        messages,
+      });
+
+      if (!cancelled) {
+        setDispatchDeal(ctx);
+        // When owner sees finalized deal & contractor clicked 2nd, ensure machine location updates under owner's RLS session
+        if (
+          ctx &&
+          ctx.deal_status === 'accepted' &&
+          ctx.owner_id === currentUserId &&
+          relocatedCampaignRef.current !== ctx.campaign_id
+        ) {
+          relocatedCampaignRef.current = ctx.campaign_id;
+          relocateMachineToSite({
+            machineId: ctx.machine_id,
+            siteLat: ctx.site_lat,
+            siteLng: ctx.site_lng,
+            siteCity: ctx.site_city,
+          }).catch(() => {});
+        }
+      }
+    };
+
+    refreshDeal();
+
+    const unsubLocal = subscribeLocalDispatchEvents(() => {
+      refreshDeal();
+    });
+
+    let rtChan: any = null;
+    if (isSupabaseConfigured && currentUserId) {
+      rtChan = supabase
+        .channel(`chat_deal_sync_${conversation.id}`)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'dispatch_notifications' },
+          () => {
+            refreshDeal();
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'dispatch_campaigns' },
+          () => {
+            refreshDeal();
+          }
+        )
+        .subscribe();
+    }
+
+    return () => {
+      cancelled = true;
+      unsubLocal();
+      if (rtChan) supabase.removeChannel(rtChan);
+    };
+  }, [
+    conversation.id,
+    conversation.other_participant.id,
+    conversation.machine_id,
+    conversation.machine?.id,
+    currentUserId,
+    campaignHint,
+    messages,
+  ]);
 
   // Quick Moroccan Construction Phrases
   const quickChips = isContractor
@@ -77,12 +182,15 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
     }
   }, [messages]);
 
+  const isChatClosedByOtherDeal = dispatchDeal?.deal_status === 'closed_other';
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setInputMessage(e.target.value);
     sendTypingStatus(e.target.value.length > 0);
   };
 
   const handleSend = (textToSend?: string) => {
+    if (isChatClosedByOtherDeal) return;
     const text = (textToSend || inputMessage).trim();
     if (!text) return;
 
@@ -94,6 +202,43 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
+    }
+  };
+
+  const handleAcceptDeal = async () => {
+    if (!dispatchDeal || isAcceptingDeal) return;
+    setIsAcceptingDeal(true);
+    try {
+      const res = await acceptDispatchDealParty({
+        deal: dispatchDeal,
+        partyRole,
+        currentUserId,
+        conversationId: conversation.id,
+      });
+
+      setDispatchDeal(res.updatedDeal);
+
+      if (res.finalized) {
+        toast.success(
+          lang === 'fr'
+            ? 'Accord confirmé ! Réservation créée, campagne clôturée et localisation de la machine mise à jour.'
+            : 'تم قبول الصفقة بنجاح! تم تسجيل الحجز، إغلاق باقي العروض، وتحديث موقع الآلية إلى الورش.'
+        );
+      } else {
+        toast.success(
+          lang === 'fr'
+            ? 'Votre confirmation est enregistrée. En attente de l’autre partie.'
+            : 'تم تسجيل موافقتك! بمجرد ضغط الطرف الآخر على «قبول الصفقة» سيتم تثبيت الحجز.'
+        );
+      }
+    } catch {
+      toast.error(
+        lang === 'fr'
+          ? 'Impossible de confirmer l’accord actuellement'
+          : 'تعذر إتمام قبول الصفقة حالياً، يرجى المحاولة مرة أخرى'
+      );
+    } finally {
+      setIsAcceptingDeal(false);
     }
   };
 
@@ -122,6 +267,10 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
   };
 
   const other = conversation.other_participant;
+  const hasCurrentPartyAccepted = Boolean(
+    dispatchDeal &&
+      (isContractor ? dispatchDeal.contractor_accepted : dispatchDeal.owner_accepted)
+  );
 
   return (
     <div className="flex flex-col h-full bg-[#EFEAE2]/30 dark:bg-ink relative overflow-hidden select-none">
@@ -143,7 +292,11 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
           {/* Peer Avatar with Role Icon */}
           <div className="relative shrink-0">
             <div className="w-10 h-10 rounded-2xl bg-amber-100 text-ink border border-primary/40 flex items-center justify-center font-black text-xs uppercase shadow-xs">
-              {other.role === 'owner' ? <Truck className="w-5 h-5 text-primary-dark" /> : <Building2 className="w-5 h-5 text-primary-dark" />}
+              {other.role === 'owner' ? (
+                <Truck className="w-5 h-5 text-primary-dark" />
+              ) : (
+                <Building2 className="w-5 h-5 text-primary-dark" />
+              )}
             </div>
             <span className="absolute bottom-0 end-0 w-3 h-3 rounded-full bg-emerald-500 border-2 border-white" />
           </div>
@@ -166,8 +319,12 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
                 <>
                   <span className="font-bold text-steel-700">
                     {other.role === 'owner'
-                      ? (lang === 'fr' ? 'Propriétaire d\'engins' : 'مالك آليات ومعدات')
-                      : (lang === 'fr' ? 'Entreprise BTP / Client' : 'مقاولة بناء / زبون')}
+                      ? lang === 'fr'
+                        ? "Propriétaire d'engins"
+                        : 'مالك آليات ومعدات'
+                      : lang === 'fr'
+                      ? 'Entreprise BTP / Client'
+                      : 'مقاولة بناء / زبون'}
                   </span>
                   <span>·</span>
                   <span>{other.city || 'المغرب'}</span>
@@ -192,9 +349,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
       </header>
 
       {/* 2. Pinned Machine Context Card if Associated with this Chat */}
-      {conversation.machine && (
-        <ChatMachineContextCard machine={conversation.machine} />
-      )}
+      {conversation.machine && <ChatMachineContextCard machine={conversation.machine} />}
 
       {/* 3. Message Thread Area */}
       <div className="flex-1 p-4 overflow-y-auto space-y-3.5 text-start">
@@ -232,11 +387,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
               )}
 
               {/* Message Bubble Row */}
-              <div
-                className={`flex w-full ${
-                  isSender ? 'justify-end' : 'justify-start'
-                }`}
-              >
+              <div className={`flex w-full ${isSender ? 'justify-end' : 'justify-start'}`}>
                 <div
                   className={`max-w-[85%] sm:max-w-[70%] px-3.5 py-2.5 rounded-2xl shadow-xs text-start relative space-y-1 transition-all ${
                     isSender
@@ -257,11 +408,9 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
                       isSender ? 'justify-end text-steel-600' : 'justify-start text-steel-400'
                     }`}
                   >
-                    <span className="font-mono latin-nums">
-                      {formatTime(msg.created_at)}
-                    </span>
+                    <span className="font-mono latin-nums">{formatTime(msg.created_at)}</span>
 
-                    {/* Sender Receipts: Single vs Double Checkmarks */}
+                    {/* Sender Receipts */}
                     {isSender && (
                       <span className="ms-0.5">
                         {msg.is_optimistic ? (
@@ -291,9 +440,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
               <span className="w-1.5 h-1.5 rounded-full bg-steel-400 animate-bounce" />
               <span className="w-1.5 h-1.5 rounded-full bg-steel-400 animate-bounce [animation-delay:0.2s]" />
               <span className="w-1.5 h-1.5 rounded-full bg-steel-400 animate-bounce [animation-delay:0.4s]" />
-              <span className="ms-1 font-bold text-[11px] text-steel-500">
-                {t('chat.typing')}
-              </span>
+              <span className="ms-1 font-bold text-[11px] text-steel-500">{t('chat.typing')}</span>
             </div>
           </div>
         )}
@@ -301,51 +448,167 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* 4. Interactive Quick Chips (اقتراحات سريعة للمحادثة) */}
-      <div className="px-3 pt-2 pb-1 bg-white border-t border-steel-100 flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0">
-        {quickChips.map((chip, idx) => (
-          <button
-            key={idx}
-            type="button"
-            onClick={() => handleSend(chip)}
-            className="px-2.5 py-1 rounded-xl bg-steel-50 hover:bg-amber-100 text-steel-700 hover:text-ink text-[11px] font-bold border border-steel-200 hover:border-primary/40 whitespace-nowrap transition-all cursor-pointer shadow-2xs"
-          >
-            {chip}
-          </button>
-        ))}
-      </div>
+      {/* 4. Mutual "قبول الصفقة" Bar (Directly Below Messages for Dispatch Opportunities) */}
+      {dispatchDeal && (
+        <div className="shrink-0 z-10">
+          {dispatchDeal.deal_status === 'closed_other' ? (
+            <div className="px-3.5 py-3 bg-steel-100 border-t border-steel-300 flex items-center gap-2.5 text-xs text-steel-700 font-bold">
+              <Lock className="w-4 h-4 text-steel-600 shrink-0" />
+              <span>
+                {lang === 'fr'
+                  ? 'Campagne terminée : cette opportunité a été conclue avec un autre propriétaire.'
+                  : 'تم إغلاق هذه المحادثة بعد اتفاق المقاولة مع مالك آخر — انتهت حملة البحث.'}
+              </span>
+            </div>
+          ) : dispatchDeal.deal_status === 'accepted' ? (
+            <div className="px-3.5 py-2.5 bg-emerald-50 border-t-2 border-emerald-400 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2 min-w-0 text-emerald-900 font-black">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span className="truncate">
+                  {lang === 'fr'
+                    ? 'Accord confirmé ! Réservation créée & engin localisé sur le chantier.'
+                    : 'تم قبول الصفقة من الطرفين! الحجز مفعّل الآن وموقع الآلية تحوّل إلى الورش.'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate(isContractor ? '/entreprise/bookings' : '/owner/bookings')}
+                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] flex items-center gap-1.5 cursor-pointer shrink-0 transition-colors"
+              >
+                <CalendarCheck className="w-3.5 h-3.5" />
+                <span>{lang === 'fr' ? 'Voir la réservation' : 'عرض الحجز والطلب'}</span>
+              </button>
+            </div>
+          ) : (
+            <div className="px-3.5 py-2.5 bg-ink text-white border-t-2 border-primary flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              <div className="min-w-0 space-y-1 text-start">
+                <div className="flex items-center gap-1.5 text-[11px] font-black text-primary truncate">
+                  <MapPin className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">
+                    {dispatchDeal.site_name}
+                    {dispatchDeal.site_city ? ` · ${dispatchDeal.site_city}` : ''}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 text-[10px] font-bold flex-wrap">
+                  <span
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg ${
+                      dispatchDeal.contractor_accepted
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40'
+                        : 'bg-white/10 text-steel-300'
+                    }`}
+                  >
+                    {dispatchDeal.contractor_accepted ? (
+                      <Check className="w-3 h-3" />
+                    ) : (
+                      <Clock className="w-3 h-3" />
+                    )}
+                    <span>{lang === 'fr' ? 'Entreprise' : 'موافقة الزبون'}</span>
+                  </span>
+                  <span
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg ${
+                      dispatchDeal.owner_accepted
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40'
+                        : 'bg-white/10 text-steel-300'
+                    }`}
+                  >
+                    {dispatchDeal.owner_accepted ? (
+                      <Check className="w-3 h-3" />
+                    ) : (
+                      <Clock className="w-3 h-3" />
+                    )}
+                    <span>{lang === 'fr' ? 'Propriétaire' : 'موافقة المالك'}</span>
+                  </span>
+                </div>
+              </div>
 
-      {/* 5. WhatsApp-style Input Footer */}
+              {hasCurrentPartyAccepted ? (
+                <div className="px-3.5 py-2 rounded-xl bg-white/10 border border-primary/50 text-primary text-xs font-black flex items-center justify-center gap-1.5 shrink-0 min-h-[42px]">
+                  <Clock className="w-4 h-4 animate-pulse shrink-0" />
+                  <span>
+                    {lang === 'fr'
+                      ? 'Confirmé — En attente du partenaire'
+                      : 'تمت موافقتك — في انتظار قبول الطرف الآخر'}
+                  </span>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleAcceptDeal}
+                  disabled={isAcceptingDeal}
+                  className="px-4 py-2 rounded-xl bg-primary hover:bg-primary-hover text-ink font-black text-xs flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer shrink-0 min-h-[44px] disabled:opacity-60"
+                >
+                  {isAcceptingDeal ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Handshake className="w-4 h-4" />
+                  )}
+                  <span>{lang === 'fr' ? 'Accepter l’accord' : 'قبول الصفقة'}</span>
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 5. Interactive Quick Chips */}
+      {!isChatClosedByOtherDeal && (
+        <div className="px-3 pt-2 pb-1 bg-white border-t border-steel-100 flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0">
+          {quickChips.map((chip, idx) => (
+            <button
+              key={idx}
+              type="button"
+              onClick={() => handleSend(chip)}
+              className="px-2.5 py-1 rounded-xl bg-steel-50 hover:bg-amber-100 text-steel-700 hover:text-ink text-[11px] font-bold border border-steel-200 hover:border-primary/40 whitespace-nowrap transition-all cursor-pointer shadow-2xs"
+            >
+              {chip}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* 6. WhatsApp-style Input Footer */}
       <footer className="p-3 bg-white border-t border-steel-200 shrink-0">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            handleSend();
-          }}
-          className="flex items-center gap-2"
-        >
-          <input
-            type="text"
-            value={inputMessage}
-            onChange={handleInputChange}
-            onKeyDown={handleKeyDown}
-            placeholder={
-              isContractor
-                ? (lang === 'fr' ? 'Écrivez votre message au propriétaire...' : 'اكتب استفسارك لمالك الآلية هنا...')
-                : (lang === 'fr' ? 'Répondez au client...' : 'اكتب ردك للزبون / المقاول هنا...')
-            }
-            className="flex-1 px-4 py-2.5 text-xs sm:text-sm bg-surface border border-steel-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary min-h-[44px]"
-          />
-
-          <button
-            type="submit"
-            disabled={!inputMessage.trim()}
-            className="w-11 h-11 rounded-2xl bg-primary hover:bg-primary-dark text-ink flex items-center justify-center transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-sm shrink-0 cursor-pointer"
-            aria-label={t('chat.send')}
+        {isChatClosedByOtherDeal ? (
+          <div className="text-center text-xs text-steel-500 font-bold py-2">
+            {lang === 'fr'
+              ? 'Cette discussion est fermée car la campagne est clôturée.'
+              : 'المحادثة مغلقة بعد انتهاء حملة البحث.'}
+          </div>
+        ) : (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSend();
+            }}
+            className="flex items-center gap-2"
           >
-            <Send className={`w-5 h-5 ${isRTL ? 'rotate-180' : ''}`} />
-          </button>
-        </form>
+            <input
+              type="text"
+              value={inputMessage}
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
+              placeholder={
+                isContractor
+                  ? lang === 'fr'
+                    ? 'Écrivez votre message au propriétaire...'
+                    : 'اكتب استفسارك لمالك الآلية هنا...'
+                  : lang === 'fr'
+                  ? 'Répondez au client...'
+                  : 'اكتب ردك للزبون / المقاول هنا...'
+              }
+              className="flex-1 px-4 py-2.5 text-xs sm:text-sm bg-surface border border-steel-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary min-h-[44px]"
+            />
+
+            <button
+              type="submit"
+              disabled={!inputMessage.trim()}
+              className="w-11 h-11 rounded-2xl bg-primary hover:bg-primary-dark text-ink flex items-center justify-center transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-sm shrink-0 cursor-pointer"
+              aria-label={t('chat.send')}
+            >
+              <Send className={`w-5 h-5 ${isRTL ? 'rotate-180' : ''}`} />
+            </button>
+          </form>
+        )}
       </footer>
     </div>
   );

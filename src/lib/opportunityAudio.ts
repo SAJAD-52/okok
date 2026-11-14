@@ -3,6 +3,8 @@
 // Synthesizes crisp celebration alert sound via Web Audio API + OS/PWA notify
 // ============================================================================
 
+import { markPushKeySeenInSW } from './pushService';
+
 let sharedAudioCtx: AudioContext | null = null;
 let audioUnlockInstalled = false;
 
@@ -96,14 +98,20 @@ export async function showBrowserOpportunityNotification(params: {
   if (typeof window === 'undefined' || !('Notification' in window)) return;
   if (Notification.permission !== 'granted') return;
 
-  const options: NotificationOptions & { vibrate?: number[] } = {
+  markPushKeySeenInSW(params.tag).catch(() => {});
+
+  const targetUrl = params.url || '/owner/messages';
+  const options: NotificationOptions & { vibrate?: number[]; renotify?: boolean } = {
     body: params.body,
     icon: '/pwa-icon-192.png',
     badge: '/pwa-icon-192.png',
     tag: params.tag,
-    vibrate: [220, 90, 220],
+    vibrate: [220, 90, 220, 90, 260],
     requireInteraction: true,
-    data: { url: params.url || '/owner' },
+    renotify: true,
+    dir: 'rtl',
+    lang: 'ar',
+    data: { url: targetUrl },
   };
 
   try {
@@ -113,13 +121,24 @@ export async function showBrowserOpportunityNotification(params: {
         await reg.showNotification(params.title, options);
         return;
       }
+      const swTarget = reg?.active || navigator.serviceWorker.controller;
+      if (swTarget) {
+        swTarget.postMessage({
+          type: 'SHOW_LOCAL_NOTIF',
+          payload: {
+            title: params.title,
+            body: params.body,
+            tag: params.tag,
+            url: targetUrl,
+          },
+        });
+        return;
+      }
     }
     const notif = new Notification(params.title, options);
     notif.onclick = () => {
       window.focus();
-      if (params.url) {
-        window.location.href = params.url;
-      }
+      window.location.href = targetUrl;
       notif.close();
     };
   } catch {

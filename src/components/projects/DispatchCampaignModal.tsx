@@ -1,10 +1,11 @@
 // ============================================================================
 // JADIJCB: InDrive-Style Live Dispatch Campaign Launch Modal
-// Allows contractors to broadcast an immediate equipment request to owners
-// within a selected km radius around the site (or nationwide across Morocco).
+// Allows contractors to select an equipment category (identical to owner's
+// machine form), choose a geographic km radius or nationwide Morocco, and add
+// work/budget details to broadcast an immediate audio & push opportunity.
 // ============================================================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   X,
   Radio,
@@ -15,12 +16,10 @@ import {
   Loader2,
   CheckCircle2,
   Truck,
-  Sparkles,
 } from 'lucide-react';
 import { ContractorSite, DispatchCampaign } from '../../types/database';
 import { EQUIPMENT_CATEGORIES } from '../../data/categories';
 import { Button } from '../ui/Button';
-import { Input } from '../ui/Input';
 import { Card } from '../ui/Card';
 import { toast } from '../ui/Toast';
 import { useLanguage } from '../../hooks/useLanguage';
@@ -41,34 +40,6 @@ interface DispatchCampaignModalProps {
 
 const PRESET_RADII = [15, 30, 50, 100, 200];
 
-const DEFAULT_MACHINE_LABELS_AR: Record<string, string> = {
-  loader: 'جرافة JCB 3CX / 4CX',
-  excavator: 'حفارة هيدروليكية (Pelle)',
-  bulldozer: 'بلدوزر تسوية (Bulldozer)',
-  crane: 'رافعة متحركة (Grue)',
-  truck: 'شاحنة قلاب (Camion Benne)',
-  'concrete-mixer': 'خلاطة إسمنت (Toupie)',
-  compactor: 'مدحلة طرق (Compacteur)',
-  generator: 'مولد كهربائي صناعي',
-  forklift: 'رافعة شوكية / تيليسكوبيك',
-  scaffolding: 'سقالات وقوالب بناء',
-  all: 'آلية أشغال عامة',
-};
-
-const DEFAULT_MACHINE_LABELS_FR: Record<string, string> = {
-  loader: 'Tractopelle JCB 3CX / 4CX',
-  excavator: 'Pelleteuse hydraulique',
-  bulldozer: 'Bulldozer / Bouteur',
-  crane: 'Grue mobile',
-  truck: 'Camion benne',
-  'concrete-mixer': 'Camion toupie béton',
-  compactor: 'Compacteur vibrant',
-  generator: 'Groupe électrogène',
-  forklift: 'Chariot élévateur / Manitou',
-  scaffolding: 'Échafaudage & coffrage',
-  all: 'Engin BTP disponible',
-};
-
 export const DispatchCampaignModal: React.FC<DispatchCampaignModalProps> = ({
   isOpen,
   onClose,
@@ -78,13 +49,14 @@ export const DispatchCampaignModal: React.FC<DispatchCampaignModalProps> = ({
   const { lang, t } = useLanguage();
   const { user, profile } = useAuth();
 
-  const machineryCategories = EQUIPMENT_CATEGORIES.filter((c) => c.slug !== 'spare-parts');
-
-  const [machineCategory, setMachineCategory] = useState<string>('loader');
-  const [machineName, setMachineName] = useState<string>(
-    lang === 'fr' ? DEFAULT_MACHINE_LABELS_FR.loader : DEFAULT_MACHINE_LABELS_AR.loader
+  const machineryCategories = useMemo(
+    () => EQUIPMENT_CATEGORIES.filter((c) => c.slug !== 'spare-parts'),
+    []
   );
-  const [hasCustomName, setHasCustomName] = useState(false);
+
+  const [machineCategory, setMachineCategory] = useState<string>(
+    machineryCategories[0]?.slug || 'loader'
+  );
   const [radiusKm, setRadiusKm] = useState<number>(50);
   const [isNationwide, setIsNationwide] = useState<boolean>(false);
   const [notes, setNotes] = useState<string>('');
@@ -93,18 +65,24 @@ export const DispatchCampaignModal: React.FC<DispatchCampaignModalProps> = ({
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [isSending, setIsSending] = useState<boolean>(false);
 
-  // Sync suggested machine name when opening or switching category (unless user typed custom name)
+  const selectedCategoryObj = useMemo(
+    () => machineryCategories.find((c) => c.slug === machineCategory) || machineryCategories[0],
+    [machineryCategories, machineCategory]
+  );
+
+  const derivedMachineName = selectedCategoryObj
+    ? lang === 'fr'
+      ? selectedCategoryObj.name_fr
+      : selectedCategoryObj.name_ar
+    : lang === 'fr'
+    ? 'Engin BTP'
+    : 'آلية أشغال';
+
   useEffect(() => {
     if (!isOpen) {
-      setHasCustomName(false);
       setNotes('');
-      return;
     }
-    if (!hasCustomName) {
-      const map = lang === 'fr' ? DEFAULT_MACHINE_LABELS_FR : DEFAULT_MACHINE_LABELS_AR;
-      setMachineName(map[machineCategory] || (lang === 'fr' ? 'Engin BTP' : 'آلية بناء'));
-    }
-  }, [isOpen, machineCategory, lang, hasCustomName]);
+  }, [isOpen]);
 
   // Live preview of matching owners in selected radius
   useEffect(() => {
@@ -118,7 +96,7 @@ export const DispatchCampaignModal: React.FC<DispatchCampaignModalProps> = ({
           siteLat: site.lat,
           siteLng: site.lng,
           machineCategory,
-          machineName,
+          machineName: derivedMachineName,
           radiusKm: isNationwide ? null : radiusKm,
           isNationwide,
           excludeOwnerId: user?.id || profile?.id,
@@ -131,13 +109,13 @@ export const DispatchCampaignModal: React.FC<DispatchCampaignModalProps> = ({
       } finally {
         if (!cancelled) setIsScanning(false);
       }
-    }, 220);
+    }, 200);
 
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [isOpen, site, machineCategory, machineName, radiusKm, isNationwide, user?.id, profile?.id]);
+  }, [isOpen, site, machineCategory, derivedMachineName, radiusKm, isNationwide, user?.id, profile?.id]);
 
   if (!isOpen || !site) return null;
 
@@ -149,15 +127,6 @@ export const DispatchCampaignModal: React.FC<DispatchCampaignModalProps> = ({
 
   const handleLaunch = async (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmedName = machineName.trim();
-    if (!trimmedName) {
-      toast.error(
-        lang === 'fr'
-          ? 'Veuillez indiquer le nom de la machine recherchée'
-          : 'يرجى تحديد اسم الآلية المطلوبة'
-      );
-      return;
-    }
 
     setIsSending(true);
     try {
@@ -165,7 +134,7 @@ export const DispatchCampaignModal: React.FC<DispatchCampaignModalProps> = ({
         siteLat: site.lat,
         siteLng: site.lng,
         machineCategory,
-        machineName: trimmedName,
+        machineName: derivedMachineName,
         radiusKm: isNationwide ? null : radiusKm,
         isNationwide,
         excludeOwnerId: user?.id || profile?.id,
@@ -181,7 +150,7 @@ export const DispatchCampaignModal: React.FC<DispatchCampaignModalProps> = ({
         siteLng: site.lng,
         sitePhone: site.manager_phone || profile?.phone || '',
         machineCategory,
-        machineName: trimmedName,
+        machineName: derivedMachineName,
         radiusKm: isNationwide ? null : radiusKm,
         isNationwide,
         notes: notes.trim(),
@@ -195,20 +164,20 @@ export const DispatchCampaignModal: React.FC<DispatchCampaignModalProps> = ({
         if (result.persistedToSupabase) {
           toast.success(
             lang === 'fr'
-              ? `Campagne lancée ! Alerte sonore envoyée à ${targets.length} propriétaire(s) ⚡`
-              : `تم إطلاق حملة البحث وإرسال الإشعار الصوتي لـ ${targets.length} مالك آليات ⚡`
+              ? `Campagne lancée ! Alerte envoyée à ${targets.length} propriétaire(s) ⚡`
+              : `تم إطلاق حملة البحث وإرسال الإشعار لـ ${targets.length} مالك آليات ⚡`
           );
         } else {
           toast.error(
             lang === 'fr'
-              ? 'Campagne enregistrée localement, mais l’envoi cloud a échoué. Vérifiez votre connexion ou reconnectez-vous.'
+              ? 'Campagne enregistrée localement, mais l’envoi cloud a échoué. Vérifiez votre connexion.'
               : 'تعذر إرسال الإشعارات للملاك عبر السحابة. تأكد من تسجيل الدخول أو اتصالك بالإنترنت ثم أعد المحاولة.'
           );
         }
       } else {
         toast.info(
           lang === 'fr'
-            ? 'Campagne enregistrée (0 engin disponible dans ce périmètre pour le moment). Essayez d’élargir le rayon ou tout le Maroc.'
+            ? 'Campagne enregistrée (0 engin disponible dans ce périmètre pour le moment).'
             : 'تم تسجيل الحملة، لكن لا توجد آليات مطابقة حالياً في هذا القطر. جرّب توسيع المسافة أو اختيار المغرب كاملاً.'
         );
       }
@@ -259,47 +228,25 @@ export const DispatchCampaignModal: React.FC<DispatchCampaignModalProps> = ({
         {/* Form */}
         <form onSubmit={handleLaunch} className="flex flex-col flex-1 min-h-0">
           <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
-            {/* Category Select */}
+            {/* 1. Category Select (Identical to Owner Add-Machine Categories) */}
             <div>
               <label className="text-xs font-black text-ink block mb-1.5">
-                {lang === 'fr' ? 'Catégorie de la machine demandée' : 'فئة الآلية المطلوبة للورش'}
+                {t('machines.category_label')}
               </label>
               <select
                 value={machineCategory}
-                onChange={(e) => {
-                  setMachineCategory(e.target.value);
-                  setHasCustomName(false);
-                }}
+                onChange={(e) => setMachineCategory(e.target.value)}
                 className="w-full px-3 py-2.5 text-xs font-bold bg-white border border-steel-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary min-h-[44px]"
               >
                 {machineryCategories.map((cat) => (
-                  <option key={cat.slug} value={cat.slug}>
+                  <option key={cat.id} value={cat.slug}>
                     {lang === 'fr' ? cat.name_fr : cat.name_ar}
                   </option>
                 ))}
-                <option value="all">
-                  {lang === 'fr' ? 'Tous types d’engins BTP' : 'أي آلية أشغال مناسبة'}
-                </option>
               </select>
             </div>
 
-            {/* Machine Name Input */}
-            <Input
-              label={
-                lang === 'fr'
-                  ? 'Nom précis de l’engin affiché dans l’alerte'
-                  : 'اسم الآلية التي ستظهر في الإشعار للملاك'
-              }
-              value={machineName}
-              onChange={(e) => {
-                setHasCustomName(true);
-                setMachineName(e.target.value);
-              }}
-              placeholder={lang === 'fr' ? 'Ex: Tractopelle JCB 3CX' : 'مثال: جرافة JCB 3CX'}
-              required
-            />
-
-            {/* Radius / Nationwide Target Scope */}
+            {/* 2. Radius / Nationwide Target Scope */}
             <div className="space-y-2.5">
               <div className="flex items-center justify-between gap-2">
                 <label className="text-xs font-black text-ink flex items-center gap-1.5">
@@ -374,53 +321,24 @@ export const DispatchCampaignModal: React.FC<DispatchCampaignModalProps> = ({
               )}
             </div>
 
-            {/* Optional Notes */}
+            {/* 3. Additional Details (Duration, Start Date, Budget, Work Type) */}
             <div>
               <label className="text-xs font-bold text-steel-700 block mb-1.5">
                 {lang === 'fr'
-                  ? 'Détails supplémentaires (durée, urgence, date de début)'
-                  : 'تفاصيل إضافية للملاك (المدة، تاريخ البدء، نوع الأشغال...)'}
+                  ? 'Détails supplémentaires (durée, date de début, budget, type de travaux...)'
+                  : 'تفاصيل إضافية للملاك (المدة، تاريخ البدء، الميزانية، نوع الأشغال...)'}
               </label>
               <textarea
-                rows={2}
+                rows={3}
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder={
                   lang === 'fr'
-                    ? 'Ex: Besoin urgent demain matin pour 15 jours avec chauffeur...'
-                    : 'مثال: مطلوب غداً صباحاً لمدة 15 يوم مع سائق محترف...'
+                    ? 'Ex: Travaux terrassement dès demain matin, durée 15 jours, budget 2200 DH/jour avec chauffeur...'
+                    : 'مثال: أشغال الحفر ابتداءً من غد صباحاً لمدة 15 يوم، الميزانية 2200 درهم/اليوم مع السائق...'
                 }
                 className="w-full px-3 py-2 text-xs border border-steel-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary"
               />
-            </div>
-
-            {/* Live Notification Preview Card */}
-            <div className="bg-ink text-white rounded-2xl p-3.5 sm:p-4 border-2 border-primary space-y-2 shadow-sm">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] font-black text-primary flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 shrink-0" />
-                  <span>
-                    {lang === 'fr' ? 'Aperçu de la notification envoyée' : 'معاينة الإشعار الذي سيصل للملاك'}
-                  </span>
-                </span>
-                <span className="text-[10px] font-bold text-steel-300">
-                  {lang === 'fr' ? 'Alerte sonore + Mobile' : 'تنبيه صوتي + تطبيق الهاتف'}
-                </span>
-              </div>
-
-              <div className="bg-white/10 rounded-xl p-2.5 flex items-center gap-3 border border-white/10">
-                <img
-                  src="/assets/aistudio/image_010e3368.png"
-                  alt="فرصة جديدة"
-                  className="w-10 h-10 object-contain shrink-0"
-                />
-                <div className="min-w-0">
-                  <p className="text-xs font-black text-primary">فرصة جديدة</p>
-                  <p className="text-xs font-bold text-white leading-snug break-words">
-                    «{companyName}» محتاجة «{machineName || '...'}» ديالك
-                  </p>
-                </div>
-              </div>
             </div>
 
             {/* Live Match Scan Summary */}

@@ -359,9 +359,21 @@ export interface DispatchCampaign {
   notes?: string;
   matched_owners_count: number;
   status: 'active' | 'closed';
+  won_owner_id?: string | null;
+  won_machine_id?: string | null;
+  won_machine_title?: string | null;
+  booking_id?: string | null;
+  won_at?: string | null;
   created_at: string;
   notifications?: DispatchNotification[];
 }
+
+export type DispatchDealStatus =
+  | 'open'
+  | 'pending_contractor'
+  | 'pending_owner'
+  | 'accepted'
+  | 'closed_other';
 
 export interface DispatchNotification {
   id: string;
@@ -383,7 +395,31 @@ export interface DispatchNotification {
   notes?: string;
   status: 'sent' | 'read' | 'accepted' | 'dismissed';
   is_read: boolean;
+  contractor_accepted?: boolean;
+  owner_accepted?: boolean;
+  deal_status?: DispatchDealStatus;
+  booking_id?: string | null;
   created_at: string;
 }
 
-
+export interface DispatchDealContext {
+  campaign_id: string;
+  notification_id?: string;
+  contractor_id: string;
+  owner_id: string;
+  machine_id?: string;
+  company_name: string;
+  machine_name: string;
+  matched_machine_title?: string;
+  site_id?: string;
+  site_name: string;
+  site_city?: string;
+  site_lat?: number;
+  site_lng?: number;
+  site_phone?: string;
+  notes?: string;
+  contractor_accepted: boolean;
+  owner_accepted: boolean;
+  deal_status: DispatchDealStatus;
+  booking_id?: string | null;
+}

@@ -961,41 +961,58 @@ export const DashboardLayout: React.FC = () => {
         </main>
       </div>
 
-      {/* Mobile Bottom Tab Bar (Fixed, 44px+ touch targets, max 5 items: اليوم / الحجوزات / الآليات / الزبائن / المزيد) */}
+      {/* Mobile Bottom Tab Bar (Fixed, 44px+ touch targets) */}
       <nav
         aria-label="Mobile Navigation"
         className="md:hidden fixed bottom-0 start-0 end-0 bg-white border-t border-steel-200 shadow-elevated z-40 px-1 py-1 flex items-center justify-around overflow-hidden"
       >
         {isContractor ? (
-          contractorNavigationItems.map((item) => {
-            const isItemActive = item.exact
-              ? location.pathname === item.to
-              : location.pathname.startsWith(item.to);
+          <>
+            {contractorNavigationItems.map((item) => {
+              const isItemActive = item.exact
+                ? location.pathname === item.to
+                : location.pathname.startsWith(item.to);
 
-            return (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                className={`flex flex-col items-center justify-center flex-1 min-w-0 px-0.5 py-1.5 min-h-[50px] transition-colors relative ${
-                  isItemActive ? 'text-ink font-bold' : 'text-steel-400 hover:text-steel-700'
-                }`}
-              >
-                <div
-                  className={`p-1 rounded-xl transition-all relative ${
-                    isItemActive ? 'bg-primary text-ink' : ''
+              return (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  className={`flex flex-col items-center justify-center flex-1 min-w-0 px-0.5 py-1.5 min-h-[50px] transition-colors relative ${
+                    isItemActive ? 'text-ink font-bold' : 'text-steel-400 hover:text-steel-700'
                   }`}
                 >
-                  {item.icon}
-                  {item.badge && item.badge > 0 && (
-                    <span className="absolute -top-1 -end-1 w-2.5 h-2.5 rounded-full bg-primary ring-2 ring-white" />
-                  )}
-                </div>
-                <span className="text-[10px] mt-0.5 tracking-tight truncate max-w-full">
-                  {item.mobileLabel || item.label}
-                </span>
-              </NavLink>
-            );
-          })
+                  <div
+                    className={`p-1 rounded-xl transition-all relative ${
+                      isItemActive ? 'bg-primary text-ink' : ''
+                    }`}
+                  >
+                    {item.icon}
+                    {item.badge && item.badge > 0 && (
+                      <span className="absolute -top-1 -end-1 w-2.5 h-2.5 rounded-full bg-primary ring-2 ring-white" />
+                    )}
+                  </div>
+                  <span className="text-[10px] mt-0.5 tracking-tight truncate max-w-full">
+                    {item.mobileLabel || item.label}
+                  </span>
+                </NavLink>
+              );
+            })}
+
+            {/* Logout Button in Mobile Bottom Bar */}
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="flex flex-col items-center justify-center flex-1 min-w-0 px-0.5 py-1.5 min-h-[50px] text-danger hover:bg-rose-50/70 rounded-xl transition-colors cursor-pointer"
+              aria-label={t('nav.logout')}
+            >
+              <div className="p-1 rounded-xl">
+                <LogOut className="w-5 h-5" />
+              </div>
+              <span className="text-[10px] font-bold mt-0.5 tracking-tight truncate max-w-full">
+                {lang === 'fr' ? 'Quitter' : 'خروج'}
+              </span>
+            </button>
+          </>
         ) : (
           <>
             {/* 1. اليوم (Today) */}
@@ -1003,7 +1020,7 @@ export const DashboardLayout: React.FC = () => {
               to="/owner"
               end
               className={({ isActive }) =>
-                `flex flex-col items-center justify-center flex-1 py-1.5 min-h-[50px] transition-colors relative ${
+                `flex flex-col items-center justify-center flex-1 min-w-0 px-0.5 py-1.5 min-h-[50px] transition-colors relative ${
                   isActive ? 'text-ink font-bold' : 'text-steel-400 hover:text-steel-700'
                 }`
               }
@@ -1013,7 +1030,7 @@ export const DashboardLayout: React.FC = () => {
                   <div className={`p-1 rounded-xl transition-all ${isActive ? 'bg-primary text-ink' : ''}`}>
                     <LayoutDashboard className="w-5 h-5" />
                   </div>
-                  <span className="text-[10px] mt-0.5 tracking-tight truncate">
+                  <span className="text-[10px] mt-0.5 tracking-tight truncate max-w-full">
                     {lang === 'fr' ? 'Aujourd\'hui' : 'اليوم'}
                   </span>
                 </>
@@ -1024,7 +1041,7 @@ export const DashboardLayout: React.FC = () => {
             <NavLink
               to="/owner/bookings"
               className={({ isActive }) =>
-                `flex flex-col items-center justify-center flex-1 py-1.5 min-h-[50px] transition-colors relative ${
+                `flex flex-col items-center justify-center flex-1 min-w-0 px-0.5 py-1.5 min-h-[50px] transition-colors relative ${
                   isActive ? 'text-ink font-bold' : 'text-steel-400 hover:text-steel-700'
                 }`
               }
@@ -1037,7 +1054,7 @@ export const DashboardLayout: React.FC = () => {
                       <span className="absolute -top-1 -end-1 w-2.5 h-2.5 rounded-full bg-primary ring-2 ring-white" />
                     )}
                   </div>
-                  <span className="text-[10px] mt-0.5 tracking-tight truncate">
+                  <span className="text-[10px] mt-0.5 tracking-tight truncate max-w-full">
                     {t('nav.bookings')}
                   </span>
                 </>
@@ -1048,7 +1065,7 @@ export const DashboardLayout: React.FC = () => {
             <NavLink
               to="/owner/machines"
               className={({ isActive }) =>
-                `flex flex-col items-center justify-center flex-1 py-1.5 min-h-[50px] transition-colors relative ${
+                `flex flex-col items-center justify-center flex-1 min-w-0 px-0.5 py-1.5 min-h-[50px] transition-colors relative ${
                   isActive ? 'text-ink font-bold' : 'text-steel-400 hover:text-steel-700'
                 }`
               }
@@ -1058,7 +1075,7 @@ export const DashboardLayout: React.FC = () => {
                   <div className={`p-1 rounded-xl transition-all ${isActive ? 'bg-primary text-ink' : ''}`}>
                     <Truck className="w-5 h-5" />
                   </div>
-                  <span className="text-[10px] mt-0.5 tracking-tight truncate">
+                  <span className="text-[10px] mt-0.5 tracking-tight truncate max-w-full">
                     {t('nav.machines')}
                   </span>
                 </>
@@ -1069,7 +1086,7 @@ export const DashboardLayout: React.FC = () => {
             <NavLink
               to="/owner/clients"
               className={({ isActive }) =>
-                `flex flex-col items-center justify-center flex-1 py-1.5 min-h-[50px] transition-colors relative ${
+                `flex flex-col items-center justify-center flex-1 min-w-0 px-0.5 py-1.5 min-h-[50px] transition-colors relative ${
                   isActive ? 'text-ink font-bold' : 'text-steel-400 hover:text-steel-700'
                 }`
               }
@@ -1079,7 +1096,7 @@ export const DashboardLayout: React.FC = () => {
                   <div className={`p-1 rounded-xl transition-all ${isActive ? 'bg-primary text-ink' : ''}`}>
                     <Users className="w-5 h-5" />
                   </div>
-                  <span className="text-[10px] mt-0.5 tracking-tight truncate">
+                  <span className="text-[10px] mt-0.5 tracking-tight truncate max-w-full">
                     {lang === 'fr' ? 'Clients' : 'الزبائن'}
                   </span>
                 </>
@@ -1099,7 +1116,7 @@ export const DashboardLayout: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setIsMoreMenuOpen(true)}
-                  className={`flex flex-col items-center justify-center flex-1 py-1.5 min-h-[50px] transition-colors relative cursor-pointer ${
+                  className={`flex flex-col items-center justify-center flex-1 min-w-0 px-0.5 py-1.5 min-h-[50px] transition-colors relative cursor-pointer ${
                     isMoreActive ? 'text-ink font-bold' : 'text-steel-400 hover:text-steel-700'
                   }`}
                 >
@@ -1109,12 +1126,27 @@ export const DashboardLayout: React.FC = () => {
                       <span className="absolute -top-1 -end-1 w-2.5 h-2.5 rounded-full bg-primary ring-2 ring-white" />
                     )}
                   </div>
-                  <span className="text-[10px] mt-0.5 tracking-tight truncate">
+                  <span className="text-[10px] mt-0.5 tracking-tight truncate max-w-full">
                     {lang === 'fr' ? 'Plus' : 'المزيد'}
                   </span>
                 </button>
               );
             })()}
+
+            {/* 6. خروج (Logout) */}
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="flex flex-col items-center justify-center flex-1 min-w-0 px-0.5 py-1.5 min-h-[50px] text-danger hover:bg-rose-50/70 rounded-xl transition-colors cursor-pointer"
+              aria-label={t('nav.logout')}
+            >
+              <div className="p-1 rounded-xl">
+                <LogOut className="w-5 h-5" />
+              </div>
+              <span className="text-[10px] font-bold mt-0.5 tracking-tight truncate max-w-full">
+                {lang === 'fr' ? 'Quitter' : 'خروج'}
+              </span>
+            </button>
           </>
         )}
       </nav>

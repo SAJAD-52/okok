@@ -37,7 +37,7 @@ const InstallGuideModal: React.FC<InstallGuideModalProps> = ({
         <div className="bg-ink text-white p-5 flex items-center justify-between border-b-2 border-primary">
           <div className="flex items-center gap-3 min-w-0">
             <img
-              src="/pwa-192x192.png"
+              src="/pwa-icon-192.png"
               alt="JADIJCB App Icon"
               className="w-12 h-12 rounded-2xl border border-primary/40 shadow-md shrink-0"
             />
@@ -272,7 +272,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
           onClick={handleClick}
           className={`inline-flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-steel-900 hover:bg-steel-800 border border-primary/50 text-white text-xs font-black shadow-sm transition-all cursor-pointer min-h-[44px] ${className}`}
         >
-          <img src="/pwa-192x192.png" alt="JADIJCB" className="w-6 h-6 rounded-lg shrink-0" />
+          <img src="/pwa-icon-192.png" alt="JADIJCB" className="w-6 h-6 rounded-lg shrink-0" />
           <div className="text-start leading-tight">
             <span className="block text-primary">{label}</span>
             <span className="block text-[10px] text-steel-300 font-semibold">
@@ -288,7 +288,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
           className={`w-full flex items-center justify-between p-3 rounded-2xl text-xs font-black bg-ink text-white border border-primary/40 hover:bg-steel-900 transition-colors text-start cursor-pointer ${className}`}
         >
           <div className="flex items-center gap-3 min-w-0">
-            <img src="/pwa-192x192.png" alt="JADIJCB" className="w-8 h-8 rounded-xl shrink-0" />
+            <img src="/pwa-icon-192.png" alt="JADIJCB" className="w-8 h-8 rounded-xl shrink-0" />
             <div className="min-w-0">
               <span className="block text-white font-black">
                 {label} · JADI<span className="text-primary">JCB</span>
@@ -378,7 +378,7 @@ export const PWAInstallBanner: React.FC = () => {
         <div className="bg-ink text-white border border-primary/50 rounded-2xl p-3 shadow-2xl flex items-center justify-between gap-2.5">
           <div className="flex items-center gap-2.5 min-w-0 flex-1">
             <img
-              src="/pwa-192x192.png"
+              src="/pwa-icon-192.png"
               alt="JADIJCB"
               className="w-11 h-11 rounded-xl border border-primary/40 shrink-0 shadow-sm"
             />

@@ -5,6 +5,7 @@
 import React, { useState, useEffect, useCallback, createContext, useContext } from 'react';
 import { supabase } from '../lib/supabase';
 import { normalizeMoroccanPhone, phoneToSyntheticEmail } from '../lib/authHelpers';
+import { isLifetimeFreePhone } from '../lib/constants';
 import { mapDatabaseError } from '../lib/errorHelpers';
 import { UserProfile, UserRole } from '../types/database';
 import { generateUniqueStorefrontSlug } from '../lib/storefrontSlug';
@@ -156,6 +157,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       const mergedPhone = (data as any)?.phone || (data as any)?.phone_number || meta.phone || localCached.phone || '';
+      const isLifetimeVip = isLifetimeFreePhone(mergedPhone);
+      const lifetimeEnd = '2099-12-31T23:59:59.000Z';
+
+      if (isLifetimeVip && (data as any)?.subscription_status !== 'active') {
+        supabase
+          .from('profiles')
+          .update({
+            subscription_status: 'active',
+            subscription_ends_at: lifetimeEnd,
+          })
+          .eq('id', userId)
+          .then(() => {}, () => {});
+      }
 
       const normalized: UserProfile = {
         id: userId,
@@ -167,9 +181,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         ice_number: (data as any)?.ice_number || meta.ice_number || meta.iceNumber || localCached.ice_number || '',
         onboarding_completed: (data as any)?.onboarding_completed ?? meta.onboarding_completed ?? localCached.onboarding_completed ?? true,
         whatsapp_verified: Boolean((data as any)?.whatsapp_verified ?? meta.whatsapp_verified ?? localCached.whatsapp_verified ?? true),
-        subscription_status: (data as any)?.subscription_status || localCached.subscription_status || 'trial',
+        subscription_status: isLifetimeVip
+          ? 'active'
+          : (data as any)?.subscription_status || localCached.subscription_status || 'trial',
         trial_started_at: (data as any)?.trial_started_at || localCached.trial_started_at || new Date().toISOString(),
         trial_ends_at: (data as any)?.trial_ends_at || localCached.trial_ends_at || new Date(Date.now() + 72 * 3600 * 1000).toISOString(),
+        subscription_ends_at: isLifetimeVip
+          ? lifetimeEnd
+          : (data as any)?.subscription_ends_at || localCached.subscription_ends_at,
         preferred_lang: (data as any)?.preferred_lang || meta.preferred_lang || localCached.preferred_lang || 'ar',
         created_at: (data as any)?.created_at || localCached.created_at || new Date().toISOString(),
       };
@@ -266,6 +285,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(data.user);
         let prof = await fetchProfile(data.user.id);
         if (!prof) {
+          const isVipSignup = isLifetimeFreePhone(norm.e164);
           const fallbackPayload: any = {
             id: data.user.id,
             phone: norm.e164,
@@ -274,9 +294,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             company_name: data.user.user_metadata?.company_name || '',
             role: data.user.user_metadata?.role || 'client',
             city: data.user.user_metadata?.city || 'Casablanca',
-            subscription_status: 'trial',
+            subscription_status: isVipSignup ? 'active' : 'trial',
             trial_started_at: new Date().toISOString(),
             trial_ends_at: new Date(Date.now() + 72 * 3600 * 1000).toISOString(),
+            subscription_ends_at: isVipSignup ? '2099-12-31T23:59:59.000Z' : undefined,
             preferred_lang: 'ar',
           };
           const { data: insertedProf } = await supabase
@@ -510,6 +531,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // If DB trigger didn't create the profile or is delayed, attempt client-side creation
       if (!loadedProfile) {
+        const isVipSignup = isLifetimeFreePhone(norm.e164);
         const newProfPayload: any = {
           id: activeUser.id,
           phone: norm.e164,
@@ -519,9 +541,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           role: role === 'owner' ? 'owner' : 'client',
           city: meta?.city || 'Casablanca',
           whatsapp_verified: false,
-          subscription_status: 'trial',
+          subscription_status: isVipSignup ? 'active' : 'trial',
           trial_started_at: new Date().toISOString(),
           trial_ends_at: new Date(Date.now() + 72 * 3600 * 1000).toISOString(),
+          subscription_ends_at: isVipSignup ? '2099-12-31T23:59:59.000Z' : undefined,
           preferred_lang: 'ar',
           created_at: new Date().toISOString(),
         };

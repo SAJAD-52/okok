@@ -5,6 +5,7 @@
 
 import { supabase, isSupabaseConfigured } from './supabase';
 import { UserProfile, Machine, Booking, PaymentRecord, UserRole, SubscriptionStatus } from '../types/database';
+import { isLifetimeFreePhone } from './constants';
 
 export interface AdminAccountDetail extends UserProfile {
   machines_count: number;
@@ -72,19 +73,24 @@ class AdminService {
 
         const totalVolume = userBookings.reduce((sum: number, b: any) => sum + (Number(b.total_price) || 0), 0);
 
+        const rawPhone = p.phone || p.phone_number || '';
+        const isVipLifetime = isLifetimeFreePhone(rawPhone);
+
         return {
           id: p.id,
-          phone: p.phone || p.phone_number || '',
+          phone: rawPhone,
           full_name: p.full_name || p.company_name || 'مستخدم مسجل',
           company_name: p.company_name,
           role: p.role || 'owner',
           city: p.city || 'Casablanca',
           ice_number: p.ice_number,
           rc_number: p.rc_number,
-          subscription_status: p.subscription_status || 'trial',
+          subscription_status: isVipLifetime ? 'active' : p.subscription_status || 'trial',
           trial_started_at: p.trial_started_at,
           trial_ends_at: p.trial_ends_at,
-          subscription_ends_at: p.subscription_ends_at,
+          subscription_ends_at: isVipLifetime
+            ? p.subscription_ends_at || '2099-12-31T23:59:59.000Z'
+            : p.subscription_ends_at,
           whatsapp_verified: Boolean(p.whatsapp_verified),
           verified: Boolean(p.verified),
           avatar_url: p.avatar_url,

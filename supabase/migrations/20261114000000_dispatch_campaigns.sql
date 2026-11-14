@@ -142,5 +142,11 @@ EXCEPTION WHEN duplicate_object THEN NULL;
 WHEN OTHERS THEN NULL;
 END $$;
 
+DO $$ BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.notifications;
+EXCEPTION WHEN duplicate_object THEN NULL;
+WHEN OTHERS THEN NULL;
+END $$;
+
 -- 8. Reload PostgREST schema cache
 NOTIFY pgrst, 'reload schema';

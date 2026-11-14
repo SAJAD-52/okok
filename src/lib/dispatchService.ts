@@ -1,6 +1,11 @@
 // ============================================================================
 // JADIJCB: InDrive-Style Live Dispatch Campaign Service
 // Matches contractors' site requests to owners whose machines fall within km radius
+// Multi-channel delivery:
+//   1. Supabase dispatch_campaigns / dispatch_notifications (with Realtime)
+//   2. Supabase public.notifications (existing table fallback, cross-device)
+//   3. Express SQLite /api/notifications (full-stack local/cloud server)
+//   4. BroadcastChannel + localStorage (same-browser instant sync)
 // ============================================================================
 
 import { supabase, isSupabaseConfigured } from './supabase';
@@ -8,10 +13,16 @@ import { calculateDistanceKm } from './geoUtils';
 import { MOROCCAN_CITIES } from '../data/cities';
 import { DispatchCampaign, DispatchNotification, Machine } from '../types/database';
 import { machineStore } from './machineStore';
+import { serverApi } from './serverApi';
 
 const DISPATCH_CHANNEL_NAME = 'jadijcb_dispatch_channel';
 const LOCAL_CAMPAIGNS_KEY = 'jadijcb_local_dispatch_campaigns';
 const LOCAL_NOTIFS_KEY = 'jadijcb_local_dispatch_notifs';
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function isUuid(val?: string | null): val is string {
+  return Boolean(val && UUID_REGEX.test(val));
+}
 
 export interface MatchedOwnerTarget {
   owner_id: string;
@@ -42,7 +53,6 @@ function matchesRequestedMachine(
   const cat = String(machine.category || machine.category_id || '').toLowerCase();
   if (cat === 'spare-parts') return false;
 
-  // If contractor selected "all" machinery
   if (!requestedCategory || requestedCategory === 'all') {
     if (!requestedName.trim()) return true;
     const text = `${machine.title_ar || ''} ${machine.title_fr || ''} ${machine.brand || ''} ${machine.model || ''} ${cat}`.toLowerCase();
@@ -58,7 +68,6 @@ function matchesRequestedMachine(
     return true;
   }
 
-  // Also check title/brand match if user typed specific keyword like JCB / 3CX
   const text = `${machine.title_ar || ''} ${machine.title_fr || ''} ${machine.brand || ''} ${machine.model || ''}`.toLowerCase();
   if (requestedName.trim()) {
     const tokens = requestedName
@@ -104,7 +113,7 @@ export async function findMatchingOwnersForCampaign(params: {
       const { data, error } = await supabase
         .from('machines')
         .select('*')
-        .eq('is_published', true);
+        .neq('is_published', false);
 
       if (!error && data) {
         rawMachines = data;
@@ -118,7 +127,6 @@ export async function findMatchingOwnersForCampaign(params: {
     rawMachines = machineStore.getCachedMachines().filter((m) => m.is_published !== false);
   }
 
-  // Deduplicate by owner_id, picking the closest matching machine per owner
   const closestByOwner = new Map<string, MatchedOwnerTarget>();
 
   for (const m of rawMachines) {
@@ -152,7 +160,11 @@ export async function findMatchingOwnersForCampaign(params: {
   return Array.from(closestByOwner.values()).sort((a, b) => a.distance_km - b.distance_km);
 }
 
-function broadcastDispatchEvent(payload: { type: string; notifications?: DispatchNotification[]; campaign?: DispatchCampaign }) {
+function broadcastDispatchEvent(payload: {
+  type: string;
+  notifications?: DispatchNotification[];
+  campaign?: DispatchCampaign;
+}) {
   try {
     if (typeof BroadcastChannel !== 'undefined') {
       const ch = new BroadcastChannel(DISPATCH_CHANNEL_NAME);
@@ -190,11 +202,14 @@ export function subscribeLocalDispatchEvents(callback: (detail: any) => void): (
 
 function saveLocalCampaignFallback(campaign: DispatchCampaign, notifications: DispatchNotification[]) {
   try {
-    const existingC = JSON.parse(localStorage.getItem(LOCAL_CAMPAIGNS_KEY) || '[]');
-    localStorage.setItem(LOCAL_CAMPAIGNS_KEY, JSON.stringify([campaign, ...existingC].slice(0, 30)));
+    const existingC: DispatchCampaign[] = JSON.parse(localStorage.getItem(LOCAL_CAMPAIGNS_KEY) || '[]');
+    const filteredC = existingC.filter((c) => c.id !== campaign.id);
+    localStorage.setItem(LOCAL_CAMPAIGNS_KEY, JSON.stringify([campaign, ...filteredC].slice(0, 30)));
 
-    const existingN = JSON.parse(localStorage.getItem(LOCAL_NOTIFS_KEY) || '[]');
-    localStorage.setItem(LOCAL_NOTIFS_KEY, JSON.stringify([...notifications, ...existingN].slice(0, 100)));
+    const existingN: DispatchNotification[] = JSON.parse(localStorage.getItem(LOCAL_NOTIFS_KEY) || '[]');
+    const newIds = new Set(notifications.map((n) => n.id));
+    const filteredN = existingN.filter((n) => !newIds.has(n.id));
+    localStorage.setItem(LOCAL_NOTIFS_KEY, JSON.stringify([...notifications, ...filteredN].slice(0, 100)));
   } catch {
     // ignore
   }
@@ -222,8 +237,26 @@ export async function launchDispatchCampaign(params: {
       ? crypto.randomUUID()
       : `cmp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
+  // Resolve real authenticated Supabase UID if present (required by RLS contractor_id = auth.uid())
+  let authUid: string | null = isUuid(params.contractorId) ? params.contractorId : null;
+  if (isSupabaseConfigured) {
+    try {
+      const { data: sessionData } = await supabase.auth.getUser();
+      if (isUuid(sessionData?.user?.id)) {
+        authUid = sessionData.user.id;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const effectiveContractorId = authUid || params.contractorId;
+  let persistedToSupabase = false;
+  let resolvedCampaignId = fallbackCampaignId;
+  let createdNotifs: DispatchNotification[] = [];
+
   const campaignPayload = {
-    contractor_id: params.contractorId,
+    contractor_id: effectiveContractorId,
     company_name: params.companyName,
     site_id: params.siteId || null,
     site_name: params.siteName,
@@ -240,7 +273,8 @@ export async function launchDispatchCampaign(params: {
     status: 'active' as const,
   };
 
-  if (isSupabaseConfigured) {
+  // Channel 1: Dedicated Supabase dispatch_campaigns + dispatch_notifications tables
+  if (isSupabaseConfigured && isUuid(effectiveContractorId)) {
     try {
       const { data: createdCamp, error: campErr } = await supabase
         .from('dispatch_campaigns')
@@ -249,12 +283,70 @@ export async function launchDispatchCampaign(params: {
         .single();
 
       if (!campErr && createdCamp) {
-        let createdNotifs: DispatchNotification[] = [];
+        resolvedCampaignId = createdCamp.id;
+        persistedToSupabase = true;
+
         if (params.targets.length > 0) {
-          const notifRows = params.targets.map((t) => ({
-            campaign_id: createdCamp.id,
+          const validTargets = params.targets.filter((t) => isUuid(t.owner_id));
+          if (validTargets.length > 0) {
+            const notifRows = validTargets.map((t) => ({
+              campaign_id: createdCamp.id,
+              owner_id: t.owner_id,
+              contractor_id: effectiveContractorId,
+              machine_id: isUuid(t.machine_id) ? t.machine_id : null,
+              company_name: params.companyName,
+              machine_name: params.machineName,
+              matched_machine_title: t.matched_machine_title,
+              site_name: params.siteName,
+              site_city: params.siteCity || '',
+              site_lat: params.siteLat,
+              site_lng: params.siteLng,
+              site_phone: params.sitePhone || '',
+              distance_km: t.distance_km,
+              is_nationwide: params.isNationwide,
+              radius_km: params.isNationwide ? null : params.radiusKm,
+              notes: params.notes || '',
+              status: 'sent',
+              is_read: false,
+            }));
+
+            const { data: insertedNotifs, error: notifErr } = await supabase
+              .from('dispatch_notifications')
+              .insert(notifRows)
+              .select('*');
+
+            if (!notifErr && insertedNotifs) {
+              createdNotifs = insertedNotifs as DispatchNotification[];
+            } else if (notifErr) {
+              console.warn('dispatch_notifications insert notice:', notifErr.message);
+            }
+          }
+        }
+      } else if (campErr) {
+        console.warn('dispatch_campaigns insert notice:', campErr.message);
+      }
+    } catch (err) {
+      console.warn('Supabase dispatch_campaigns exception:', err);
+    }
+  }
+
+  // Channel 2: Existing Supabase public.notifications table (Works cross-device even before SQL migration)
+  if (isSupabaseConfigured && params.targets.length > 0) {
+    try {
+      const uuidTargets = params.targets.filter((t) => isUuid(t.owner_id));
+      if (uuidTargets.length > 0) {
+        const genericNotifs = uuidTargets.map((t) => {
+          const distTextAr = params.isNationwide
+            ? 'المغرب كاملاً'
+            : `${Math.round(t.distance_km)} كم`;
+          const distTextFr = params.isNationwide
+            ? 'Tout le Maroc'
+            : `${Math.round(t.distance_km)} km`;
+
+          const dataPayload = {
+            campaign_id: resolvedCampaignId,
             owner_id: t.owner_id,
-            contractor_id: params.contractorId,
+            contractor_id: effectiveContractorId,
             machine_id: t.machine_id || null,
             company_name: params.companyName,
             machine_name: params.machineName,
@@ -269,85 +361,191 @@ export async function launchDispatchCampaign(params: {
             radius_km: params.isNationwide ? null : params.radiusKm,
             notes: params.notes || '',
             status: 'sent',
+          };
+
+          return {
+            user_id: t.owner_id,
+            title_ar: 'فرصة جديدة 🎉',
+            title_fr: 'Nouvelle opportunité 🎉',
+            body_ar: `«${params.companyName}» محتاجة «${params.machineName}» ديالك · ${distTextAr}`,
+            body_fr: `«${params.companyName}» recherche «${params.machineName}» · ${distTextFr}`,
+            type: 'dispatch_opportunity',
+            data: dataPayload,
             is_read: false,
-          }));
-
-          const { data: insertedNotifs, error: notifErr } = await supabase
-            .from('dispatch_notifications')
-            .insert(notifRows)
-            .select('*');
-
-          if (!notifErr && insertedNotifs) {
-            createdNotifs = insertedNotifs as DispatchNotification[];
-          }
-        }
-
-        const fullCampaign: DispatchCampaign = {
-          ...(createdCamp as DispatchCampaign),
-          notifications: createdNotifs,
-        };
-
-        broadcastDispatchEvent({
-          type: 'CAMPAIGN_LAUNCHED',
-          campaign: fullCampaign,
-          notifications: createdNotifs,
+          };
         });
 
-        return { campaign: fullCampaign, notifications: createdNotifs, persistedToSupabase: true };
-      }
+        const { data: insertedGeneric, error: genErr } = await supabase
+          .from('notifications')
+          .insert(genericNotifs)
+          .select('*');
 
-      console.warn('Supabase dispatch_campaigns insert notice:', campErr?.message);
+        if (!genErr && insertedGeneric) {
+          persistedToSupabase = true;
+          if (createdNotifs.length === 0) {
+            createdNotifs = insertedGeneric.map((row: any) => ({
+              id: row.id,
+              campaign_id: row.data?.campaign_id || resolvedCampaignId,
+              owner_id: row.user_id,
+              contractor_id: row.data?.contractor_id || effectiveContractorId,
+              machine_id: row.data?.machine_id || undefined,
+              company_name: row.data?.company_name || params.companyName,
+              machine_name: row.data?.machine_name || params.machineName,
+              matched_machine_title: row.data?.matched_machine_title,
+              site_name: row.data?.site_name || params.siteName,
+              site_city: row.data?.site_city || params.siteCity || '',
+              site_lat: row.data?.site_lat ?? params.siteLat,
+              site_lng: row.data?.site_lng ?? params.siteLng,
+              site_phone: row.data?.site_phone || params.sitePhone || '',
+              distance_km: row.data?.distance_km ?? 0,
+              is_nationwide: Boolean(row.data?.is_nationwide),
+              radius_km: row.data?.radius_km ?? null,
+              notes: row.data?.notes || '',
+              status: 'sent',
+              is_read: false,
+              created_at: row.created_at || now,
+            }));
+          }
+        } else if (genErr) {
+          console.warn('Supabase generic notifications insert notice:', genErr.message);
+        }
+      }
     } catch (err) {
-      console.warn('Supabase dispatch_campaigns exception:', err);
+      console.warn('Supabase public.notifications dispatch warning:', err);
     }
   }
 
-  // Fallback local persistence (only if migration not yet applied remotely)
-  const localCampaign: DispatchCampaign = {
-    id: fallbackCampaignId,
+  // Channel 3: Express Server SQLite /api/notifications (full-stack server sync)
+  if (params.targets.length > 0) {
+    await Promise.allSettled(
+      params.targets.map((t) =>
+        serverApi.createNotification({
+          user_id: t.owner_id,
+          title_ar: 'فرصة جديدة 🎉',
+          title_fr: 'Nouvelle opportunité 🎉',
+          body_ar: `«${params.companyName}» محتاجة «${params.machineName}» ديالك`,
+          body_fr: `«${params.companyName}» recherche «${params.machineName}»`,
+          type: 'dispatch_opportunity',
+          data: {
+            campaign_id: resolvedCampaignId,
+            owner_id: t.owner_id,
+            contractor_id: effectiveContractorId,
+            machine_id: t.machine_id,
+            company_name: params.companyName,
+            machine_name: params.machineName,
+            matched_machine_title: t.matched_machine_title,
+            site_name: params.siteName,
+            site_city: params.siteCity || '',
+            site_lat: params.siteLat,
+            site_lng: params.siteLng,
+            site_phone: params.sitePhone || '',
+            distance_km: t.distance_km,
+            is_nationwide: params.isNationwide,
+            radius_km: params.isNationwide ? null : params.radiusKm,
+            notes: params.notes || '',
+            status: 'sent',
+          },
+        })
+      )
+    );
+  }
+
+  // Build final notification list (guaranteeing in-memory objects even if offline)
+  if (createdNotifs.length === 0 && params.targets.length > 0) {
+    createdNotifs = params.targets.map((t, i) => ({
+      id: `dn_${Date.now()}_${i}`,
+      campaign_id: resolvedCampaignId,
+      owner_id: t.owner_id,
+      contractor_id: effectiveContractorId,
+      machine_id: t.machine_id,
+      company_name: params.companyName,
+      machine_name: params.machineName,
+      matched_machine_title: t.matched_machine_title,
+      site_name: params.siteName,
+      site_city: params.siteCity || '',
+      site_lat: params.siteLat,
+      site_lng: params.siteLng,
+      site_phone: params.sitePhone || '',
+      distance_km: t.distance_km,
+      is_nationwide: params.isNationwide,
+      radius_km: params.isNationwide ? null : params.radiusKm,
+      notes: params.notes || '',
+      status: 'sent',
+      is_read: false,
+      created_at: now,
+    }));
+  }
+
+  const finalCampaign: DispatchCampaign = {
+    id: resolvedCampaignId,
     ...campaignPayload,
     created_at: now,
-    notifications: [],
+    notifications: createdNotifs,
   };
 
-  const localNotifs: DispatchNotification[] = params.targets.map((t, i) => ({
-    id: `dn_${Date.now()}_${i}`,
-    campaign_id: fallbackCampaignId,
-    owner_id: t.owner_id,
-    contractor_id: params.contractorId,
-    machine_id: t.machine_id,
-    company_name: params.companyName,
-    machine_name: params.machineName,
-    matched_machine_title: t.matched_machine_title,
-    site_name: params.siteName,
-    site_city: params.siteCity || '',
-    site_lat: params.siteLat,
-    site_lng: params.siteLng,
-    site_phone: params.sitePhone || '',
-    distance_km: t.distance_km,
-    is_nationwide: params.isNationwide,
-    radius_km: params.isNationwide ? null : params.radiusKm,
-    notes: params.notes || '',
-    status: 'sent',
-    is_read: false,
-    created_at: now,
-  }));
-
-  localCampaign.notifications = localNotifs;
-  saveLocalCampaignFallback(localCampaign, localNotifs);
+  // Channel 4: Local persistence & BroadcastChannel
+  saveLocalCampaignFallback(finalCampaign, createdNotifs);
   broadcastDispatchEvent({
     type: 'CAMPAIGN_LAUNCHED',
-    campaign: localCampaign,
-    notifications: localNotifs,
+    campaign: finalCampaign,
+    notifications: createdNotifs,
   });
 
-  return { campaign: localCampaign, notifications: localNotifs, persistedToSupabase: false };
+  return { campaign: finalCampaign, notifications: createdNotifs, persistedToSupabase };
+}
+
+function mapGenericNotificationToDispatch(row: any): DispatchNotification | null {
+  const data = row?.data || {};
+  if (!row) return null;
+  if (row.type !== 'dispatch_opportunity' && !data.campaign_id) return null;
+
+  return {
+    id: row.id,
+    campaign_id: data.campaign_id || row.id,
+    owner_id: data.owner_id || row.user_id,
+    contractor_id: data.contractor_id || '',
+    machine_id: data.machine_id || undefined,
+    company_name: data.company_name || 'مقاولة أشغال',
+    machine_name: data.machine_name || 'آلية بناء',
+    matched_machine_title: data.matched_machine_title || undefined,
+    site_name: data.site_name || 'ورش بناء',
+    site_city: data.site_city || '',
+    site_lat: data.site_lat ?? undefined,
+    site_lng: data.site_lng ?? undefined,
+    site_phone: data.site_phone || '',
+    distance_km: data.distance_km != null ? Number(data.distance_km) : null,
+    is_nationwide: Boolean(data.is_nationwide),
+    radius_km: data.radius_km != null ? Number(data.radius_km) : null,
+    notes: data.notes || '',
+    status: data.status || (row.is_read || row.read ? 'read' : 'sent'),
+    is_read: Boolean(row.is_read || row.read),
+    created_at: row.created_at || new Date().toISOString(),
+  };
 }
 
 export async function fetchOwnerDispatchNotifications(ownerId: string): Promise<DispatchNotification[]> {
   if (!ownerId) return [];
 
-  if (isSupabaseConfigured) {
+  const mergedByCampaign = new Map<string, DispatchNotification>();
+
+  const mergeNotif = (item: DispatchNotification, preferIncoming: boolean) => {
+    if (!item || item.status === 'dismissed') return;
+    const key = `${item.campaign_id || item.id}__${item.owner_id}`;
+    const existing = mergedByCampaign.get(key);
+    if (!existing) {
+      mergedByCampaign.set(key, item);
+    } else if (preferIncoming) {
+      mergedByCampaign.set(key, {
+        ...existing,
+        ...item,
+        is_read: existing.is_read || item.is_read,
+        status: existing.status === 'accepted' ? 'accepted' : item.status,
+      });
+    }
+  };
+
+  if (isSupabaseConfigured && isUuid(ownerId)) {
+    // 1. Dedicated dispatch_notifications table
     try {
       const { data, error } = await supabase
         .from('dispatch_notifications')
@@ -358,25 +556,71 @@ export async function fetchOwnerDispatchNotifications(ownerId: string): Promise<
         .limit(30);
 
       if (!error && data) {
-        return data as DispatchNotification[];
+        for (const row of data as DispatchNotification[]) {
+          mergeNotif(row, true);
+        }
       }
     } catch {
-      // Fallback below
+      // ignore if table not created yet
+    }
+
+    // 2. Existing public.notifications table fallback
+    try {
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('*')
+        .eq('user_id', ownerId)
+        .eq('type', 'dispatch_opportunity')
+        .order('created_at', { ascending: false })
+        .limit(30);
+
+      if (!error && data) {
+        for (const row of data) {
+          const mapped = mapGenericNotificationToDispatch(row);
+          if (mapped) mergeNotif(mapped, false);
+        }
+      }
+    } catch {
+      // ignore
     }
   }
 
+  // 3. Express SQLite /api/notifications fallback
+  try {
+    const serverRes = await serverApi.getNotifications({ user_id: ownerId });
+    for (const sNotif of serverRes.notifications || []) {
+      const mapped = mapGenericNotificationToDispatch(sNotif);
+      if (mapped && mapped.owner_id === ownerId) {
+        mergeNotif(mapped, false);
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // 4. Local cache merge
   try {
     const local: DispatchNotification[] = JSON.parse(localStorage.getItem(LOCAL_NOTIFS_KEY) || '[]');
-    return local.filter((n) => n.owner_id === ownerId && n.status !== 'dismissed');
+    for (const n of local) {
+      if (n.owner_id === ownerId) {
+        mergeNotif(n, false);
+      }
+    }
   } catch {
-    return [];
+    // ignore
   }
+
+  return Array.from(mergedByCampaign.values()).sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
 }
 
 export async function fetchContractorCampaigns(contractorId: string): Promise<DispatchCampaign[]> {
   if (!contractorId) return [];
 
-  if (isSupabaseConfigured) {
+  const campaignsMap = new Map<string, DispatchCampaign>();
+
+  if (isSupabaseConfigured && isUuid(contractorId)) {
     try {
       const { data: camps, error } = await supabase
         .from('dispatch_campaigns')
@@ -387,7 +631,7 @@ export async function fetchContractorCampaigns(contractorId: string): Promise<Di
 
       if (!error && camps) {
         const campIds = camps.map((c: any) => c.id);
-        let notifsByCamp = new Map<string, DispatchNotification[]>();
+        const notifsByCamp = new Map<string, DispatchNotification[]>();
 
         if (campIds.length > 0) {
           const { data: notifs } = await supabase
@@ -405,10 +649,12 @@ export async function fetchContractorCampaigns(contractorId: string): Promise<Di
           }
         }
 
-        return (camps as DispatchCampaign[]).map((c) => ({
-          ...c,
-          notifications: notifsByCamp.get(c.id) || [],
-        }));
+        for (const c of camps as DispatchCampaign[]) {
+          campaignsMap.set(c.id, {
+            ...c,
+            notifications: notifsByCamp.get(c.id) || [],
+          });
+        }
       }
     } catch {
       // Fallback below
@@ -417,30 +663,56 @@ export async function fetchContractorCampaigns(contractorId: string): Promise<Di
 
   try {
     const local: DispatchCampaign[] = JSON.parse(localStorage.getItem(LOCAL_CAMPAIGNS_KEY) || '[]');
-    return local.filter((c) => c.contractor_id === contractorId);
+    for (const c of local) {
+      if (c.contractor_id === contractorId && !campaignsMap.has(c.id)) {
+        campaignsMap.set(c.id, c);
+      }
+    }
   } catch {
-    return [];
+    // ignore
   }
+
+  return Array.from(campaignsMap.values()).sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
 }
 
 export async function updateDispatchNotificationStatus(
   notificationId: string,
-  updates: { status?: DispatchNotification['status']; is_read?: boolean }
+  updates: { status?: DispatchNotification['status']; is_read?: boolean },
+  campaignId?: string
 ): Promise<void> {
-  if (isSupabaseConfigured && !notificationId.startsWith('dn_')) {
+  if (isSupabaseConfigured && isUuid(notificationId)) {
     try {
       await supabase
         .from('dispatch_notifications')
         .update(updates)
         .eq('id', notificationId);
     } catch {
-      // Ignore
+      // ignore
     }
+
+    try {
+      await supabase
+        .from('notifications')
+        .update({ is_read: updates.is_read ?? true })
+        .eq('id', notificationId);
+    } catch {
+      // ignore
+    }
+  }
+
+  if (notificationId.startsWith('notif_')) {
+    await serverApi.markNotificationRead(notificationId);
   }
 
   try {
     const local: DispatchNotification[] = JSON.parse(localStorage.getItem(LOCAL_NOTIFS_KEY) || '[]');
-    const updated = local.map((n) => (n.id === notificationId ? { ...n, ...updates } : n));
+    const updated = local.map((n) =>
+      n.id === notificationId || (campaignId && n.campaign_id === campaignId)
+        ? { ...n, ...updates }
+        : n
+    );
     localStorage.setItem(LOCAL_NOTIFS_KEY, JSON.stringify(updated));
     broadcastDispatchEvent({ type: 'NOTIF_UPDATED' });
   } catch {
@@ -449,7 +721,7 @@ export async function updateDispatchNotificationStatus(
 }
 
 export async function closeDispatchCampaign(campaignId: string): Promise<void> {
-  if (isSupabaseConfigured && !campaignId.startsWith('cmp_')) {
+  if (isSupabaseConfigured && isUuid(campaignId)) {
     try {
       await supabase
         .from('dispatch_campaigns')
@@ -462,7 +734,7 @@ export async function closeDispatchCampaign(campaignId: string): Promise<void> {
 
   try {
     const local: DispatchCampaign[] = JSON.parse(localStorage.getItem(LOCAL_CAMPAIGNS_KEY) || '[]');
-    const updated = local.map((c) => (c.id === campaignId ? { ...c, status: 'closed' } : c));
+    const updated = local.map((c) => (c.id === campaignId ? { ...c, status: 'closed' as const } : c));
     localStorage.setItem(LOCAL_CAMPAIGNS_KEY, JSON.stringify(updated));
     broadcastDispatchEvent({ type: 'CAMPAIGN_UPDATED' });
   } catch {

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from './useAuth';
-import { URGENT_HOURS_THRESHOLD } from '../lib/constants';
+import { URGENT_HOURS_THRESHOLD, isLifetimeFreePhone } from '../lib/constants';
 import { SubscriptionStatus } from '../types/database';
 
 export interface SubscriptionInfo {
@@ -10,6 +10,7 @@ export interface SubscriptionInfo {
   isExpired: boolean;
   isLocked: boolean;
   isUrgent: boolean;
+  isLifetimeFree?: boolean;
   remainingSeconds: number;
   formattedCountdown: string;
   hours: number;
@@ -43,8 +44,13 @@ export function useSubscription(): SubscriptionInfo {
   }, []);
 
   return useMemo(() => {
-    // If user is admin, they are never locked and always active
-    if (profile?.role === 'admin') {
+    const isVipPhone =
+      isLifetimeFreePhone(profile?.phone) ||
+      isLifetimeFreePhone((user as any)?.phone) ||
+      isLifetimeFreePhone((user as any)?.user_metadata?.phone);
+
+    // If user is admin or holds a lifetime-free VIP phone number, they are never locked and always active
+    if (profile?.role === 'admin' || isVipPhone) {
       return {
         status: 'active',
         isTrial: false,
@@ -52,13 +58,14 @@ export function useSubscription(): SubscriptionInfo {
         isExpired: false,
         isLocked: false,
         isUrgent: false,
-        remainingSeconds: 86400 * 365,
+        isLifetimeFree: isVipPhone,
+        remainingSeconds: 86400 * 365 * 50,
         formattedCountdown: '∞',
         hours: 999,
         minutes: 0,
         seconds: 0,
         trialEndsAt: null,
-        subscriptionEndsAt: new Date(Date.now() + 86400000 * 365),
+        subscriptionEndsAt: new Date('2099-12-31T23:59:59.000Z'),
       };
     }
 

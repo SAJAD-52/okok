@@ -660,7 +660,10 @@ export const DashboardLayout: React.FC = () => {
             </div>
               {/* Notifications Button with Live Badge & Dropdown */}
               {(() => {
-                const unreadSystemCount = systemNotifications.filter((n) => !n.is_read && !n.read).length;
+                const generalSystemNotifs = systemNotifications.filter(
+                  (n) => n.type !== 'dispatch_opportunity'
+                );
+                const unreadSystemCount = generalSystemNotifs.filter((n) => !n.is_read && !n.read).length;
                 const unreadOppCount = opportunityNotifications.filter(
                   (n) => !n.is_read && n.status === 'sent'
                 ).length;
@@ -746,7 +749,7 @@ export const DashboardLayout: React.FC = () => {
                         <div className="max-h-80 overflow-y-auto p-2 space-y-2">
                           {opportunityNotifications.length === 0 &&
                           pendingBookingsList.length === 0 &&
-                          systemNotifications.length === 0 ? (
+                          generalSystemNotifs.length === 0 ? (
                             <div className="p-6 text-center text-steel-400 text-xs">
                               <Check className="w-8 h-8 mx-auto mb-1 text-steel-300" />
                               <span>
@@ -810,10 +813,14 @@ export const DashboardLayout: React.FC = () => {
                                     <button
                                       type="button"
                                       onClick={async () => {
-                                        await updateDispatchNotificationStatus(opp.id, {
-                                          is_read: true,
-                                          status: 'accepted',
-                                        });
+                                        await updateDispatchNotificationStatus(
+                                          opp.id,
+                                          {
+                                            is_read: true,
+                                            status: 'accepted',
+                                          },
+                                          opp.campaign_id
+                                        );
                                         setOpportunityNotifications((prev) =>
                                           prev.map((item) =>
                                             item.id === opp.id
@@ -895,7 +902,7 @@ export const DashboardLayout: React.FC = () => {
                               ))}
 
                               {/* 2. System notifications from SQLite DB */}
-                              {systemNotifications.map((notif) => (
+                              {generalSystemNotifs.map((notif) => (
                                 <div
                                   key={notif.id}
                                   onClick={async () => {

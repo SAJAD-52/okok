@@ -1,8 +1,8 @@
 // ============================================================================
 // JADIJCB: Real-Time Owner Dispatch Opportunity Listener & Celebration Alert
-// Listens via Supabase Realtime + BroadcastChannel for contractor dispatch
-// campaigns inside the owner's km radius, plays celebration sound, triggers
-// mobile/PWA notification, and displays an instant action card.
+// Listens across Supabase Realtime (dispatch_notifications + notifications),
+// Express /api/notifications, BroadcastChannel, and lightweight visibility poll
+// so live contractor dispatch alerts ALWAYS arrive across phones & browsers.
 // ============================================================================
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
@@ -37,9 +37,9 @@ interface OpportunityAlertListenerProps {
   onNotificationsSync: (notifications: DispatchNotification[]) => void;
 }
 
-const SESSION_ALERTED_KEY = 'jadijcb_session_alerted_dispatch_ids';
+const SESSION_ALERTED_KEY = 'jadijcb_session_alerted_dispatch_keys';
 
-function getSessionAlertedIds(): Set<string> {
+function getSessionAlertedKeys(): Set<string> {
   try {
     const raw = sessionStorage.getItem(SESSION_ALERTED_KEY);
     if (!raw) return new Set();
@@ -49,11 +49,11 @@ function getSessionAlertedIds(): Set<string> {
   }
 }
 
-function addSessionAlertedId(id: string) {
+function addSessionAlertedKey(key: string) {
   try {
-    const set = getSessionAlertedIds();
-    set.add(id);
-    sessionStorage.setItem(SESSION_ALERTED_KEY, JSON.stringify(Array.from(set).slice(-100)));
+    const set = getSessionAlertedKeys();
+    set.add(key);
+    sessionStorage.setItem(SESSION_ALERTED_KEY, JSON.stringify(Array.from(set).slice(-120)));
   } catch {
     // ignore
   }
@@ -67,14 +67,19 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
   const navigate = useNavigate();
 
   const [activeAlert, setActiveAlert] = useState<DispatchNotification | null>(null);
-  const alertedIdsRef = useRef<Set<string>>(getSessionAlertedIds());
+  const alertedKeysRef = useRef<Set<string>>(getSessionAlertedKeys());
   const onSyncRef = useRef(onNotificationsSync);
   onSyncRef.current = onNotificationsSync;
 
   const triggerCelebrationAlert = useCallback((notif: DispatchNotification) => {
-    if (!notif?.id || alertedIdsRef.current.has(notif.id)) return;
-    alertedIdsRef.current.add(notif.id);
-    addSessionAlertedId(notif.id);
+    if (!notif?.id) return;
+    const alertKey = notif.campaign_id || notif.id;
+    if (alertedKeysRef.current.has(alertKey) || alertedKeysRef.current.has(notif.id)) return;
+
+    alertedKeysRef.current.add(alertKey);
+    alertedKeysRef.current.add(notif.id);
+    addSessionAlertedKey(alertKey);
+    addSessionAlertedKey(notif.id);
 
     // 1. Play synthesized chime & vibrate phone
     playOpportunitySound();
@@ -91,7 +96,7 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
       body: `«${notif.company_name}» محتاجة «${notif.machine_name}» ديالك${
         distLabel ? ` · ${distLabel}` : ''
       }`,
-      tag: notif.id,
+      tag: alertKey,
       url: `/owner/messages?target=${notif.contractor_id}&machine=${notif.machine_id || ''}`,
     });
 
@@ -100,15 +105,21 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
   }, []);
 
   const syncFromSource = useCallback(
-    async (notifyUnreadFirstTime: boolean) => {
+    async (notifyUnread: boolean) => {
       if (!ownerId) return;
       const list = await fetchOwnerDispatchNotifications(ownerId);
       onSyncRef.current(list);
 
-      if (notifyUnreadFirstTime) {
-        const newestUnread = list.find(
-          (n) => !n.is_read && n.status === 'sent' && !alertedIdsRef.current.has(n.id)
-        );
+      if (notifyUnread) {
+        const newestUnread = list.find((n) => {
+          const key = n.campaign_id || n.id;
+          return (
+            !n.is_read &&
+            n.status === 'sent' &&
+            !alertedKeysRef.current.has(key) &&
+            !alertedKeysRef.current.has(n.id)
+          );
+        });
         if (newestUnread) {
           triggerCelebrationAlert(newestUnread);
         }
@@ -124,10 +135,10 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
   useEffect(() => {
     if (!ownerId) return;
 
-    // Initial load
+    // 1. Initial load
     syncFromSource(true);
 
-    // Same-browser / local BroadcastChannel listener
+    // 2. Same-browser BroadcastChannel listener
     const unsubscribeLocal = subscribeLocalDispatchEvents((detail) => {
       if (detail?.type === 'CAMPAIGN_LAUNCHED' && Array.isArray(detail.notifications)) {
         const mine = (detail.notifications as DispatchNotification[]).filter(
@@ -142,11 +153,11 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
       }
     });
 
-    // Cross-device Supabase Realtime listener
+    // 3. Cross-device Supabase Realtime listeners (both dedicated dispatch_notifications & public.notifications)
     let realtimeChannel: any = null;
     if (isSupabaseConfigured) {
       realtimeChannel = supabase
-        .channel(`owner_dispatch_${ownerId}`)
+        .channel(`owner_dispatch_all_${ownerId}`)
         .on(
           'postgres_changes',
           {
@@ -175,8 +186,30 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
             syncFromSource(false);
           }
         )
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'notifications',
+            filter: `user_id=eq.${ownerId}`,
+          },
+          (payload: any) => {
+            const row = payload?.new;
+            if (row?.type === 'dispatch_opportunity') {
+              syncFromSource(true);
+            }
+          }
+        )
         .subscribe();
     }
+
+    // 4. Lightweight 7s fallback polling while tab is visible (catches cross-device alerts even if Realtime WS drops)
+    const pollTimer = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        syncFromSource(true);
+      }
+    }, 7000);
 
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
@@ -187,6 +220,7 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
 
     return () => {
       unsubscribeLocal();
+      clearInterval(pollTimer);
       document.removeEventListener('visibilitychange', handleVisibility);
       if (realtimeChannel) {
         supabase.removeChannel(realtimeChannel);
@@ -196,9 +230,13 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
 
   const handleDismiss = async () => {
     if (!activeAlert) return;
-    const currentId = activeAlert.id;
+    const target = activeAlert;
     setActiveAlert(null);
-    await updateDispatchNotificationStatus(currentId, { is_read: true, status: 'read' });
+    await updateDispatchNotificationStatus(
+      target.id,
+      { is_read: true, status: 'read' },
+      target.campaign_id
+    );
     syncFromSource(false);
   };
 
@@ -206,10 +244,14 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
     if (!activeAlert) return;
     const alertTarget = activeAlert;
     setActiveAlert(null);
-    await updateDispatchNotificationStatus(alertTarget.id, {
-      is_read: true,
-      status: 'accepted',
-    });
+    await updateDispatchNotificationStatus(
+      alertTarget.id,
+      {
+        is_read: true,
+        status: 'accepted',
+      },
+      alertTarget.campaign_id
+    );
     syncFromSource(false);
     navigate(
       `/owner/messages?target=${alertTarget.contractor_id}&machine=${alertTarget.machine_id || ''}`

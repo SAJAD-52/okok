@@ -4,6 +4,7 @@ import { PlusCircle, User, Menu, X, Compass, Wrench, MapPin, Building2, HardHat,
 import { Logo } from '../ui/Logo';
 import { LanguageSwitcher } from '../ui/LanguageSwitcher';
 import { Button } from '../ui/Button';
+import { PWAInstallButton } from '../pwa/PWAInstallUI';
 import { useLanguage } from '../../hooks/useLanguage';
 import { useAuth } from '../../hooks/useAuth';
 
@@ -59,7 +60,8 @@ export const PublicHeader: React.FC = () => {
         </nav>
 
         {/* Zone 3: Primary Action + Language Switcher + Auth */}
-        <div className="flex items-center gap-2.5 sm:gap-3.5 shrink-0">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          <PWAInstallButton variant="header" className="hidden lg:inline-flex" />
           <LanguageSwitcher />
 
           {user ? (
@@ -220,6 +222,11 @@ export const PublicHeader: React.FC = () => {
                 ? (isSuperAdmin ? '👑 Super Admin' : isContractor ? (lang === 'fr' ? 'Mon Entreprise' : 'بوابة المقاولة') : t('nav.dashboard'))
                 : t('nav.login')}
             </Button>
+
+            <PWAInstallButton
+              variant="drawer"
+              onAfterClick={() => setMobileMenuOpen(false)}
+            />
           </div>
         </div>
       )}

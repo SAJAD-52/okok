@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { Logo } from '../ui/Logo';
 import { LanguageSwitcher } from '../ui/LanguageSwitcher';
+import { PWAInstallButton } from '../pwa/PWAInstallUI';
 import { useLanguage } from '../../hooks/useLanguage';
 import { useAuth } from '../../hooks/useAuth';
 import { useSubscription } from '../../hooks/useSubscription';
@@ -523,6 +524,9 @@ export const DashboardLayout: React.FC = () => {
             <span>{lang === 'fr' ? 'Modifier mes informations' : 'تعديل معلوماتي الشخصية'}</span>
           </button>
 
+          {/* Install Mobile App Button */}
+          <PWAInstallButton variant="sidebar" />
+
           {/* Subscription Mini Pill (Only for machinery owners) */}
           {isTrial && !isLocked && !isContractor && (
             <button
@@ -635,6 +639,10 @@ export const DashboardLayout: React.FC = () => {
               )}
               <span className="hidden sm:inline whitespace-nowrap">{lang === 'fr' ? 'Mon profil' : 'تعديل حسابي'}</span>
             </button>
+
+            <div className="hidden sm:flex shrink-0">
+              <PWAInstallButton variant="header-icon" />
+            </div>
 
             <div className="md:hidden shrink-0">
               <LanguageSwitcher className="px-2! min-h-[40px]!" />
@@ -1115,6 +1123,12 @@ export const DashboardLayout: React.FC = () => {
                   <ChevronLeft className="w-4 h-4 rtl:rotate-0 ltr:rotate-180 text-steel-400" />
                 </NavLink>
               )}
+
+              {/* Install App Button inside mobile More menu */}
+              <PWAInstallButton
+                variant="drawer"
+                onAfterClick={() => setIsMoreMenuOpen(false)}
+              />
 
               {/* Logout Button */}
               <button

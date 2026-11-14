@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ToastContainer } from './components/ui/Toast';
+import { PWAInstallBanner, OfflineIndicator } from './components/pwa/PWAInstallUI';
 import { AuthProvider } from './hooks/useAuth';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
 
@@ -135,6 +136,10 @@ export const App: React.FC = () => {
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
+
+          {/* PWA Install Floating Card & Offline Connectivity Indicator */}
+          <PWAInstallBanner />
+          <OfflineIndicator />
 
           {/* Global Toast Notification Portal */}
           <ToastContainer />

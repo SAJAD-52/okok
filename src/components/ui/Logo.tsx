@@ -62,11 +62,11 @@ export const Logo: React.FC<LogoProps> = ({
           JADI<span className="text-primary">JCB</span>
         </span>
         <span
-          className={`font-semibold tracking-wider uppercase font-arabic mt-0.5 leading-none ${
-            isLight ? 'text-steel-300' : 'text-steel-500'
+          className={`font-bold font-arabic mt-1 leading-none ${
+            isLight ? 'text-primary/90' : 'text-steel-600'
           } ${sizeMap[size].sub}`}
         >
-          ماروك · MAROC
+          كلشي قريب ليك
         </span>
       </div>
     </Link>

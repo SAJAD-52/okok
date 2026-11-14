@@ -7,7 +7,12 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import './index.css';
 import './i18n'; // Initialize i18next & apply HTML dir/lang
+import { registerSW } from 'virtual:pwa-register';
 import { AlertTriangle, Database, Key, Terminal, ExternalLink } from 'lucide-react';
+
+if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+  registerSW({ immediate: true });
+}
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;

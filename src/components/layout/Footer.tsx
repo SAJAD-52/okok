@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Phone, Mail, MapPin, ShieldCheck } from 'lucide-react';
 import { Logo } from '../ui/Logo';
 import { LanguageSwitcher } from '../ui/LanguageSwitcher';
+import { PWAInstallButton } from '../pwa/PWAInstallUI';
 import { useLanguage } from '../../hooks/useLanguage';
 import { EQUIPMENT_CATEGORIES } from '../../data/categories';
 import { MOROCCAN_CITIES } from '../../data/cities';
@@ -38,8 +39,9 @@ export const Footer: React.FC = () => {
               </div>
             </div>
 
-            <div className="mt-3">
+            <div className="mt-3 flex flex-wrap items-center gap-3">
               <LanguageSwitcher variant="dark" />
+              <PWAInstallButton variant="dark" />
             </div>
           </div>
 

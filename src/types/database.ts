@@ -342,3 +342,48 @@ export interface Lead {
   machine?: Partial<Machine>;
 }
 
+export interface DispatchCampaign {
+  id: string;
+  contractor_id: string;
+  company_name: string;
+  site_id?: string | null;
+  site_name: string;
+  site_city?: string;
+  site_lat: number;
+  site_lng: number;
+  site_phone?: string;
+  machine_category: string;
+  machine_name: string;
+  radius_km: number | null;
+  is_nationwide: boolean;
+  notes?: string;
+  matched_owners_count: number;
+  status: 'active' | 'closed';
+  created_at: string;
+  notifications?: DispatchNotification[];
+}
+
+export interface DispatchNotification {
+  id: string;
+  campaign_id: string;
+  owner_id: string;
+  contractor_id: string;
+  machine_id?: string;
+  company_name: string;
+  machine_name: string;
+  matched_machine_title?: string;
+  site_name: string;
+  site_city?: string;
+  site_lat?: number;
+  site_lng?: number;
+  site_phone?: string;
+  distance_km: number | null;
+  is_nationwide: boolean;
+  radius_km: number | null;
+  notes?: string;
+  status: 'sent' | 'read' | 'accepted' | 'dismissed';
+  is_read: boolean;
+  created_at: string;
+}
+
+

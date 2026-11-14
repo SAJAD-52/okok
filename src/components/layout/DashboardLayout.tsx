@@ -23,10 +23,14 @@ import {
   Users,
   Briefcase,
   MoreHorizontal,
+  Volume2,
+  Globe,
+  Navigation,
 } from 'lucide-react';
 import { Logo } from '../ui/Logo';
 import { LanguageSwitcher } from '../ui/LanguageSwitcher';
 import { PWAInstallButton } from '../pwa/PWAInstallUI';
+import { OpportunityAlertListener } from '../pwa/OpportunityAlertListener';
 import { useLanguage } from '../../hooks/useLanguage';
 import { useAuth } from '../../hooks/useAuth';
 import { useSubscription } from '../../hooks/useSubscription';
@@ -34,13 +38,16 @@ import { TrialBanner } from '../dashboard/TrialBanner';
 import { SoftLockModal } from '../dashboard/SoftLockModal';
 import { PaymentProofModal } from '../dashboard/PaymentProofModal';
 import { ProfileSettingsModal } from '../profile/ProfileSettingsModal';
-import { Booking } from '../../types/database';
+import { Booking, DispatchNotification } from '../../types/database';
 import { bookingStore } from '../../lib/bookingStore';
 import { machineStore } from '../../lib/machineStore';
 import { chatStore } from '../../lib/chatStore';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { toast } from '../ui/Toast';
 import { serverApi, ServerNotification } from '../../lib/serverApi';
+import { updateDispatchNotificationStatus } from '../../lib/dispatchService';
+import { playOpportunitySound, requestNotificationPermission } from '../../lib/opportunityAudio';
+import { formatDistanceKm } from '../../lib/geoUtils';
 
 export const DashboardLayout: React.FC = () => {
   const { t, isRTL, lang } = useLanguage();
@@ -55,6 +62,10 @@ export const DashboardLayout: React.FC = () => {
   const [pendingBookingsCount, setPendingBookingsCount] = useState<number>(0);
   const [pendingBookingsList, setPendingBookingsList] = useState<Booking[]>([]);
   const [systemNotifications, setSystemNotifications] = useState<ServerNotification[]>([]);
+  const [opportunityNotifications, setOpportunityNotifications] = useState<DispatchNotification[]>([]);
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission>(
+    typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'denied'
+  );
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
 
   const isContractor = profile?.role === 'client' || profile?.role === 'contractor';
@@ -650,7 +661,10 @@ export const DashboardLayout: React.FC = () => {
               {/* Notifications Button with Live Badge & Dropdown */}
               {(() => {
                 const unreadSystemCount = systemNotifications.filter((n) => !n.is_read && !n.read).length;
-                const totalAlertsCount = pendingBookingsCount + unreadSystemCount;
+                const unreadOppCount = opportunityNotifications.filter(
+                  (n) => !n.is_read && n.status === 'sent'
+                ).length;
+                const totalAlertsCount = pendingBookingsCount + unreadSystemCount + unreadOppCount;
 
                 return (
                   <div className="relative shrink-0">
@@ -662,7 +676,7 @@ export const DashboardLayout: React.FC = () => {
                     >
                       <Bell className="w-5 h-5" />
                       {totalAlertsCount > 0 && (
-                        <span className="absolute top-1 end-1 px-1.5 py-0.2 rounded-full bg-primary text-ink text-[10px] font-black border border-white animate-pulse">
+                        <span className="absolute top-1 end-1 px-1.5 py-0.2 rounded-full bg-primary text-ink text-[10px] font-black border border-white animate-pulse tabular-nums">
                           {totalAlertsCount}
                         </span>
                       )}
@@ -675,12 +689,12 @@ export const DashboardLayout: React.FC = () => {
                           <div className="flex items-center gap-2">
                             <Bell className="w-4 h-4 text-primary" />
                             <span className="text-xs font-bold">
-                              {lang === 'fr' ? 'Notifications & Demandes' : 'الإشعارات وطلبات الكراء'}
+                              {lang === 'fr' ? 'Notifications & Opportunités' : 'الإشعارات والفرص المباشرة'}
                             </span>
                           </div>
                           <div className="flex items-center gap-2">
                             {totalAlertsCount > 0 && (
-                              <span className="px-2 py-0.5 rounded-full bg-primary text-ink text-[10px] font-black">
+                              <span className="px-2 py-0.5 rounded-full bg-primary text-ink text-[10px] font-black tabular-nums">
                                 {totalAlertsCount} {lang === 'fr' ? 'nouveaux' : 'جديد'}
                               </span>
                             )}
@@ -701,18 +715,134 @@ export const DashboardLayout: React.FC = () => {
                           </div>
                         </div>
 
+                        {/* Enable Mobile Audio & Push Alert Prompt for Owners */}
+                        {!isContractor &&
+                          typeof window !== 'undefined' &&
+                          'Notification' in window &&
+                          notifPermission === 'default' && (
+                            <div className="p-2.5 bg-amber-50 border-b border-amber-200 flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <Volume2 className="w-4 h-4 text-primary-dark shrink-0" />
+                                <span className="text-[11px] font-bold text-ink truncate">
+                                  {lang === 'fr'
+                                    ? 'Activer les alertes sonores mobile'
+                                    : 'فعّل إشعارات الفرص الصوتية للهاتف'}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const perm = await requestNotificationPermission();
+                                  setNotifPermission(perm);
+                                  playOpportunitySound();
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-primary text-ink text-[10px] font-black shrink-0 cursor-pointer"
+                              >
+                                {lang === 'fr' ? 'Activer' : 'تفعيل 🔔'}
+                              </button>
+                            </div>
+                          )}
+
                         <div className="max-h-80 overflow-y-auto p-2 space-y-2">
-                          {pendingBookingsList.length === 0 && systemNotifications.length === 0 ? (
+                          {opportunityNotifications.length === 0 &&
+                          pendingBookingsList.length === 0 &&
+                          systemNotifications.length === 0 ? (
                             <div className="p-6 text-center text-steel-400 text-xs">
                               <Check className="w-8 h-8 mx-auto mb-1 text-steel-300" />
                               <span>
                                 {lang === 'fr'
                                   ? 'Aucune nouvelle demande pour le moment.'
-                                  : 'لا توجد طلبات حجز جديدة حالياً.'}
+                                  : 'لا توجد طلبات أو فرص جديدة حالياً.'}
                               </span>
                             </div>
                           ) : (
                             <>
+                              {/* 0. Live InDrive Dispatch Opportunities */}
+                              {opportunityNotifications.map((opp) => (
+                                <div
+                                  key={opp.id}
+                                  className={`p-3 rounded-xl border space-y-2 text-xs shadow-xs ${
+                                    !opp.is_read && opp.status === 'sent'
+                                      ? 'bg-ink text-white border-primary'
+                                      : 'bg-amber-50/70 text-ink border-amber-200'
+                                  }`}
+                                >
+                                  <div className="flex items-start gap-2.5">
+                                    <img
+                                      src="/assets/aistudio/image_010e3368.png"
+                                      alt="فرصة جديدة"
+                                      className="w-9 h-9 object-contain shrink-0 rounded-lg bg-white/10 p-0.5"
+                                    />
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex items-center justify-between gap-2">
+                                        <span
+                                          className={`text-xs font-black ${
+                                            !opp.is_read && opp.status === 'sent'
+                                              ? 'text-primary'
+                                              : 'text-primary-dark'
+                                          }`}
+                                        >
+                                          فرصة جديدة
+                                        </span>
+                                        {opp.is_nationwide ? (
+                                          <span className="inline-flex items-center gap-1 text-[10px] font-bold opacity-85">
+                                            <Globe className="w-3 h-3" />
+                                            <span>{lang === 'fr' ? 'Maroc' : 'المغرب كاملاً'}</span>
+                                          </span>
+                                        ) : opp.distance_km != null ? (
+                                          <span className="inline-flex items-center gap-1 text-[10px] font-black tabular-nums opacity-90">
+                                            <Navigation className="w-3 h-3" />
+                                            <span>{formatDistanceKm(opp.distance_km, lang)}</span>
+                                          </span>
+                                        ) : null}
+                                      </div>
+                                      <p className="font-black leading-snug mt-0.5 break-words">
+                                        «{opp.company_name}» محتاجة «{opp.machine_name}» ديالك
+                                      </p>
+                                      <p className="text-[10px] opacity-75 truncate mt-0.5">
+                                        {opp.site_name}
+                                        {opp.site_city ? ` · ${opp.site_city}` : ''}
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center gap-2 pt-1">
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        await updateDispatchNotificationStatus(opp.id, {
+                                          is_read: true,
+                                          status: 'accepted',
+                                        });
+                                        setOpportunityNotifications((prev) =>
+                                          prev.map((item) =>
+                                            item.id === opp.id
+                                              ? { ...item, is_read: true, status: 'accepted' }
+                                              : item
+                                          )
+                                        );
+                                        setIsNotificationsOpen(false);
+                                        navigate(
+                                          `/owner/messages?target=${opp.contractor_id}&machine=${opp.machine_id || ''}`
+                                        );
+                                      }}
+                                      className="px-2.5 py-1.5 rounded-lg bg-primary text-ink font-black text-[11px] hover:bg-primary-hover transition-colors cursor-pointer"
+                                    >
+                                      {lang === 'fr' ? 'Accepter & Discuter' : 'موافقة ومحادثة المقاولة'}
+                                    </button>
+                                    {opp.site_phone && (
+                                      <a
+                                        href={`tel:${opp.site_phone}`}
+                                        className="px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white font-bold text-[11px] hover:bg-emerald-700 flex items-center gap-1"
+                                      >
+                                        <Phone className="w-3 h-3" />
+                                        <span>{lang === 'fr' ? 'Appeler' : 'اتصال'}</span>
+                                      </a>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+
                               {/* 1. Pending Bookings requiring action */}
                               {pendingBookingsList.map((pb) => (
                                 <div
@@ -1162,6 +1292,14 @@ export const DashboardLayout: React.FC = () => {
         isOpen={isProfileModalOpen}
         onClose={() => setIsProfileModalOpen(false)}
       />
+
+      {/* Real-Time InDrive Opportunity Listener (Audio + Push + Celebration Popup for Owners) */}
+      {!isContractor && profile?.id && !(isSuperAdmin && !isImpersonating) && (
+        <OpportunityAlertListener
+          ownerId={profile.id}
+          onNotificationsSync={setOpportunityNotifications}
+        />
+      )}
     </div>
   );
 };

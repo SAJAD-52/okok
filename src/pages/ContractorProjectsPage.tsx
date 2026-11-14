@@ -17,24 +17,38 @@ import {
   CheckCircle,
   X,
   Navigation,
+  Radio,
+  Globe,
+  MessageSquare,
+  CheckCircle2,
+  XCircle,
 } from 'lucide-react';
-import { ContractorSite, MoroccanCity } from '../types/database';
+import { ContractorSite, DispatchCampaign, MoroccanCity } from '../types/database';
 import { MOROCCAN_CITIES } from '../data/cities';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { toast } from '../components/ui/Toast';
 import { MapLocationPicker } from '../components/machines/MapLocationPicker';
+import { DispatchCampaignModal } from '../components/projects/DispatchCampaignModal';
+import {
+  closeDispatchCampaign,
+  fetchContractorCampaigns,
+  subscribeLocalDispatchEvents,
+} from '../lib/dispatchService';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { useLanguage } from '../hooks/useLanguage';
 import { useAuth } from '../hooks/useAuth';
 
 export const ContractorProjectsPage: React.FC = () => {
   const { t, lang } = useLanguage();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const navigate = useNavigate();
 
   const [sites, setSites] = useState<ContractorSite[]>([]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [dispatchSite, setDispatchSite] = useState<ContractorSite | null>(null);
+  const [campaigns, setCampaigns] = useState<DispatchCampaign[]>([]);
 
   // New Site Form
   const [siteName, setSiteName] = useState('');
@@ -44,6 +58,46 @@ export const ContractorProjectsPage: React.FC = () => {
   const [managerPhone, setManagerPhone] = useState('+2126');
   const [lat, setLat] = useState<number>(33.5731);
   const [lng, setLng] = useState<number>(-7.5898);
+
+  const contractorId = user?.id || profile?.id || 'demo';
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadCampaigns = async () => {
+      const list = await fetchContractorCampaigns(contractorId);
+      if (!cancelled) setCampaigns(list);
+    };
+    loadCampaigns();
+
+    const unsubLocal = subscribeLocalDispatchEvents(() => {
+      loadCampaigns();
+    });
+
+    let channel: any = null;
+    if (isSupabaseConfigured && user?.id) {
+      channel = supabase
+        .channel(`contractor_campaigns_${user.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'dispatch_notifications',
+            filter: `contractor_id=eq.${user.id}`,
+          },
+          () => {
+            loadCampaigns();
+          }
+        )
+        .subscribe();
+    }
+
+    return () => {
+      cancelled = true;
+      unsubLocal();
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, [contractorId, user?.id]);
 
   useEffect(() => {
     try {
@@ -290,8 +344,8 @@ export const ContractorProjectsPage: React.FC = () => {
                 )}
               </div>
 
-              {/* Direct Radar Button */}
-              <div className="pt-3.5 mt-3.5 border-t border-steel-100">
+              {/* Direct Radar + Live Dispatch Campaign Buttons */}
+              <div className="pt-3.5 mt-3.5 border-t border-steel-100 grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <Button
                   type="button"
                   variant="primary"
@@ -300,13 +354,186 @@ export const ContractorProjectsPage: React.FC = () => {
                     navigate(`/entreprise/map?lat=${s.lat}&lng=${s.lng}&site=${encodeURIComponent(s.name)}`)
                   }
                   leftIcon={<Compass className="w-4 h-4" />}
-                  className="w-full justify-center font-black text-xs min-h-[44px]"
+                  className="w-full justify-center font-black text-xs min-h-[44px] whitespace-normal text-center leading-tight py-2"
                 >
-                  {lang === 'fr' ? 'Radar engins pour ce chantier' : 'رادار الآليات الأقرب لهذا الورش'}
+                  {lang === 'fr' ? 'Radar engins' : 'رادار الآليات الأقرب لهذا الورش'}
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="dark"
+                  size="sm"
+                  onClick={() => setDispatchSite(s)}
+                  leftIcon={<Radio className="w-4 h-4 text-primary" />}
+                  className="w-full justify-center font-black text-xs min-h-[44px] whitespace-normal text-center leading-tight py-2"
+                >
+                  {lang === 'fr' ? 'Lancer une alerte directe' : 'إطلاق حملة بحث مباشر'}
                 </Button>
               </div>
             </Card>
           ))}
+        </div>
+      )}
+
+      {/* Active & Recent Live Dispatch Campaigns Section */}
+      {campaigns.length > 0 && (
+        <div className="space-y-3 pt-2">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-base sm:text-lg font-black text-ink flex items-center gap-2">
+              <Radio className="w-5 h-5 text-primary-dark shrink-0" />
+              <span>
+                {lang === 'fr'
+                  ? 'Campagnes de recherche directe lancées'
+                  : 'حملات البحث المباشر المرسلة للملاك'}
+              </span>
+            </h2>
+            <span className="text-xs font-black px-2.5 py-1 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 tabular-nums">
+              {campaigns.filter((c) => c.status === 'active').length}{' '}
+              {lang === 'fr' ? 'actives' : 'نشطة'}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {campaigns.map((camp) => {
+              const acceptedNotifs = (camp.notifications || []).filter((n) => n.status === 'accepted');
+              const isClosed = camp.status === 'closed';
+
+              return (
+                <Card
+                  key={camp.id}
+                  className={`p-4 rounded-2xl border space-y-3 ${
+                    isClosed
+                      ? 'bg-steel-50/70 border-steel-200 opacity-85'
+                      : 'bg-white border-amber-300 shadow-soft'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span
+                          className={`px-2 py-0.5 rounded-lg text-[10px] font-black ${
+                            isClosed
+                              ? 'bg-steel-200 text-steel-700'
+                              : 'bg-emerald-100 text-emerald-800'
+                          }`}
+                        >
+                          {isClosed
+                            ? lang === 'fr'
+                              ? 'Clôturée'
+                              : 'مغلقة'
+                            : lang === 'fr'
+                            ? 'En diffusion live'
+                            : 'نشطة الآن'}
+                        </span>
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-steel-100 text-steel-700 text-[10px] font-bold tabular-nums">
+                          {camp.is_nationwide ? (
+                            <>
+                              <Globe className="w-3 h-3 text-primary-dark" />
+                              <span>{lang === 'fr' ? 'Tout le Maroc' : 'المغرب كاملاً'}</span>
+                            </>
+                          ) : (
+                            <span>
+                              {lang === 'fr' ? `Rayon ${camp.radius_km} km` : `نطاق ${camp.radius_km} كم`}
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                      <h3 className="text-sm font-black text-ink mt-1.5">{camp.machine_name}</h3>
+                      <p className="text-[11px] text-steel-500 font-bold flex items-center gap-1 mt-0.5">
+                        <MapPin className="w-3 h-3 shrink-0" />
+                        <span className="truncate">{camp.site_name}</span>
+                      </p>
+                    </div>
+
+                    <div className="text-end shrink-0">
+                      <span className="text-xs font-black text-primary-dark font-mono tabular-nums block">
+                        {camp.matched_owners_count}{' '}
+                        {lang === 'fr' ? 'notifiés' : 'مالك'}
+                      </span>
+                      <span className="text-[10px] text-steel-400 font-mono" dir="ltr">
+                        {camp.created_at?.slice(0, 10)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Owner Responses */}
+                  {acceptedNotifs.length > 0 ? (
+                    <div className="space-y-2 pt-2 border-t border-steel-100">
+                      <p className="text-[11px] font-black text-emerald-700 flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                        <span>
+                          {lang === 'fr'
+                            ? `${acceptedNotifs.length} propriétaire(s) intéressé(s) !`
+                            : `استجاب ${acceptedNotifs.length} مالك آليات لطلبك!`}
+                        </span>
+                      </p>
+                      {acceptedNotifs.map((n) => (
+                        <div
+                          key={n.id}
+                          className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between gap-2"
+                        >
+                          <div className="min-w-0 text-xs">
+                            <p className="font-black text-ink truncate">
+                              {n.matched_machine_title || camp.machine_name}
+                            </p>
+                            {n.distance_km != null && (
+                              <span className="text-[10px] text-emerald-800 font-bold tabular-nums">
+                                {lang === 'fr' ? 'À' : 'على بعد'} {Math.round(n.distance_km)}{' '}
+                                {lang === 'fr' ? 'km' : 'كم'}
+                              </span>
+                            )}
+                          </div>
+                          <Button
+                            type="button"
+                            variant="primary"
+                            size="sm"
+                            onClick={() =>
+                              navigate(
+                                `/entreprise/messages?target=${n.owner_id}&machine=${n.machine_id || ''}`
+                              )
+                            }
+                            leftIcon={<MessageSquare className="w-3.5 h-3.5" />}
+                            className="shrink-0 text-[11px] min-h-[38px]"
+                          >
+                            {lang === 'fr' ? 'Discuter' : 'محادثة المالك'}
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-steel-500 pt-2 border-t border-steel-100">
+                      {camp.matched_owners_count > 0
+                        ? lang === 'fr'
+                          ? 'Alerte envoyée. En attente de réponse des propriétaires...'
+                          : 'تم إرسال الإشعار الصوتي للملاك داخل النطاق وفي انتظار تفاعلهم...'
+                        : lang === 'fr'
+                        ? 'Aucun engin trouvé lors du lancement dans ce rayon.'
+                        : 'لم يتم العثور على آليات منشورة داخل هذا القطر وقت الإرسال.'}
+                    </p>
+                  )}
+
+                  {!isClosed && (
+                    <div className="flex justify-end pt-1">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await closeDispatchCampaign(camp.id);
+                          setCampaigns((prev) =>
+                            prev.map((c) => (c.id === camp.id ? { ...c, status: 'closed' } : c))
+                          );
+                          toast.info(lang === 'fr' ? 'Campagne clôturée' : 'تم إغلاق حملة البحث');
+                        }}
+                        className="inline-flex items-center gap-1 text-[11px] font-bold text-steel-500 hover:text-rose-600 transition-colors cursor-pointer py-1 px-2"
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                        <span>{lang === 'fr' ? 'Clôturer la campagne' : 'إغلاق الحملة'}</span>
+                      </button>
+                    </div>
+                  )}
+                </Card>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -433,6 +660,16 @@ export const ContractorProjectsPage: React.FC = () => {
           </Card>
         </div>
       )}
+
+      {/* Live InDrive-Style Dispatch Campaign Modal */}
+      <DispatchCampaignModal
+        isOpen={Boolean(dispatchSite)}
+        onClose={() => setDispatchSite(null)}
+        site={dispatchSite}
+        onCampaignLaunched={(newCampaign) => {
+          setCampaigns((prev) => [newCampaign, ...prev]);
+        }}
+      />
     </div>
   );
 };

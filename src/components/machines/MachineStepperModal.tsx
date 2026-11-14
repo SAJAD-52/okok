@@ -104,10 +104,17 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
     (machineToEdit?.specs as any)?.compatible_models || 'JCB 3CX, 4CX'
   );
 
-  // Location
+  // Location (Mandatory map pin confirmation for new listings)
   const [cityId, setCityId] = useState(machineToEdit?.city_id || 'casablanca');
-  const [lat, setLat] = useState<number>(machineToEdit?.location_lat || 33.5731);
-  const [lng, setLng] = useState<number>(machineToEdit?.location_lng || -7.5898);
+  const [lat, setLat] = useState<number>(machineToEdit?.location_lat || machineToEdit?.lat || 33.5731);
+  const [lng, setLng] = useState<number>(machineToEdit?.location_lng || machineToEdit?.lng || -7.5898);
+  const [hasConfirmedMapLocation, setHasConfirmedMapLocation] = useState<boolean>(
+    Boolean(
+      machineToEdit &&
+        ((machineToEdit.location_lat && machineToEdit.location_lng) ||
+          (machineToEdit.lat && machineToEdit.lng))
+    )
+  );
 
   // Images (up to 8 real photos)
   const [images, setImages] = useState<string[]>(
@@ -126,6 +133,7 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
   const handleLocationChange = (newLat: number, newLng: number, newCityId?: string) => {
     setLat(newLat);
     setLng(newLng);
+    setHasConfirmedMapLocation(true);
     if (newCityId) {
       setCityId(newCityId);
     }
@@ -176,6 +184,11 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
     setPendingFiles((prev) => prev.filter((p) => p.previewUrl !== removedUrl));
   };
 
+  const requireMapLocationMessage =
+    lang === 'fr'
+      ? "Obligatoire : veuillez cliquer sur la carte ou confirmer l'emplacement exact avant de continuer 📍"
+      : 'إلزامي: يرجى النقر على الخريطة أو تثبيت موقع الآلية الدقيق أولاً قبل المتابعة 📍';
+
   const handleFinalSubmit = async () => {
     if (!titleAr.trim() && !titleFr.trim()) {
       toast.error(
@@ -184,6 +197,12 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
           : 'يرجى إدخال عنوان الإعلان'
       );
       setStep(1);
+      return;
+    }
+
+    if (!hasConfirmedMapLocation || !Number.isFinite(lat) || !Number.isFinite(lng) || lat === 0 || lng === 0) {
+      toast.error(requireMapLocationMessage);
+      setStep(3);
       return;
     }
 
@@ -475,7 +494,14 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
             <button
               key={s.num}
               type="button"
-              onClick={() => setStep(s.num)}
+              onClick={() => {
+                if (s.num > 3 && !hasConfirmedMapLocation) {
+                  toast.error(requireMapLocationMessage);
+                  setStep(3);
+                  return;
+                }
+                setStep(s.num);
+              }}
               className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
                 step === s.num
                   ? 'bg-primary text-ink shadow-sm'
@@ -968,22 +994,66 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
             </div>
           )}
 
-          {/* STEP 3: LOCATION WITH LEAFLET PICKER */}
+          {/* STEP 3: MANDATORY LOCATION WITH LEAFLET PICKER */}
           {step === 3 && (
             <div className="space-y-3">
-              <div className="mb-2">
-                <h4 className="text-xs font-extrabold text-ink">
-                  {t('machines.map_picker_title')}
-                </h4>
-                <p className="text-[11px] text-steel-500">
-                  {t('machines.map_picker_hint')}
-                </p>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-1">
+                <div>
+                  <h4 className="text-xs font-extrabold text-ink flex items-center gap-1.5">
+                    <MapPin className="w-4 h-4 text-primary-dark shrink-0" />
+                    <span>{t('machines.map_picker_title')}</span>
+                    <span className="px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 text-[10px] font-black">
+                      {lang === 'fr' ? 'Obligatoire' : 'إلزامي'}
+                    </span>
+                  </h4>
+                  <p className="text-[11px] text-steel-500 mt-0.5">
+                    {lang === 'fr'
+                      ? 'Nécessaire pour recevoir les alertes directes des chantiers à proximité.'
+                      : 'ضروري لتحديد المسافة وتلقي إشعارات البحث المباشر من الأوراش القريبة منك.'}
+                  </p>
+                </div>
               </div>
+
+              {/* Mandatory confirmation status bar */}
+              {hasConfirmedMapLocation ? (
+                <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-300 flex items-center justify-between gap-2 text-xs text-emerald-900">
+                  <div className="flex items-center gap-2 font-bold min-w-0">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span className="truncate">
+                      {lang === 'fr'
+                        ? 'Position confirmée sur la carte'
+                        : 'تم تثبيت الموقع على الخريطة بنجاح'}
+                    </span>
+                  </div>
+                  <span dir="ltr" className="font-mono text-[11px] font-bold shrink-0">
+                    {lat.toFixed(4)}, {lng.toFixed(4)}
+                  </span>
+                </div>
+              ) : (
+                <div className="p-3 rounded-2xl bg-amber-50 border border-amber-300 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs text-amber-950">
+                  <div className="flex items-start gap-2 font-bold">
+                    <MapPin className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                    <span>
+                      {lang === 'fr'
+                        ? 'Cliquez sur la carte, déplacez le marqueur ou confirmez la position ci-dessous :'
+                        : 'انقر على الخريطة أو اسحب الدبوس لتحديد مكان الآلية، أو اضغط على زر التثبيت:'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setHasConfirmedMapLocation(true)}
+                    className="px-3 py-2 rounded-xl bg-ink text-primary text-[11px] font-black hover:bg-steel-800 transition-colors shrink-0 cursor-pointer"
+                  >
+                    {lang === 'fr' ? 'Confirmer ce point ✓' : 'تثبيت هذا الموقع ✓'}
+                  </button>
+                </div>
+              )}
 
               <MapLocationPicker
                 lat={lat}
                 lng={lng}
                 cityId={cityId}
+                showGpsButton={true}
                 onLocationChange={handleLocationChange}
               />
             </div>
@@ -1142,7 +1212,13 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
               type="button"
               variant="primary"
               size="md"
-              onClick={() => setStep(step + 1)}
+              onClick={() => {
+                if (step === 3 && !hasConfirmedMapLocation) {
+                  toast.error(requireMapLocationMessage);
+                  return;
+                }
+                setStep(step + 1);
+              }}
               className="font-bold"
               rightIcon={isRTL ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
             >

@@ -354,9 +354,9 @@ export const ContractorProjectsPage: React.FC = () => {
                     navigate(`/entreprise/map?lat=${s.lat}&lng=${s.lng}&site=${encodeURIComponent(s.name)}`)
                   }
                   leftIcon={<Compass className="w-4 h-4" />}
-                  className="w-full justify-center font-black text-xs min-h-[44px] whitespace-normal text-center leading-tight py-2"
+                  className="w-full justify-center font-black text-[11px] sm:text-xs min-h-[44px] px-2.5 !whitespace-normal text-center leading-tight py-2"
                 >
-                  {lang === 'fr' ? 'Radar engins' : 'رادار الآليات الأقرب لهذا الورش'}
+                  {lang === 'fr' ? 'Voir sur la carte' : 'ابحث في الخريطة'}
                 </Button>
 
                 <Button
@@ -365,9 +365,9 @@ export const ContractorProjectsPage: React.FC = () => {
                   size="sm"
                   onClick={() => setDispatchSite(s)}
                   leftIcon={<Radio className="w-4 h-4 text-primary" />}
-                  className="w-full justify-center font-black text-xs min-h-[44px] whitespace-normal text-center leading-tight py-2"
+                  className="w-full justify-center font-black text-[11px] sm:text-xs min-h-[44px] px-2.5 !whitespace-normal text-center leading-tight py-2"
                 >
-                  {lang === 'fr' ? 'Lancer une alerte directe' : 'إطلاق حملة بحث مباشر'}
+                  {lang === 'fr' ? 'Lancer alerte directe' : 'إطلاق حملة بحث مباشر'}
                 </Button>
               </div>
             </Card>

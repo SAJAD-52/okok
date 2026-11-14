@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { ChatConversationItem } from '../../types/chat';
 import { useLanguage } from '../../hooks/useLanguage';
+import { stripDispatchMarker } from '../../lib/dispatchService';
 
 interface ConversationListProps {
   conversations: ChatConversationItem[];
@@ -198,7 +199,7 @@ export const ConversationList: React.FC<ConversationListProps> = ({
                           : 'text-steel-500 font-normal'
                       }`}
                     >
-                      {conv.last_message || t('chat.no_messages')}
+                      {stripDispatchMarker(conv.last_message) || t('chat.no_messages')}
                     </p>
 
                     {conv.unread_count > 0 && (

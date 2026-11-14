@@ -16,6 +16,7 @@ import { chatStore } from '../lib/chatStore';
 import { machineStore } from '../lib/machineStore';
 import { ConversationList } from '../features/chat/ConversationList';
 import { ChatThread } from '../features/chat/ChatThread';
+import { stripDispatchMarker } from '../lib/dispatchService';
 
 export const Messages: React.FC = () => {
   const { t, lang } = useLanguage();
@@ -116,7 +117,7 @@ export const Messages: React.FC = () => {
             const latestMessageMap = new Map<string, string>();
             (messagesRes.data || []).forEach((m: any) => {
               if (!latestMessageMap.has(m.conversation_id)) {
-                latestMessageMap.set(m.conversation_id, m.content || m.body || '');
+                latestMessageMap.set(m.conversation_id, stripDispatchMarker(m.content || m.body || ''));
               }
             });
 
@@ -397,7 +398,7 @@ export const Messages: React.FC = () => {
                 const isCurrentlyActive = activeConvIdRef.current === c.id;
                 return {
                   ...c,
-                  last_message: newMsg.content || newMsg.body || c.last_message,
+                  last_message: stripDispatchMarker(newMsg.content || newMsg.body) || c.last_message,
                   last_message_at: newMsg.created_at || new Date().toISOString(),
                   unread_count:
                     isFromOther && !isCurrentlyActive

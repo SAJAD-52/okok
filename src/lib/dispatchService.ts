@@ -1,11 +1,11 @@
 // ============================================================================
 // JADIJCB: InDrive-Style Live Dispatch Campaign Service
 // Matches contractors' site requests to owners whose machines fall within km radius
-// Multi-channel delivery:
+// Multi-channel guaranteed delivery:
 //   1. Supabase dispatch_campaigns / dispatch_notifications (with Realtime)
-//   2. Supabase public.notifications (existing table fallback, cross-device)
-//   3. Express SQLite /api/notifications (full-stack local/cloud server)
-//   4. BroadcastChannel + localStorage (same-browser instant sync)
+//   2. Supabase public.notifications (INSERT without .select() so RLS never blocks)
+//   3. Supabase conversations + messages (guaranteed fallback if neither table exists)
+//   4. Express SQLite /api/notifications + BroadcastChannel
 // ============================================================================
 
 import { supabase, isSupabaseConfigured } from './supabase';
@@ -18,10 +18,29 @@ import { serverApi } from './serverApi';
 const DISPATCH_CHANNEL_NAME = 'jadijcb_dispatch_channel';
 const LOCAL_CAMPAIGNS_KEY = 'jadijcb_local_dispatch_campaigns';
 const LOCAL_NOTIFS_KEY = 'jadijcb_local_dispatch_notifs';
+export const DISPATCH_MSG_MARKER = '\n#DISPATCH_DATA:';
+
+export function stripDispatchMarker(raw?: string | null): string {
+  if (!raw) return '';
+  const idx = raw.indexOf('#DISPATCH_DATA:');
+  if (idx === -1) return raw;
+  return raw.slice(0, idx).trim();
+}
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 function isUuid(val?: string | null): val is string {
   return Boolean(val && UUID_REGEX.test(val));
+}
+
+function makeUuid(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
 }
 
 export interface MatchedOwnerTarget {
@@ -215,6 +234,156 @@ function saveLocalCampaignFallback(campaign: DispatchCampaign, notifications: Di
   }
 }
 
+async function sendFallbackDispatchMessage(params: {
+  contractorId: string;
+  ownerId: string;
+  machineId?: string;
+  notification: DispatchNotification;
+}): Promise<boolean> {
+  if (!isSupabaseConfigured || !isUuid(params.contractorId) || !isUuid(params.ownerId)) {
+    return false;
+  }
+
+  try {
+    const machineUuid = isUuid(params.machineId) ? params.machineId : null;
+    let convId: string | null = null;
+
+    const findExistingConv = async () => {
+      let q = supabase
+        .from('conversations')
+        .select('id')
+        .or(
+          `and(participant_a.eq.${params.contractorId},participant_b.eq.${params.ownerId}),and(participant_a.eq.${params.ownerId},participant_b.eq.${params.contractorId})`
+        );
+      q = machineUuid ? q.eq('machine_id', machineUuid) : q.is('machine_id', null);
+      const { data: rows } = await q.limit(1);
+      if (rows && rows.length > 0) return rows[0].id as string;
+
+      // Also check participant_one / participant_two if that schema variant exists
+      let qAlt = supabase
+        .from('conversations')
+        .select('id')
+        .or(
+          `and(participant_one.eq.${params.contractorId},participant_two.eq.${params.ownerId}),and(participant_one.eq.${params.ownerId},participant_two.eq.${params.contractorId})`
+        );
+      qAlt = machineUuid ? qAlt.eq('machine_id', machineUuid) : qAlt.is('machine_id', null);
+      const { data: altRows } = await qAlt.limit(1);
+      if (altRows && altRows.length > 0) return altRows[0].id as string;
+      return null;
+    };
+
+    convId = await findExistingConv();
+
+    if (!convId) {
+      const insertConvPrimary: any = {
+        participant_a: params.contractorId,
+        participant_b: params.ownerId,
+      };
+      if (machineUuid) insertConvPrimary.machine_id = machineUuid;
+
+      const { data: createdConv, error: convErr } = await supabase
+        .from('conversations')
+        .insert(insertConvPrimary)
+        .select('id')
+        .maybeSingle();
+
+      if (!convErr && createdConv?.id) {
+        convId = createdConv.id;
+      } else {
+        // Retry with participant_one/participant_two included, or re-fetch if unique conflict
+        const insertConvFull: any = {
+          ...insertConvPrimary,
+          participant_one: params.contractorId,
+          participant_two: params.ownerId,
+        };
+        const { data: createdAlt } = await supabase
+          .from('conversations')
+          .insert(insertConvFull)
+          .select('id')
+          .maybeSingle();
+
+        convId = createdAlt?.id || (await findExistingConv());
+      }
+    }
+
+    if (!convId) return false;
+
+    const distText = params.notification.is_nationwide
+      ? 'المغرب كاملاً'
+      : params.notification.distance_km != null
+      ? `${Math.round(params.notification.distance_km)} كم`
+      : '';
+
+    const readableHeader = `🎉 فرصة جديدة — «${params.notification.company_name}» محتاجة «${params.notification.machine_name}» ديالك${
+      distText ? ` (${distText})` : ''
+    }\n📍 ${params.notification.site_name}${params.notification.site_city ? ` · ${params.notification.site_city}` : ''}`;
+
+    const encodedPayload = JSON.stringify({
+      id: params.notification.id,
+      campaign_id: params.notification.campaign_id,
+      owner_id: params.ownerId,
+      contractor_id: params.contractorId,
+      machine_id: params.machineId || null,
+      company_name: params.notification.company_name,
+      machine_name: params.notification.machine_name,
+      matched_machine_title: params.notification.matched_machine_title,
+      site_name: params.notification.site_name,
+      site_city: params.notification.site_city,
+      site_phone: params.notification.site_phone,
+      distance_km: params.notification.distance_km,
+      is_nationwide: params.notification.is_nationwide,
+      radius_km: params.notification.radius_km,
+      notes: params.notification.notes,
+    });
+
+    const fullBody = `${readableHeader}${DISPATCH_MSG_MARKER}${encodedPayload}`;
+
+    // init_schema.sql uses column `body` (without `content`), so insert with `body` first.
+    let msgInserted = false;
+    const { error: bodyErr } = await supabase.from('messages').insert({
+      id: params.notification.id,
+      conversation_id: convId,
+      sender_id: params.contractorId,
+      body: fullBody,
+    });
+
+    if (!bodyErr) {
+      msgInserted = true;
+    } else {
+      // Fallback for schemas that expect `content` column instead of or alongside `body`
+      const { error: contentErr } = await supabase.from('messages').insert({
+        id: params.notification.id,
+        conversation_id: convId,
+        sender_id: params.contractorId,
+        content: fullBody,
+        body: fullBody,
+      });
+      if (!contentErr) {
+        msgInserted = true;
+      } else {
+        const { error: contentOnlyErr } = await supabase.from('messages').insert({
+          id: params.notification.id,
+          conversation_id: convId,
+          sender_id: params.contractorId,
+          content: fullBody,
+        });
+        msgInserted = !contentOnlyErr;
+      }
+    }
+
+    if (msgInserted) {
+      await supabase
+        .from('conversations')
+        .update({ last_message_at: new Date().toISOString() })
+        .eq('id', convId);
+      return true;
+    }
+  } catch (err) {
+    console.warn('Dispatch chat fallback warning:', err);
+  }
+  return false;
+}
+
 export async function launchDispatchCampaign(params: {
   contractorId: string;
   companyName: string;
@@ -232,12 +401,9 @@ export async function launchDispatchCampaign(params: {
   targets: MatchedOwnerTarget[];
 }): Promise<{ campaign: DispatchCampaign; notifications: DispatchNotification[]; persistedToSupabase: boolean }> {
   const now = new Date().toISOString();
-  const fallbackCampaignId =
-    typeof crypto !== 'undefined' && crypto.randomUUID
-      ? crypto.randomUUID()
-      : `cmp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const resolvedCampaignId = makeUuid();
 
-  // Resolve real authenticated Supabase UID if present (required by RLS contractor_id = auth.uid())
+  // Resolve active Supabase auth user UID (needed for RLS policies)
   let authUid: string | null = isUuid(params.contractorId) ? params.contractorId : null;
   if (isSupabaseConfigured) {
     try {
@@ -251,11 +417,12 @@ export async function launchDispatchCampaign(params: {
   }
 
   const effectiveContractorId = authUid || params.contractorId;
-  let persistedToSupabase = false;
-  let resolvedCampaignId = fallbackCampaignId;
-  let createdNotifs: DispatchNotification[] = [];
+  let dispatchNotifsSent = false;
+  let genericNotifsSent = false;
+  let chatFallbackSent = false;
 
   const campaignPayload = {
+    id: resolvedCampaignId,
     contractor_id: effectiveContractorId,
     company_name: params.companyName,
     site_id: params.siteId || null,
@@ -273,56 +440,75 @@ export async function launchDispatchCampaign(params: {
     status: 'active' as const,
   };
 
-  // Channel 1: Dedicated Supabase dispatch_campaigns + dispatch_notifications tables
+  // Pre-build notification objects with valid UUIDs
+  const preparedNotifs: DispatchNotification[] = params.targets.map((t) => ({
+    id: makeUuid(),
+    campaign_id: resolvedCampaignId,
+    owner_id: t.owner_id,
+    contractor_id: effectiveContractorId,
+    machine_id: t.machine_id,
+    company_name: params.companyName,
+    machine_name: params.machineName,
+    matched_machine_title: t.matched_machine_title,
+    site_name: params.siteName,
+    site_city: params.siteCity || '',
+    site_lat: params.siteLat,
+    site_lng: params.siteLng,
+    site_phone: params.sitePhone || '',
+    distance_km: t.distance_km,
+    is_nationwide: params.isNationwide,
+    radius_km: params.isNationwide ? null : params.radiusKm,
+    notes: params.notes || '',
+    status: 'sent',
+    is_read: false,
+    created_at: now,
+  }));
+
+  // Channel 1: Dedicated dispatch_campaigns + dispatch_notifications tables
   if (isSupabaseConfigured && isUuid(effectiveContractorId)) {
     try {
-      const { data: createdCamp, error: campErr } = await supabase
+      const { error: campErr } = await supabase
         .from('dispatch_campaigns')
-        .insert(campaignPayload)
-        .select('*')
-        .single();
+        .insert(campaignPayload);
 
-      if (!campErr && createdCamp) {
-        resolvedCampaignId = createdCamp.id;
-        persistedToSupabase = true;
+      if (!campErr) {
+        const validNotifs = preparedNotifs.filter((n) => isUuid(n.owner_id));
+        if (validNotifs.length > 0) {
+          const notifRows = validNotifs.map((n) => ({
+            id: n.id,
+            campaign_id: resolvedCampaignId,
+            owner_id: n.owner_id,
+            contractor_id: effectiveContractorId,
+            machine_id: isUuid(n.machine_id) ? n.machine_id : null,
+            company_name: n.company_name,
+            machine_name: n.machine_name,
+            matched_machine_title: n.matched_machine_title || '',
+            site_name: n.site_name,
+            site_city: n.site_city || '',
+            site_lat: n.site_lat,
+            site_lng: n.site_lng,
+            site_phone: n.site_phone || '',
+            distance_km: n.distance_km,
+            is_nationwide: n.is_nationwide,
+            radius_km: n.radius_km,
+            notes: n.notes || '',
+            status: 'sent',
+            is_read: false,
+          }));
 
-        if (params.targets.length > 0) {
-          const validTargets = params.targets.filter((t) => isUuid(t.owner_id));
-          if (validTargets.length > 0) {
-            const notifRows = validTargets.map((t) => ({
-              campaign_id: createdCamp.id,
-              owner_id: t.owner_id,
-              contractor_id: effectiveContractorId,
-              machine_id: isUuid(t.machine_id) ? t.machine_id : null,
-              company_name: params.companyName,
-              machine_name: params.machineName,
-              matched_machine_title: t.matched_machine_title,
-              site_name: params.siteName,
-              site_city: params.siteCity || '',
-              site_lat: params.siteLat,
-              site_lng: params.siteLng,
-              site_phone: params.sitePhone || '',
-              distance_km: t.distance_km,
-              is_nationwide: params.isNationwide,
-              radius_km: params.isNationwide ? null : params.radiusKm,
-              notes: params.notes || '',
-              status: 'sent',
-              is_read: false,
-            }));
+          const { error: notifErr } = await supabase
+            .from('dispatch_notifications')
+            .insert(notifRows);
 
-            const { data: insertedNotifs, error: notifErr } = await supabase
-              .from('dispatch_notifications')
-              .insert(notifRows)
-              .select('*');
-
-            if (!notifErr && insertedNotifs) {
-              createdNotifs = insertedNotifs as DispatchNotification[];
-            } else if (notifErr) {
-              console.warn('dispatch_notifications insert notice:', notifErr.message);
-            }
+          if (!notifErr) {
+            dispatchNotifsSent = true;
+          } else {
+            console.warn('dispatch_notifications insert notice:', notifErr.message);
           }
+        } else {
+          dispatchNotifsSent = params.targets.length === 0;
         }
-      } else if (campErr) {
+      } else {
         console.warn('dispatch_campaigns insert notice:', campErr.message);
       }
     } catch (err) {
@@ -330,84 +516,61 @@ export async function launchDispatchCampaign(params: {
     }
   }
 
-  // Channel 2: Existing Supabase public.notifications table (Works cross-device even before SQL migration)
-  if (isSupabaseConfigured && params.targets.length > 0) {
+  // Channel 2: Existing Supabase public.notifications table
+  // IMPORTANT: Do NOT chain .select() here! SELECT RLS checks (auth.uid() = user_id)
+  // which blocks contractor from reading the owner's inserted row and would roll back the INSERT!
+  if (isSupabaseConfigured && preparedNotifs.length > 0) {
     try {
-      const uuidTargets = params.targets.filter((t) => isUuid(t.owner_id));
-      if (uuidTargets.length > 0) {
-        const genericNotifs = uuidTargets.map((t) => {
-          const distTextAr = params.isNationwide
+      const uuidNotifs = preparedNotifs.filter((n) => isUuid(n.owner_id));
+      if (uuidNotifs.length > 0) {
+        const genericRows = uuidNotifs.map((n) => {
+          const distTextAr = n.is_nationwide
             ? 'المغرب كاملاً'
-            : `${Math.round(t.distance_km)} كم`;
-          const distTextFr = params.isNationwide
+            : `${Math.round(n.distance_km || 0)} كم`;
+          const distTextFr = n.is_nationwide
             ? 'Tout le Maroc'
-            : `${Math.round(t.distance_km)} km`;
-
-          const dataPayload = {
-            campaign_id: resolvedCampaignId,
-            owner_id: t.owner_id,
-            contractor_id: effectiveContractorId,
-            machine_id: t.machine_id || null,
-            company_name: params.companyName,
-            machine_name: params.machineName,
-            matched_machine_title: t.matched_machine_title,
-            site_name: params.siteName,
-            site_city: params.siteCity || '',
-            site_lat: params.siteLat,
-            site_lng: params.siteLng,
-            site_phone: params.sitePhone || '',
-            distance_km: t.distance_km,
-            is_nationwide: params.isNationwide,
-            radius_km: params.isNationwide ? null : params.radiusKm,
-            notes: params.notes || '',
-            status: 'sent',
-          };
+            : `${Math.round(n.distance_km || 0)} km`;
 
           return {
-            user_id: t.owner_id,
+            id: n.id,
+            user_id: n.owner_id,
             title_ar: 'فرصة جديدة 🎉',
             title_fr: 'Nouvelle opportunité 🎉',
-            body_ar: `«${params.companyName}» محتاجة «${params.machineName}» ديالك · ${distTextAr}`,
-            body_fr: `«${params.companyName}» recherche «${params.machineName}» · ${distTextFr}`,
+            body_ar: `«${n.company_name}» محتاجة «${n.machine_name}» ديالك · ${distTextAr}`,
+            body_fr: `«${n.company_name}» recherche «${n.machine_name}» · ${distTextFr}`,
             type: 'dispatch_opportunity',
-            data: dataPayload,
+            data: {
+              id: n.id,
+              campaign_id: n.campaign_id,
+              owner_id: n.owner_id,
+              contractor_id: n.contractor_id,
+              machine_id: n.machine_id || null,
+              company_name: n.company_name,
+              machine_name: n.machine_name,
+              matched_machine_title: n.matched_machine_title,
+              site_name: n.site_name,
+              site_city: n.site_city || '',
+              site_lat: n.site_lat,
+              site_lng: n.site_lng,
+              site_phone: n.site_phone || '',
+              distance_km: n.distance_km,
+              is_nationwide: n.is_nationwide,
+              radius_km: n.radius_km,
+              notes: n.notes || '',
+              status: 'sent',
+            },
             is_read: false,
           };
         });
 
-        const { data: insertedGeneric, error: genErr } = await supabase
+        const { error: genErr } = await supabase
           .from('notifications')
-          .insert(genericNotifs)
-          .select('*');
+          .insert(genericRows);
 
-        if (!genErr && insertedGeneric) {
-          persistedToSupabase = true;
-          if (createdNotifs.length === 0) {
-            createdNotifs = insertedGeneric.map((row: any) => ({
-              id: row.id,
-              campaign_id: row.data?.campaign_id || resolvedCampaignId,
-              owner_id: row.user_id,
-              contractor_id: row.data?.contractor_id || effectiveContractorId,
-              machine_id: row.data?.machine_id || undefined,
-              company_name: row.data?.company_name || params.companyName,
-              machine_name: row.data?.machine_name || params.machineName,
-              matched_machine_title: row.data?.matched_machine_title,
-              site_name: row.data?.site_name || params.siteName,
-              site_city: row.data?.site_city || params.siteCity || '',
-              site_lat: row.data?.site_lat ?? params.siteLat,
-              site_lng: row.data?.site_lng ?? params.siteLng,
-              site_phone: row.data?.site_phone || params.sitePhone || '',
-              distance_km: row.data?.distance_km ?? 0,
-              is_nationwide: Boolean(row.data?.is_nationwide),
-              radius_km: row.data?.radius_km ?? null,
-              notes: row.data?.notes || '',
-              status: 'sent',
-              is_read: false,
-              created_at: row.created_at || now,
-            }));
-          }
-        } else if (genErr) {
-          console.warn('Supabase generic notifications insert notice:', genErr.message);
+        if (!genErr) {
+          genericNotifsSent = true;
+        } else {
+          console.warn('Supabase notifications insert notice:', genErr.message);
         }
       }
     } catch (err) {
@@ -415,34 +578,51 @@ export async function launchDispatchCampaign(params: {
     }
   }
 
-  // Channel 3: Express Server SQLite /api/notifications (full-stack server sync)
-  if (params.targets.length > 0) {
+  // Channel 3: Guaranteed Supabase Realtime fallback via conversations + messages
+  // Runs whenever dedicated dispatch_notifications wasn't persisted (init_schema.sql has Realtime on messages by default)
+  if (isSupabaseConfigured && !dispatchNotifsSent && preparedNotifs.length > 0) {
+    const results = await Promise.all(
+      preparedNotifs.map((n) =>
+        sendFallbackDispatchMessage({
+          contractorId: effectiveContractorId,
+          ownerId: n.owner_id,
+          machineId: n.machine_id,
+          notification: n,
+        })
+      )
+    );
+    chatFallbackSent = results.some(Boolean);
+  }
+
+  // Channel 4: Express Server SQLite /api/notifications (full-stack server sync)
+  if (preparedNotifs.length > 0) {
     await Promise.allSettled(
-      params.targets.map((t) =>
+      preparedNotifs.map((n) =>
         serverApi.createNotification({
-          user_id: t.owner_id,
+          user_id: n.owner_id,
           title_ar: 'فرصة جديدة 🎉',
           title_fr: 'Nouvelle opportunité 🎉',
-          body_ar: `«${params.companyName}» محتاجة «${params.machineName}» ديالك`,
-          body_fr: `«${params.companyName}» recherche «${params.machineName}»`,
+          body_ar: `«${n.company_name}» محتاجة «${n.machine_name}» ديالك`,
+          body_fr: `«${n.company_name}» recherche «${n.machine_name}»`,
           type: 'dispatch_opportunity',
           data: {
-            campaign_id: resolvedCampaignId,
-            owner_id: t.owner_id,
-            contractor_id: effectiveContractorId,
-            machine_id: t.machine_id,
-            company_name: params.companyName,
-            machine_name: params.machineName,
-            matched_machine_title: t.matched_machine_title,
-            site_name: params.siteName,
-            site_city: params.siteCity || '',
-            site_lat: params.siteLat,
-            site_lng: params.siteLng,
-            site_phone: params.sitePhone || '',
-            distance_km: t.distance_km,
-            is_nationwide: params.isNationwide,
-            radius_km: params.isNationwide ? null : params.radiusKm,
-            notes: params.notes || '',
+            id: n.id,
+            campaign_id: n.campaign_id,
+            owner_id: n.owner_id,
+            contractor_id: n.contractor_id,
+            machine_id: n.machine_id,
+            company_name: n.company_name,
+            machine_name: n.machine_name,
+            matched_machine_title: n.matched_machine_title,
+            site_name: n.site_name,
+            site_city: n.site_city || '',
+            site_lat: n.site_lat,
+            site_lng: n.site_lng,
+            site_phone: n.site_phone || '',
+            distance_km: n.distance_km,
+            is_nationwide: n.is_nationwide,
+            radius_km: n.radius_km,
+            notes: n.notes || '',
             status: 'sent',
           },
         })
@@ -450,48 +630,23 @@ export async function launchDispatchCampaign(params: {
     );
   }
 
-  // Build final notification list (guaranteeing in-memory objects even if offline)
-  if (createdNotifs.length === 0 && params.targets.length > 0) {
-    createdNotifs = params.targets.map((t, i) => ({
-      id: `dn_${Date.now()}_${i}`,
-      campaign_id: resolvedCampaignId,
-      owner_id: t.owner_id,
-      contractor_id: effectiveContractorId,
-      machine_id: t.machine_id,
-      company_name: params.companyName,
-      machine_name: params.machineName,
-      matched_machine_title: t.matched_machine_title,
-      site_name: params.siteName,
-      site_city: params.siteCity || '',
-      site_lat: params.siteLat,
-      site_lng: params.siteLng,
-      site_phone: params.sitePhone || '',
-      distance_km: t.distance_km,
-      is_nationwide: params.isNationwide,
-      radius_km: params.isNationwide ? null : params.radiusKm,
-      notes: params.notes || '',
-      status: 'sent',
-      is_read: false,
-      created_at: now,
-    }));
-  }
+  const persistedToSupabase = dispatchNotifsSent || genericNotifsSent || chatFallbackSent;
 
   const finalCampaign: DispatchCampaign = {
-    id: resolvedCampaignId,
     ...campaignPayload,
     created_at: now,
-    notifications: createdNotifs,
+    notifications: preparedNotifs,
   };
 
-  // Channel 4: Local persistence & BroadcastChannel
-  saveLocalCampaignFallback(finalCampaign, createdNotifs);
+  // Channel 5: Local persistence & BroadcastChannel
+  saveLocalCampaignFallback(finalCampaign, preparedNotifs);
   broadcastDispatchEvent({
     type: 'CAMPAIGN_LAUNCHED',
     campaign: finalCampaign,
-    notifications: createdNotifs,
+    notifications: preparedNotifs,
   });
 
-  return { campaign: finalCampaign, notifications: createdNotifs, persistedToSupabase };
+  return { campaign: finalCampaign, notifications: preparedNotifs, persistedToSupabase };
 }
 
 function mapGenericNotificationToDispatch(row: any): DispatchNotification | null {
@@ -500,7 +655,7 @@ function mapGenericNotificationToDispatch(row: any): DispatchNotification | null
   if (row.type !== 'dispatch_opportunity' && !data.campaign_id) return null;
 
   return {
-    id: row.id,
+    id: data.id || row.id,
     campaign_id: data.campaign_id || row.id,
     owner_id: data.owner_id || row.user_id,
     contractor_id: data.contractor_id || '',
@@ -521,6 +676,40 @@ function mapGenericNotificationToDispatch(row: any): DispatchNotification | null
     is_read: Boolean(row.is_read || row.read),
     created_at: row.created_at || new Date().toISOString(),
   };
+}
+
+export function parseDispatchMessageRow(msg: any, ownerId: string): DispatchNotification | null {
+  const rawBody = String(msg?.body || msg?.content || '');
+  const idx = rawBody.indexOf(DISPATCH_MSG_MARKER);
+  if (idx === -1) return null;
+  try {
+    const jsonPart = rawBody.slice(idx + DISPATCH_MSG_MARKER.length).trim();
+    const data = JSON.parse(jsonPart);
+    if (!data || (data.owner_id && data.owner_id !== ownerId)) return null;
+    const isRead = Boolean(msg.read_at);
+    return {
+      id: data.id || msg.id,
+      campaign_id: data.campaign_id || msg.id,
+      owner_id: ownerId,
+      contractor_id: data.contractor_id || msg.sender_id || '',
+      machine_id: data.machine_id || undefined,
+      company_name: data.company_name || 'مقاولة أشغال',
+      machine_name: data.machine_name || 'آلية بناء',
+      matched_machine_title: data.matched_machine_title || undefined,
+      site_name: data.site_name || 'ورش بناء',
+      site_city: data.site_city || '',
+      site_phone: data.site_phone || '',
+      distance_km: data.distance_km != null ? Number(data.distance_km) : null,
+      is_nationwide: Boolean(data.is_nationwide),
+      radius_km: data.radius_km != null ? Number(data.radius_km) : null,
+      notes: data.notes || '',
+      status: isRead ? 'read' : 'sent',
+      is_read: isRead,
+      created_at: msg.created_at || new Date().toISOString(),
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function fetchOwnerDispatchNotifications(ownerId: string): Promise<DispatchNotification[]> {
@@ -564,7 +753,7 @@ export async function fetchOwnerDispatchNotifications(ownerId: string): Promise<
       // ignore if table not created yet
     }
 
-    // 2. Existing public.notifications table fallback
+    // 2. Existing public.notifications table
     try {
       const { data, error } = await supabase
         .from('notifications')
@@ -583,9 +772,28 @@ export async function fetchOwnerDispatchNotifications(ownerId: string): Promise<
     } catch {
       // ignore
     }
+
+    // 3. Fallback: recent incoming messages containing DISPATCH_MSG_MARKER (column-agnostic)
+    try {
+      const { data: msgRows } = await supabase
+        .from('messages')
+        .select('*')
+        .neq('sender_id', ownerId)
+        .order('created_at', { ascending: false })
+        .limit(40);
+
+      if (msgRows) {
+        for (const m of msgRows) {
+          const parsed = parseDispatchMessageRow(m, ownerId);
+          if (parsed) mergeNotif(parsed, false);
+        }
+      }
+    } catch {
+      // ignore
+    }
   }
 
-  // 3. Express SQLite /api/notifications fallback
+  // 4. Express SQLite /api/notifications
   try {
     const serverRes = await serverApi.getNotifications({ user_id: ownerId });
     for (const sNotif of serverRes.notifications || []) {
@@ -598,7 +806,7 @@ export async function fetchOwnerDispatchNotifications(ownerId: string): Promise<
     // ignore
   }
 
-  // 4. Local cache merge
+  // 5. Local cache merge
   try {
     const local: DispatchNotification[] = JSON.parse(localStorage.getItem(LOCAL_NOTIFS_KEY) || '[]');
     for (const n of local) {
@@ -699,6 +907,17 @@ export async function updateDispatchNotificationStatus(
         .eq('id', notificationId);
     } catch {
       // ignore
+    }
+
+    if (updates.is_read) {
+      try {
+        await supabase
+          .from('messages')
+          .update({ read_at: new Date().toISOString() })
+          .eq('id', notificationId);
+      } catch {
+        // ignore
+      }
     }
   }
 

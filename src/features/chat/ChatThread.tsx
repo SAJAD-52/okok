@@ -22,6 +22,7 @@ import { useLanguage } from '../../hooks/useLanguage';
 import { useAuth } from '../../hooks/useAuth';
 import { useChatRealtime } from './useChatRealtime';
 import { ChatMachineContextCard } from './ChatMachineContextCard';
+import { stripDispatchMarker } from '../../lib/dispatchService';
 
 interface ChatThreadProps {
   conversation: ChatConversationItem;
@@ -245,7 +246,9 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
                 >
                   {/* Message Body */}
                   <p className="text-xs sm:text-sm whitespace-pre-wrap leading-relaxed select-text font-medium">
-                    {msg.body || (msg as any).content || (msg as any).message || (msg as any).text || ''}
+                    {stripDispatchMarker(
+                      msg.body || (msg as any).content || (msg as any).message || (msg as any).text || ''
+                    )}
                   </p>
 
                   {/* Metadata: Timestamp & Read Receipts */}

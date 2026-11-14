@@ -53,7 +53,7 @@ export const DashboardLayout: React.FC = () => {
   const { t, isRTL, lang } = useLanguage();
   const navigate = useNavigate();
   const location = useLocation();
-  const { profile, logout, isSuperAdmin, isImpersonating, stopImpersonating, impersonatedUser } = useAuth();
+  const { user, profile, logout, isSuperAdmin, isImpersonating, stopImpersonating, impersonatedUser } = useAuth();
   const { isLocked, isTrial, formattedCountdown, isActive } = useSubscription();
 
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -1333,9 +1333,9 @@ export const DashboardLayout: React.FC = () => {
       />
 
       {/* Real-Time InDrive Opportunity Listener (Audio + Push + Celebration Popup for Owners) */}
-      {!isContractor && profile?.id && !(isSuperAdmin && !isImpersonating) && (
+      {!isContractor && (profile?.id || user?.id) && !(isSuperAdmin && !isImpersonating) && (
         <OpportunityAlertListener
-          ownerId={profile.id}
+          ownerId={profile?.id || user?.id || ''}
           onNotificationsSync={setOpportunityNotifications}
         />
       )}

@@ -19,6 +19,7 @@ import {
 import { DispatchNotification } from '../../types/database';
 import {
   fetchOwnerDispatchNotifications,
+  parseDispatchMessageRow,
   subscribeLocalDispatchEvents,
   updateDispatchNotificationStatus,
 } from '../../lib/dispatchService';
@@ -201,6 +202,23 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
             }
           }
         )
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'messages',
+          },
+          (payload: any) => {
+            const row = payload?.new;
+            if (!row || row.sender_id === ownerId) return;
+            const parsed = parseDispatchMessageRow(row, ownerId);
+            if (parsed) {
+              syncFromSource(false);
+              triggerCelebrationAlert(parsed);
+            }
+          }
+        )
         .subscribe();
     }
 
@@ -264,7 +282,7 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
     <div
       role="alert"
       aria-live="assertive"
-      className="fixed bottom-20 md:bottom-6 inset-x-3 sm:inset-x-auto sm:end-6 sm:w-[420px] z-50 animate-in slide-in-from-bottom duration-300"
+      className="fixed bottom-20 md:bottom-6 inset-x-3 sm:inset-x-auto sm:end-6 sm:w-[420px] z-[70] animate-in slide-in-from-bottom duration-300"
     >
       <div className="bg-ink text-white rounded-3xl border-2 border-primary shadow-2xl overflow-hidden">
         {/* Top Celebratory Bar */}

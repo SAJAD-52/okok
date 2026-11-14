@@ -192,11 +192,19 @@ export const DispatchCampaignModal: React.FC<DispatchCampaignModalProps> = ({
       onClose();
 
       if (targets.length > 0) {
-        toast.success(
-          lang === 'fr'
-            ? `Campagne lancée ! Alerte sonore envoyée à ${targets.length} propriétaire(s) ⚡`
-            : `تم إطلاق حملة البحث وإرسال الإشعار الصوتي لـ ${targets.length} مالك آليات ⚡`
-        );
+        if (result.persistedToSupabase) {
+          toast.success(
+            lang === 'fr'
+              ? `Campagne lancée ! Alerte sonore envoyée à ${targets.length} propriétaire(s) ⚡`
+              : `تم إطلاق حملة البحث وإرسال الإشعار الصوتي لـ ${targets.length} مالك آليات ⚡`
+          );
+        } else {
+          toast.error(
+            lang === 'fr'
+              ? 'Campagne enregistrée localement, mais l’envoi cloud a échoué. Vérifiez votre connexion ou reconnectez-vous.'
+              : 'تعذر إرسال الإشعارات للملاك عبر السحابة. تأكد من تسجيل الدخول أو اتصالك بالإنترنت ثم أعد المحاولة.'
+          );
+        }
       } else {
         toast.info(
           lang === 'fr'

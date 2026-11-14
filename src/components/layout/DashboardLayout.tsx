@@ -322,26 +322,31 @@ export const DashboardLayout: React.FC = () => {
       to: '/entreprise',
       exact: true,
       label: lang === 'fr' ? 'Tableau de bord' : 'لوحة المقاولة',
+      mobileLabel: lang === 'fr' ? 'Accueil' : 'الرئيسية',
       icon: <Building2 className="w-5 h-5" />,
     },
     {
       to: '/entreprise/map',
       label: lang === 'fr' ? 'Radar Chantiers' : 'رادار الآليات (الخريطة)',
+      mobileLabel: lang === 'fr' ? 'Radar' : 'الرادار',
       icon: <MapPin className="w-5 h-5" />,
     },
     {
       to: '/entreprise/bookings',
       label: lang === 'fr' ? 'Mes Locations' : 'حجوزاتي وتمديد الكراء',
+      mobileLabel: lang === 'fr' ? 'Locations' : 'حجوزاتي',
       icon: <CalendarCheck className="w-5 h-5" />,
     },
     {
       to: '/entreprise/projects',
       label: lang === 'fr' ? 'Mes Chantiers' : 'أوراش ومشاريع المقاولة',
+      mobileLabel: lang === 'fr' ? 'Chantiers' : 'الأوراش',
       icon: <HardHat className="w-5 h-5" />,
     },
     {
       to: '/entreprise/messages',
       label: t('nav.messages'),
+      mobileLabel: t('nav.messages'),
       icon: <MessageSquare className="w-5 h-5" />,
       badge: unreadMessagesCount,
     },
@@ -409,7 +414,7 @@ export const DashboardLayout: React.FC = () => {
       : (lang === 'fr' ? 'Entreprise / Client' : 'مقاولة بناء / زبون مستأجر');
 
   return (
-    <div className="min-h-screen bg-surface flex flex-col md:flex-row relative">
+    <div className="min-h-screen bg-surface flex flex-col md:flex-row relative overflow-x-hidden">
       {/* Desktop Sidebar (Logical start-0) */}
       <aside className="hidden md:flex flex-col w-64 lg:w-72 bg-ink text-white border-e border-steel-800 shrink-0 sticky top-0 h-screen select-none z-30">
         {/* Brand Area */}
@@ -577,12 +582,12 @@ export const DashboardLayout: React.FC = () => {
         {!isContractor && <TrialBanner onOpenPaymentModal={() => setIsPaymentModalOpen(true)} />}
 
         {/* Mobile & Tablet Header Bar */}
-        <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-steel-200/80 px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="md:hidden">
+        <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-steel-200/80 px-3 sm:px-6 h-16 flex items-center justify-between gap-2 sm:gap-4 max-w-full">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0 shrink-0">
+            <div className="md:hidden shrink-0">
               <Logo size="sm" />
             </div>
-            <h1 className="hidden md:block text-base font-bold text-ink">
+            <h1 className="hidden md:block text-base font-bold text-ink truncate">
               {navigationItems.find((i) =>
                 i.exact
                   ? location.pathname === i.to
@@ -591,19 +596,20 @@ export const DashboardLayout: React.FC = () => {
             </h1>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             {isContractor ? (
               <NavLink
                 to="/entreprise/map"
-                className="text-xs font-black text-ink px-3 py-1.5 rounded-xl border border-primary/50 bg-primary hover:bg-primary-hover min-h-[44px] flex items-center gap-1.5 shadow-sm"
+                className="text-[11px] sm:text-xs font-black text-ink px-2.5 sm:px-3 py-1.5 rounded-xl border border-primary/50 bg-primary hover:bg-primary-hover min-h-[40px] sm:min-h-[44px] flex items-center gap-1 sm:gap-1.5 shadow-sm whitespace-nowrap shrink-0"
               >
-                <MapPin className="w-3.5 h-3.5" />
-                <span>{lang === 'fr' ? 'Radar Chantiers' : 'رادار الآليات للورش'}</span>
+                <MapPin className="w-3.5 h-3.5 shrink-0" />
+                <span className="sm:hidden">{lang === 'fr' ? 'Radar' : 'رادار الورش'}</span>
+                <span className="hidden sm:inline">{lang === 'fr' ? 'Radar Chantiers' : 'رادار الآليات للورش'}</span>
               </NavLink>
             ) : (
               <NavLink
                 to="/marketplace"
-                className="text-xs font-semibold text-steel-700 hover:text-ink px-3 py-1.5 rounded-lg border border-steel-200 bg-steel-50 hover:bg-steel-100 min-h-[44px] flex items-center"
+                className="text-xs font-semibold text-steel-700 hover:text-ink px-2.5 sm:px-3 py-1.5 rounded-lg border border-steel-200 bg-steel-50 hover:bg-steel-100 min-h-[40px] sm:min-h-[44px] flex items-center whitespace-nowrap shrink-0"
               >
                 {t('nav.marketplace')}
               </NavLink>
@@ -613,7 +619,7 @@ export const DashboardLayout: React.FC = () => {
             <button
               type="button"
               onClick={() => setIsProfileModalOpen(true)}
-              className="px-2.5 py-1.5 text-xs font-bold text-steel-700 hover:text-ink hover:bg-steel-100 rounded-xl border border-steel-200 bg-white min-h-[44px] flex items-center gap-2 transition-colors cursor-pointer shadow-xs"
+              className="px-2 sm:px-2.5 py-1.5 text-xs font-bold text-steel-700 hover:text-ink hover:bg-steel-100 rounded-xl border border-steel-200 bg-white min-h-[40px] sm:min-h-[44px] flex items-center gap-1.5 sm:gap-2 transition-colors cursor-pointer shadow-xs shrink-0"
               title={lang === 'fr' ? 'Modifier mes informations' : 'تعديل معلوماتي الشخصية'}
             >
               {profile?.avatar_url ? (
@@ -627,11 +633,11 @@ export const DashboardLayout: React.FC = () => {
                   {displayName.slice(0, 2).toUpperCase()}
                 </div>
               )}
-              <span className="hidden sm:inline">{lang === 'fr' ? 'Mon profil' : 'تعديل حسابي'}</span>
+              <span className="hidden sm:inline whitespace-nowrap">{lang === 'fr' ? 'Mon profil' : 'تعديل حسابي'}</span>
             </button>
 
-            <div className="md:hidden">
-              <LanguageSwitcher />
+            <div className="md:hidden shrink-0">
+              <LanguageSwitcher className="px-2! min-h-[40px]!" />
             </div>
               {/* Notifications Button with Live Badge & Dropdown */}
               {(() => {
@@ -639,16 +645,16 @@ export const DashboardLayout: React.FC = () => {
                 const totalAlertsCount = pendingBookingsCount + unreadSystemCount;
 
                 return (
-                  <div className="relative">
+                  <div className="relative shrink-0">
                     <button
                       type="button"
                       onClick={() => setIsNotificationsOpen((prev) => !prev)}
-                      className="p-2 text-steel-600 hover:text-ink hover:bg-steel-100 rounded-lg min-h-[44px] min-w-[44px] flex items-center justify-center relative cursor-pointer"
+                      className="p-2 text-steel-600 hover:text-ink hover:bg-steel-100 rounded-lg min-h-[40px] min-w-[40px] sm:min-h-[44px] sm:min-w-[44px] flex items-center justify-center relative cursor-pointer"
                       aria-label="Notifications"
                     >
                       <Bell className="w-5 h-5" />
                       {totalAlertsCount > 0 && (
-                        <span className="absolute top-1.5 end-1.5 px-1.5 py-0.2 rounded-full bg-primary text-ink text-[10px] font-black border border-white animate-pulse">
+                        <span className="absolute top-1 end-1 px-1.5 py-0.2 rounded-full bg-primary text-ink text-[10px] font-black border border-white animate-pulse">
                           {totalAlertsCount}
                         </span>
                       )}
@@ -656,7 +662,7 @@ export const DashboardLayout: React.FC = () => {
 
                     {/* Notifications Dropdown */}
                     {isNotificationsOpen && (
-                      <div className="absolute top-full end-0 mt-2 w-80 sm:w-96 bg-white border border-steel-200 rounded-2xl shadow-2xl z-50 overflow-hidden text-start animate-fade-in">
+                      <div className="fixed sm:absolute top-16 sm:top-full inset-x-3 sm:inset-x-auto sm:end-0 mt-1 sm:mt-2 w-auto sm:w-96 bg-white border border-steel-200 rounded-2xl shadow-2xl z-50 overflow-hidden text-start animate-fade-in">
                         <div className="bg-ink p-3.5 text-white flex items-center justify-between border-b border-primary">
                           <div className="flex items-center gap-2">
                             <Bell className="w-4 h-4 text-primary" />
@@ -820,7 +826,7 @@ export const DashboardLayout: React.FC = () => {
       {/* Mobile Bottom Tab Bar (Fixed, 44px+ touch targets, max 5 items: اليوم / الحجوزات / الآليات / الزبائن / المزيد) */}
       <nav
         aria-label="Mobile Navigation"
-        className="md:hidden fixed bottom-0 start-0 end-0 bg-white border-t border-steel-200 shadow-elevated z-40 px-2 py-1 flex items-center justify-around"
+        className="md:hidden fixed bottom-0 start-0 end-0 bg-white border-t border-steel-200 shadow-elevated z-40 px-1 py-1 flex items-center justify-around overflow-hidden"
       >
         {isContractor ? (
           contractorNavigationItems.map((item) => {
@@ -832,7 +838,7 @@ export const DashboardLayout: React.FC = () => {
               <NavLink
                 key={item.to}
                 to={item.to}
-                className={`flex flex-col items-center justify-center flex-1 py-1.5 min-h-[50px] transition-colors relative ${
+                className={`flex flex-col items-center justify-center flex-1 min-w-0 px-0.5 py-1.5 min-h-[50px] transition-colors relative ${
                   isItemActive ? 'text-ink font-bold' : 'text-steel-400 hover:text-steel-700'
                 }`}
               >
@@ -846,8 +852,8 @@ export const DashboardLayout: React.FC = () => {
                     <span className="absolute -top-1 -end-1 w-2.5 h-2.5 rounded-full bg-primary ring-2 ring-white" />
                   )}
                 </div>
-                <span className="text-[10px] mt-0.5 tracking-tight truncate max-w-[64px]">
-                  {item.label}
+                <span className="text-[10px] mt-0.5 tracking-tight truncate max-w-full">
+                  {item.mobileLabel || item.label}
                 </span>
               </NavLink>
             );

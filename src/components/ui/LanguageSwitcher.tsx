@@ -28,10 +28,10 @@ export const LanguageSwitcher: React.FC<LanguageSwitcherProps> = ({
       title={lang === 'ar' ? 'Passer en Français' : 'التحويل إلى العربية'}
     >
       <Languages className="w-4 h-4 text-primary shrink-0" aria-hidden="true" />
-      <span className="font-semibold tracking-wide">
+      <span className="font-semibold tracking-wide whitespace-nowrap">
         {lang === 'ar' ? 'FR' : 'عر'}
       </span>
-      <span className="text-[11px] opacity-75 font-normal">
+      <span className="hidden sm:inline text-[11px] opacity-75 font-normal whitespace-nowrap">
         {lang === 'ar' ? 'Français' : 'العربية'}
       </span>
     </button>

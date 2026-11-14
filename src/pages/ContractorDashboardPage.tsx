@@ -116,54 +116,57 @@ export const ContractorDashboardPage: React.FC = () => {
   const companyTitle = profile?.company_name || profile?.full_name || (lang === 'fr' ? 'Entreprise BTP' : 'مقاولة البناء');
 
   return (
-    <div className="space-y-6 text-start">
+    <div className="space-y-5 sm:space-y-6 text-start max-w-full overflow-x-hidden">
       {/* Welcome Banner */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-ink via-steel-900 to-steel-800 text-white p-6 sm:p-8 shadow-xl border border-steel-700">
-        <div className="relative z-10 max-w-2xl space-y-2">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/20 text-primary border border-primary/30 text-xs font-black">
-            <HardHat className="w-3.5 h-3.5" />
-            <span>{lang === 'fr' ? 'Espace Professionnel Entreprise' : 'بوابة مقاولات البناء والأشغال الكبرى'}</span>
+      <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-r from-ink via-steel-900 to-steel-800 text-white p-4 sm:p-8 shadow-xl border border-steel-700">
+        <div className="relative z-10 max-w-2xl space-y-2.5 sm:space-y-3">
+          <div className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 rounded-full bg-primary/20 text-primary border border-primary/30 text-[11px] sm:text-xs font-black max-w-full">
+            <HardHat className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">
+              {lang === 'fr' ? 'Espace Professionnel Entreprise' : 'بوابة مقاولات البناء والأشغال الكبرى'}
+            </span>
           </div>
 
-          <h1 className="text-xl sm:text-3xl font-black text-white">
+          <h1 className="text-lg sm:text-3xl font-black text-white leading-snug break-words">
             {lang === 'fr' ? `Bienvenue, ${companyTitle}` : `مرحباً بك، ${companyTitle}`}
           </h1>
 
-          <p className="text-xs sm:text-sm text-steel-300">
+          <p className="text-xs sm:text-sm text-steel-300 leading-relaxed">
             {lang === 'fr'
               ? 'Localisez les engins de chantier les plus proches de vos projets en temps réel, réservez en direct et prolongez vos locations sans intermédiaire.'
               : 'حدد موقع ورش العمل على الخريطة لرصد أقرب الآليات المتاحة فوراً بنظام الرادار، مع إمكانية الحجز المباشر وطلب تمديد الكراء.'}
           </p>
 
-          <div className="pt-3 flex items-center gap-3 flex-wrap">
+          <div className="pt-2 sm:pt-3 flex flex-col sm:flex-row sm:items-center gap-2.5 sm:gap-3 sm:flex-wrap">
             <Button
               type="button"
               variant="primary"
               size="md"
               onClick={() => navigate('/entreprise/map')}
               leftIcon={<MapPin className="w-4 h-4" />}
-              className="font-black text-xs sm:text-sm shadow-md"
+              className="w-full sm:w-auto justify-center font-black text-xs sm:text-sm shadow-md"
             >
               {lang === 'fr' ? 'Ouvrir le Radar InDrive Chantiers' : 'فتح رادار أقرب الآليات للورش'}
             </Button>
 
             <Button
               type="button"
-              variant="outline"
+              variant="dark-outline"
               size="md"
               onClick={() => navigate('/entreprise/bookings')}
-              className="text-white border-steel-600 hover:bg-steel-800 text-xs font-bold"
+              leftIcon={<CalendarCheck className="w-4 h-4 text-primary" />}
+              className="w-full sm:w-auto justify-center text-xs font-bold"
             >
               {lang === 'fr' ? 'Mes locations actives' : 'متابعة حجوزاتي النشطة'}
             </Button>
 
             <Button
               type="button"
-              variant="outline"
+              variant="dark-outline"
               size="md"
               onClick={() => setIsProfileModalOpen(true)}
               leftIcon={<Building2 className="w-4 h-4 text-primary" />}
-              className="text-white border-steel-600 hover:bg-steel-800 text-xs font-bold"
+              className="w-full sm:w-auto justify-center text-xs font-bold"
             >
               {lang === 'fr' ? 'Modifier mes informations' : 'تعديل معلومات المقاولة'}
             </Button>
@@ -177,56 +180,62 @@ export const ContractorDashboardPage: React.FC = () => {
       </div>
 
       {/* 4 Contractor KPIs */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
         {/* KPI 1: Active on Site */}
-        <Card className="p-4 bg-white border border-steel-200 shadow-soft rounded-2xl flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0">
-            <Truck className="w-6 h-6" />
+        <Card className="p-3 sm:p-4 bg-white border border-steel-200 shadow-soft rounded-2xl flex items-center gap-2.5 sm:gap-3.5 min-w-0">
+          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0">
+            <Truck className="w-5 h-5 sm:w-6 sm:h-6" />
           </div>
-          <div>
-            <span className="text-[11px] font-bold text-steel-500 block">
+          <div className="min-w-0 flex-1">
+            <span className="text-[10px] sm:text-[11px] font-bold text-steel-500 block leading-tight line-clamp-2">
               {lang === 'fr' ? 'Engins sur chantier' : 'آليات تعمل بالورش حالياً'}
             </span>
-            <span className="text-lg sm:text-xl font-black text-ink">{activeBookings.length}</span>
+            <span className="text-base sm:text-xl font-black text-ink tabular-nums mt-0.5 block">
+              {activeBookings.length}
+            </span>
           </div>
         </Card>
 
         {/* KPI 2: Pending requests */}
-        <Card className="p-4 bg-white border border-steel-200 shadow-soft rounded-2xl flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center shrink-0">
-            <Clock className="w-6 h-6" />
+        <Card className="p-3 sm:p-4 bg-white border border-steel-200 shadow-soft rounded-2xl flex items-center gap-2.5 sm:gap-3.5 min-w-0">
+          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center shrink-0">
+            <Clock className="w-5 h-5 sm:w-6 sm:h-6" />
           </div>
-          <div>
-            <span className="text-[11px] font-bold text-steel-500 block">
+          <div className="min-w-0 flex-1">
+            <span className="text-[10px] sm:text-[11px] font-bold text-steel-500 block leading-tight line-clamp-2">
               {lang === 'fr' ? 'Demandes en attente' : 'طلبات قيد المراجعة'}
             </span>
-            <span className="text-lg sm:text-xl font-black text-ink">{pendingBookings.length}</span>
+            <span className="text-base sm:text-xl font-black text-ink tabular-nums mt-0.5 block">
+              {pendingBookings.length}
+            </span>
           </div>
         </Card>
 
         {/* KPI 3: Saved Job Sites */}
-        <Card className="p-4 bg-white border border-steel-200 shadow-soft rounded-2xl flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center shrink-0">
-            <HardHat className="w-6 h-6" />
+        <Card className="p-3 sm:p-4 bg-white border border-steel-200 shadow-soft rounded-2xl flex items-center gap-2.5 sm:gap-3.5 min-w-0">
+          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center shrink-0">
+            <HardHat className="w-5 h-5 sm:w-6 sm:h-6" />
           </div>
-          <div>
-            <span className="text-[11px] font-bold text-steel-500 block">
+          <div className="min-w-0 flex-1">
+            <span className="text-[10px] sm:text-[11px] font-bold text-steel-500 block leading-tight line-clamp-2">
               {lang === 'fr' ? 'Chantiers enregistrés' : 'أوراش ومشاريع نشطة'}
             </span>
-            <span className="text-lg sm:text-xl font-black text-ink">{savedSites.length}</span>
+            <span className="text-base sm:text-xl font-black text-ink tabular-nums mt-0.5 block">
+              {savedSites.length}
+            </span>
           </div>
         </Card>
 
         {/* KPI 4: Total Spent */}
-        <Card className="p-4 bg-white border border-steel-200 shadow-soft rounded-2xl flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-xl bg-purple-50 text-purple-700 flex items-center justify-center shrink-0">
-            <FileCheck2 className="w-6 h-6" />
+        <Card className="p-3 sm:p-4 bg-white border border-steel-200 shadow-soft rounded-2xl flex items-center gap-2.5 sm:gap-3.5 min-w-0">
+          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-purple-50 text-purple-700 flex items-center justify-center shrink-0">
+            <FileCheck2 className="w-5 h-5 sm:w-6 sm:h-6" />
           </div>
-          <div>
-            <span className="text-[11px] font-bold text-steel-500 block">
+          <div className="min-w-0 flex-1">
+            <span className="text-[10px] sm:text-[11px] font-bold text-steel-500 block leading-tight line-clamp-2">
               {lang === 'fr' ? 'Investissement locations' : 'إجمالي كراء الآليات'}
             </span>
-            <span className="text-sm sm:text-base font-black text-ink truncate block">
+            <span className="text-xs sm:text-base font-black text-ink tabular-nums truncate mt-0.5 block">
               {totalSpent.toLocaleString('fr-FR')} MAD
             </span>
           </div>
@@ -234,16 +243,16 @@ export const ContractorDashboardPage: React.FC = () => {
       </div>
 
       {/* InDrive Interactive Radar Card Callout */}
-      <Card className="p-6 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border border-primary/40 rounded-3xl flex flex-col md:flex-row items-center justify-between gap-5">
-        <div className="flex items-center gap-4">
-          <div className="w-14 h-14 rounded-2xl bg-primary text-ink flex items-center justify-center font-black shrink-0 shadow-sm">
-            <MapPin className="w-7 h-7" />
+      <Card className="p-4 sm:p-6 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border border-primary/40 rounded-2xl sm:rounded-3xl flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 sm:gap-5">
+        <div className="flex items-start sm:items-center gap-3 sm:gap-4 min-w-0">
+          <div className="w-11 h-11 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl bg-primary text-ink flex items-center justify-center font-black shrink-0 shadow-sm">
+            <MapPin className="w-5 h-5 sm:w-7 sm:h-7" />
           </div>
-          <div>
-            <h3 className="text-base font-black text-ink">
+          <div className="min-w-0 flex-1">
+            <h3 className="text-sm sm:text-base font-black text-ink leading-snug">
               {lang === 'fr' ? 'Besoin d\'un engin urgent sur votre chantier ?' : 'هل تحتاج آلية أو شاحنة عاجلة لورشك الآن؟'}
             </h3>
-            <p className="text-xs text-steel-600 mt-0.5">
+            <p className="text-xs text-steel-600 mt-1 leading-relaxed">
               {lang === 'fr'
                 ? 'Pointez votre chantier sur la carte et voyez immédiatement les engins disponibles avec la distance exacte et l\'estimation d\'arrivée.'
                 : 'حدد موقع الورش على الخريطة، وسيرصد لك الرادار أقرب الآليات المتاحة مع المسافة بالكيلومتر ووقت الوصول التقديري.'}
@@ -256,7 +265,7 @@ export const ContractorDashboardPage: React.FC = () => {
           variant="primary"
           size="md"
           onClick={() => navigate('/entreprise/map')}
-          className="whitespace-nowrap shrink-0 font-black text-xs sm:text-sm"
+          className="w-full md:w-auto justify-center whitespace-nowrap shrink-0 font-black text-xs sm:text-sm"
           leftIcon={<Sparkles className="w-4 h-4" />}
         >
           {lang === 'fr' ? 'Chercher avec le Radar' : 'البحث برادار الخريطة 📍'}
@@ -265,10 +274,12 @@ export const ContractorDashboardPage: React.FC = () => {
 
       {/* Active Machines Currently On Site */}
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-base sm:text-lg font-black text-ink flex items-center gap-2">
-            <Truck className="w-5 h-5 text-primary" />
-            <span>{lang === 'fr' ? 'Engins actuellement actifs sur vos chantiers' : 'الآليات العاملة في أوراشك حالياً'}</span>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-4">
+          <h2 className="text-base sm:text-lg font-black text-ink flex items-center gap-2 min-w-0">
+            <Truck className="w-5 h-5 text-primary shrink-0" />
+            <span className="leading-snug">
+              {lang === 'fr' ? 'Engins actuellement actifs sur vos chantiers' : 'الآليات العاملة في أوراشك حالياً'}
+            </span>
           </h2>
 
           <Button
@@ -276,16 +287,16 @@ export const ContractorDashboardPage: React.FC = () => {
             variant="outline"
             size="sm"
             onClick={() => navigate('/entreprise/bookings')}
-            className="text-xs font-bold"
+            className="w-full sm:w-auto justify-center text-xs font-bold shrink-0"
           >
             {lang === 'fr' ? 'Voir toutes les locations' : 'عرض كافة الحجوزات'}
           </Button>
         </div>
 
         {activeBookings.length === 0 ? (
-          <Card className="p-8 text-center bg-white border border-steel-200 rounded-3xl space-y-3">
+          <Card className="p-6 sm:p-8 text-center bg-white border border-steel-200 rounded-2xl sm:rounded-3xl space-y-3">
             <Truck className="w-10 h-10 text-steel-300 mx-auto" />
-            <p className="text-xs text-steel-500">
+            <p className="text-xs text-steel-500 leading-relaxed">
               {lang === 'fr'
                 ? 'Aucune machine n\'est actuellement en cours de location sur vos chantiers.'
                 : 'لا توجد آليات تعمل في أوراشك حالياً. يمكنك تصفح السوق أو استخدام الرادار لكراء آلية فوراً.'}
@@ -295,21 +306,22 @@ export const ContractorDashboardPage: React.FC = () => {
               variant="outline"
               size="sm"
               onClick={() => navigate('/marketplace')}
+              className="w-full sm:w-auto justify-center"
             >
               {lang === 'fr' ? 'Parcourir le catalogue d\'engins' : 'تصفح سوق الآليات والمعدات'}
             </Button>
           </Card>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
             {activeBookings.map((b) => {
               const machine = b.machine as any;
               return (
                 <Card
                   key={b.id}
-                  className="p-4 bg-white border border-steel-200 shadow-soft rounded-2xl flex flex-col justify-between space-y-3"
+                  className="p-3.5 sm:p-4 bg-white border border-steel-200 shadow-soft rounded-2xl flex flex-col justify-between space-y-3 min-w-0 overflow-hidden"
                 >
-                  <div className="flex gap-3">
-                    <div className="w-20 h-20 rounded-xl overflow-hidden bg-steel-100 shrink-0">
+                  <div className="flex gap-3 min-w-0">
+                    <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl overflow-hidden bg-steel-100 shrink-0">
                       <img
                         src={
                           machine?.images?.[0] ||
@@ -320,24 +332,24 @@ export const ContractorDashboardPage: React.FC = () => {
                       />
                     </div>
                     <div className="min-w-0 flex-1 space-y-1">
-                      <div className="flex items-center justify-between">
-                        <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black shrink-0">
                           {lang === 'fr' ? 'En activité' : 'قيد العمل بالورش'}
                         </span>
-                        <span className="text-xs font-black text-primary-dark">
+                        <span className="text-xs font-black text-primary-dark tabular-nums shrink-0">
                           {b.total_price.toLocaleString('fr-FR')} MAD
                         </span>
                       </div>
                       <h4 className="text-xs sm:text-sm font-black text-ink truncate">
                         {lang === 'fr' ? machine?.title_fr || machine?.brand : machine?.title_ar || machine?.brand}
                       </h4>
-                      <p className="text-[11px] text-steel-500">
+                      <p className="text-[11px] text-steel-500 truncate">
                         {machine?.brand} {machine?.model} · {machine?.city || 'المغرب'}
                       </p>
                     </div>
                   </div>
 
-                  <div className="pt-2 border-t border-steel-100 flex items-center justify-between gap-2">
+                  <div className="pt-2.5 border-t border-steel-100 flex items-center gap-2">
                     <Button
                       type="button"
                       variant="primary"
@@ -347,7 +359,7 @@ export const ContractorDashboardPage: React.FC = () => {
                         setIsExtensionModalOpen(true);
                       }}
                       leftIcon={<PlusCircle className="w-3.5 h-3.5" />}
-                      className="text-xs font-black flex-1 justify-center"
+                      className="text-xs font-black flex-1 justify-center px-3!"
                     >
                       {lang === 'fr' ? 'Prolonger le contrat' : 'طلب تمديد الكراء'}
                     </Button>
@@ -360,7 +372,7 @@ export const ContractorDashboardPage: React.FC = () => {
                         navigate(`/entreprise/messages?target=${b.owner_id}&machine=${b.machine_id}`)
                       }
                       leftIcon={<MessageSquare className="w-3.5 h-3.5" />}
-                      className="text-xs"
+                      className="text-xs shrink-0 px-3!"
                     >
                       {lang === 'fr' ? 'Chat' : 'المحادثة'}
                     </Button>

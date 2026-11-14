@@ -92,10 +92,17 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
 
   // Spare Parts specific
   const [isSparePart, setIsSparePart] = useState<boolean>(
-    machineToEdit?.category_id === 'spare-parts' || false
+    machineToEdit?.category_id === 'spare-parts' || machineToEdit?.category === 'spare-parts' || false
   );
-  const [partNumber, setPartNumber] = useState<string>('JCB-320/08560');
-  const [compatibleBrands, setCompatibleBrands] = useState<string>('JCB 3CX, 4CX, JS200');
+  const [sparePartCategory, setSparePartCategory] = useState<string>(
+    (machineToEdit?.specs as any)?.part_type || 'filters'
+  );
+  const [partNumber, setPartNumber] = useState<string>(
+    (machineToEdit?.specs as any)?.part_number || 'JCB-320/08560'
+  );
+  const [compatibleBrands, setCompatibleBrands] = useState<string>(
+    (machineToEdit?.specs as any)?.compatible_models || 'JCB 3CX, 4CX'
+  );
 
   // Location
   const [cityId, setCityId] = useState(machineToEdit?.city_id || 'casablanca');
@@ -229,16 +236,16 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
     const machineData: Machine = {
       id: machineToEdit?.id || 'mac_' + Math.random().toString(36).substring(2, 9),
       owner_id: user?.id || profile?.id || 'demo-owner',
-      title_ar: titleAr.trim() || titleFr.trim(),
-      title_fr: titleFr.trim() || titleAr.trim(),
-      description_ar: descAr.trim() || descFr.trim(),
-      description_fr: descFr.trim() || descAr.trim(),
+      title_ar: titleAr.trim() || titleFr.trim() || (isSparePart ? `${brand} ${partNumber}` : `${brand} ${model}`),
+      title_fr: titleFr.trim() || titleAr.trim() || (isSparePart ? `${brand} ${partNumber}` : `${brand} ${model}`),
+      description_ar: descAr.trim() || descFr.trim() || (isSparePart ? `قطعة غيار ${brand} أصلية - مرجع ${partNumber}` : ''),
+      description_fr: descFr.trim() || descAr.trim() || (isSparePart ? `Pièce détachée ${brand} - Réf ${partNumber}` : ''),
       category: catSlug,
       category_id: catSlug,
       brand: brand.trim(),
-      model: model.trim(),
-      year: Number(year) || 2022,
-      listing_mode: listingMode,
+      model: isSparePart ? (partNumber.trim() || model.trim()) : model.trim(),
+      year: isSparePart ? new Date().getFullYear() : (Number(year) || 2022),
+      listing_mode: isSparePart ? 'sale' : listingMode,
       condition,
       city: cityName,
       city_id: cityId,
@@ -246,25 +253,31 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
       lng,
       location_lat: lat,
       location_lng: lng,
-      rate_hourly: hourlyRate,
-      rate_daily: dailyRate,
-      rate_weekly: weeklyRate,
-      hourly_rate: hourlyRate,
-      daily_rate: dailyRate,
-      weekly_rate: weeklyRate,
+      rate_hourly: isSparePart ? 0 : hourlyRate,
+      rate_daily: isSparePart ? 0 : dailyRate,
+      rate_weekly: isSparePart ? 0 : weeklyRate,
+      hourly_rate: isSparePart ? 0 : hourlyRate,
+      daily_rate: isSparePart ? 0 : dailyRate,
+      weekly_rate: isSparePart ? 0 : weeklyRate,
       sale_price: salePrice,
       currency: 'MAD',
-      with_operator: withOperator,
-      fuel_included: fuelIncluded,
+      with_operator: isSparePart ? false : withOperator,
+      fuel_included: isSparePart ? false : fuelIncluded,
       delivery_available: deliveryAvailable,
       status: isPublished ? 'available' : 'inactive',
       is_published: isPublished,
       images: finalImageUrls,
-      specs: {
-        operating_weight_ton: 8.5,
-        engine_power_hp: 92,
-        bucket_capacity_m3: 1.0,
-      },
+      specs: isSparePart
+        ? ({
+            part_number: partNumber,
+            compatible_models: compatibleBrands,
+            part_type: sparePartCategory,
+          } as any)
+        : {
+            operating_weight_ton: 8.5,
+            engine_power_hp: 92,
+            bucket_capacity_m3: 1.0,
+          },
       views_count: machineToEdit?.views_count || 0,
       rating_avg: machineToEdit?.rating_avg || 5.0,
       reviews_count: machineToEdit?.reviews_count || 0,
@@ -401,13 +414,21 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
     onClose();
   };
 
-  const stepsList = [
-    { num: 1, title: t('machines.step_basics') },
-    { num: 2, title: t('machines.step_mode') },
-    { num: 3, title: t('machines.step_location') },
-    { num: 4, title: t('machines.step_images') },
-    { num: 5, title: t('machines.step_publish') },
-  ];
+  const stepsList = isSparePart
+    ? [
+        { num: 1, title: lang === 'fr' ? '1. Données de la pièce' : '1. بيانات قطعة الغيار' },
+        { num: 2, title: lang === 'fr' ? '2. Prix & Conditions' : '2. السعر وشروط البيع' },
+        { num: 3, title: lang === 'fr' ? '3. Emplacement' : '3. الموقع الجغرافي' },
+        { num: 4, title: lang === 'fr' ? '4. Photos de la pièce' : '4. صور قطعة الغيار' },
+        { num: 5, title: lang === 'fr' ? '5. Révision & Publication' : '5. المراجعة والنشر' },
+      ]
+    : [
+        { num: 1, title: t('machines.step_basics') },
+        { num: 2, title: t('machines.step_mode') },
+        { num: 3, title: t('machines.step_location') },
+        { num: 4, title: t('machines.step_images') },
+        { num: 5, title: t('machines.step_publish') },
+      ];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-ink/80 backdrop-blur-md overflow-y-auto">
@@ -420,7 +441,17 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
             </div>
             <div>
               <h3 className="text-base sm:text-lg font-black text-white">
-                {machineToEdit ? t('machines.edit_machine') : t('machines.add_machine')}
+                {isSparePart
+                  ? machineToEdit
+                    ? lang === 'fr'
+                      ? 'Modifier la pièce de rechange'
+                      : 'تعديل قطعة الغيار'
+                    : lang === 'fr'
+                    ? 'إضافة قطعة غيار أو ملحق'
+                    : 'إضافة قطعة غيار أو ملحق'
+                  : machineToEdit
+                  ? t('machines.edit_machine')
+                  : t('machines.add_machine')}
               </h3>
               <span className="text-[11px] text-primary font-bold">
                 {stepsList[step - 1].title}
@@ -467,61 +498,136 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
           {step === 1 && (
             <div className="space-y-4">
               {/* Spare Part Toggle */}
-              <div className="p-3.5 rounded-2xl bg-amber-50/60 border border-primary/40 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Wrench className="w-4 h-4 text-primary-dark" />
-                  <span className="text-xs font-bold text-ink">
-                    {t('machines.is_spare_part_label')}
-                  </span>
+              <div className="p-3.5 rounded-2xl bg-amber-50/80 border border-amber-300 flex items-center justify-between shadow-2xs">
+                <div className="flex items-center gap-2.5">
+                  <Wrench className="w-4 h-4 text-primary-dark shrink-0" />
+                  <div>
+                    <span className="text-xs font-black text-ink block">
+                      {lang === 'fr' ? 'Annonce spécifique pour pièces de rechange et outillage' : 'هذا الإعلان خاص بقطع الغيار والمستلزمات'}
+                    </span>
+                    <span className="text-[11px] text-steel-500">
+                      {lang === 'fr'
+                        ? 'Active le formulaire adapté (vente ferme, sans location, sans chauffeur ni carburant)'
+                        : 'تكييف النموذج لقطع الغيار (بيع مباشر، بدون كراء، وبدون سائق أو مازوت)'}
+                    </span>
+                  </div>
                 </div>
                 <input
                   type="checkbox"
                   checked={isSparePart}
-                  onChange={(e) => setIsSparePart(e.target.checked)}
-                  className="w-5 h-5 accent-primary cursor-pointer"
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setIsSparePart(checked);
+                    if (checked) {
+                      setListingMode('sale');
+                      setWithOperator(false);
+                      setFuelIncluded(false);
+                      if (salePrice > 100000) setSalePrice(2500);
+                    }
+                  }}
+                  className="w-5 h-5 accent-primary cursor-pointer shrink-0"
                 />
               </div>
 
-              {/* Equipment Category Selection */}
-              <div>
-                <label className="text-xs font-bold text-steel-700 block mb-1.5">
-                  {t('machines.category_label')}
-                </label>
-                <select
-                  value={categoryId}
-                  onChange={(e) => setCategoryId(e.target.value)}
-                  className="w-full px-3 py-2.5 text-xs font-bold bg-white border border-steel-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary min-h-[44px]"
-                >
-                  {EQUIPMENT_CATEGORIES.map((cat) => (
-                    <option key={cat.id} value={cat.slug}>
-                      {lang === 'fr' ? cat.name_fr : cat.name_ar}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {/* Conditional Step 1 Fields */}
+              {isSparePart ? (
+                /* SPARE PARTS SPECIFIC FIELDS (No machinery category, no year) */
+                <div className="space-y-4">
+                  {/* Spare Part Category */}
+                  <div>
+                    <label className="text-xs font-bold text-steel-700 block mb-1.5">
+                      {lang === 'fr' ? 'Catégorie de la pièce détachée :' : 'نوع وتصنيف قطعة الغيار :'}
+                    </label>
+                    <select
+                      value={sparePartCategory}
+                      onChange={(e) => setSparePartCategory(e.target.value)}
+                      className="w-full px-3 py-2.5 text-xs font-bold bg-white border border-steel-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary min-h-[44px]"
+                    >
+                      <option value="filters">{lang === 'fr' ? 'Filtres & Lubrifiants (Huile, Carburant, Air)' : 'فلاتر وزيوت وتشحيم (زيت، مازوت، هواء)'}</option>
+                      <option value="hydraulic">{lang === 'fr' ? 'Hydraulique (Pompes, Vérins, Flexibles, Distributeurs)' : 'هيدروليك، مضخات، موزعات وخراطيم'}</option>
+                      <option value="engine">{lang === 'fr' ? 'Moteurs, Culasses & Boîtes de vitesse' : 'محركات، رؤوس أسطوانات وناقل الحركة'}</option>
+                      <option value="teeth">{lang === 'fr' ? 'Dents, Lames de godet & Fixations' : 'أسنان وشفرات كباش ومثبتات'}</option>
+                      <option value="tracks">{lang === 'fr' ? 'Chenilles (Caoutchouc/Acier) & Galets' : 'جنازير مطاطية وحديدية وعجلات'}</option>
+                      <option value="electric">{lang === 'fr' ? 'Électricité, Démarreurs, Alternateurs & Batteries' : 'كهرباء، دينامو، إنارة وبطاريات تشغيل'}</option>
+                      <option value="attachments">{lang === 'fr' ? 'Brise-roche (BRH) & Outils de démolition' : 'كواسر ومرفقات هيدروليكية BRH'}</option>
+                      <option value="other">{lang === 'fr' ? 'Autres composants mécaniques & outillage' : 'مستلزمات وصيانة عامة'}</option>
+                    </select>
+                  </div>
 
-              {/* Brand & Model */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <Input
-                  label={t('machines.brand_label')}
-                  value={brand}
-                  onChange={(e) => setBrand(e.target.value)}
-                  required
-                />
-                <Input
-                  label={t('machines.model_label')}
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  required
-                />
-                <Input
-                  type="number"
-                  label={t('machines.year_label')}
-                  value={year}
-                  onChange={(e) => setYear(Number(e.target.value))}
-                  required
-                />
-              </div>
+                  {/* Brand & Reference (Réf) */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <Input
+                      label={lang === 'fr' ? 'Marque / Fabricant de la pièce :' : 'الماركة المصنعة للقطعة أو المورد :'}
+                      value={brand}
+                      onChange={(e) => setBrand(e.target.value)}
+                      placeholder={lang === 'fr' ? 'Ex: JCB, Caterpillar, Rexroth, Perkins...' : 'مثال: JCB، كاتر بيلر، ريكسروث، بيركنز...'}
+                      required
+                    />
+                    <Input
+                      label={lang === 'fr' ? 'Référence d\'origine (Réf / Part Number) :' : 'رقم المرجع الأصلي للقطعة (Réf / Part Number) :'}
+                      value={partNumber}
+                      onChange={(e) => setPartNumber(e.target.value)}
+                      placeholder="Ex: 320/08560, J350, 1104D..."
+                      required
+                    />
+                  </div>
+
+                  {/* Compatible Models */}
+                  <div>
+                    <Input
+                      label={lang === 'fr' ? 'Engins et modèles compatibles :' : 'الآليات والموديلات المتوافقة مع هذه القطعة :'}
+                      value={compatibleBrands}
+                      onChange={(e) => setCompatibleBrands(e.target.value)}
+                      placeholder={lang === 'fr' ? 'Ex: Compatible avec JCB 3CX, 4CX, CAT 428...' : 'مثال: متوافق مع JCB 3CX، 4CX، كوماتسو PC200...'}
+                      required
+                    />
+                  </div>
+                </div>
+              ) : (
+                /* MACHINERY FIELDS (Standard Category, Brand, Model & Year) */
+                <>
+                  {/* Equipment Category Selection */}
+                  <div>
+                    <label className="text-xs font-bold text-steel-700 block mb-1.5">
+                      {t('machines.category_label')}
+                    </label>
+                    <select
+                      value={categoryId}
+                      onChange={(e) => setCategoryId(e.target.value)}
+                      className="w-full px-3 py-2.5 text-xs font-bold bg-white border border-steel-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary min-h-[44px]"
+                    >
+                      {EQUIPMENT_CATEGORIES.filter((c) => c.slug !== 'spare-parts').map((cat) => (
+                        <option key={cat.id} value={cat.slug}>
+                          {lang === 'fr' ? cat.name_fr : cat.name_ar}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Brand, Model & Year */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <Input
+                      label={t('machines.brand_label')}
+                      value={brand}
+                      onChange={(e) => setBrand(e.target.value)}
+                      required
+                    />
+                    <Input
+                      label={t('machines.model_label')}
+                      value={model}
+                      onChange={(e) => setModel(e.target.value)}
+                      required
+                    />
+                    <Input
+                      type="number"
+                      label={t('machines.year_label')}
+                      value={year}
+                      onChange={(e) => setYear(Number(e.target.value))}
+                      required
+                    />
+                  </div>
+                </>
+              )}
 
               {/* Bilingual Tabs AR / FR */}
               <div>
@@ -554,22 +660,30 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
                 {langTab === 'ar' ? (
                   <div className="space-y-3">
                     <Input
-                      label={t('machines.title_ar')}
-                      placeholder="مثال: جرافة JCB 3CX موديل 2022 بحالة ممتازة"
+                      label={isSparePart ? 'عنوان إعلان قطعة الغيار (بالعربية) :' : t('machines.title_ar')}
+                      placeholder={
+                        isSparePart
+                          ? 'مثال: طقم فلاتر أصلية شامل لآلية JCB 3CX (زيت + هيدروليك)'
+                          : 'مثال: جرافة JCB 3CX موديل 2022 بحالة ممتازة'
+                      }
                       value={titleAr}
                       onChange={(e) => setTitleAr(e.target.value)}
                       dir="rtl"
                     />
                     <div>
                       <label className="text-xs font-bold text-steel-700 block mb-1">
-                        {t('machines.desc_ar')}
+                        {isSparePart ? 'وصف تفصيلي لقطعة الغيار (بالعربية) :' : t('machines.desc_ar')}
                       </label>
                       <textarea
                         rows={3}
                         dir="rtl"
                         value={descAr}
                         onChange={(e) => setDescAr(e.target.value)}
-                        placeholder="أدخل مواصفات الآلية، ساعات العمل، وسجل الصيانة..."
+                        placeholder={
+                          isSparePart
+                            ? 'أدخل مواصفات القطعة، رقم المرجع، مدى التوافق والجاهزية، الضمان إن وجد...'
+                            : 'أدخل مواصفات الآلية، ساعات العمل، وسجل الصيانة...'
+                        }
                         className="w-full px-3 py-2 text-xs border border-steel-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary"
                       />
                     </div>
@@ -577,22 +691,30 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
                 ) : (
                   <div className="space-y-3">
                     <Input
-                      label={t('machines.title_fr')}
-                      placeholder="ex. Tractopelle JCB 3CX 2022 en excellent état"
+                      label={isSparePart ? 'Titre de l\'annonce pièce (Français) :' : t('machines.title_fr')}
+                      placeholder={
+                        isSparePart
+                          ? 'ex. Kit complet filtres d\'origine JCB 3CX (Huile, Carburant)'
+                          : 'ex. Tractopelle JCB 3CX 2022 en excellent état'
+                      }
                       value={titleFr}
                       onChange={(e) => setTitleFr(e.target.value)}
                       dir="ltr"
                     />
                     <div>
                       <label className="text-xs font-bold text-steel-700 block mb-1">
-                        {t('machines.desc_fr')}
+                        {isSparePart ? 'Description détaillée de la pièce (Français) :' : t('machines.desc_fr')}
                       </label>
                       <textarea
                         rows={3}
                         dir="ltr"
                         value={descFr}
                         onChange={(e) => setDescFr(e.target.value)}
-                        placeholder="Précisez les heures de travail, godets disponibles, et révisions..."
+                        placeholder={
+                          isSparePart
+                            ? 'Précisez la référence, l\'état neuf sous emballage, la compatibilité exacte...'
+                            : 'Précisez les heures de travail, godets disponibles, et révisions...'
+                        }
                         className="w-full px-3 py-2 text-xs border border-steel-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary"
                       />
                     </div>
@@ -605,165 +727,243 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
           {/* STEP 2: MODE & PRICING */}
           {step === 2 && (
             <div className="space-y-4">
-              {/* Dual-Mode Selector */}
-              <div>
-                <label className="text-xs font-bold text-steel-700 block mb-1.5">
-                  {t('machines.listing_mode_label')}
-                </label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setListingMode('rent')}
-                    className={`p-3 rounded-2xl border text-xs font-bold flex flex-col items-center justify-center gap-1 min-h-[56px] transition-all cursor-pointer ${
-                      listingMode === 'rent'
-                        ? 'border-primary bg-amber-50 text-ink ring-2 ring-primary'
-                        : 'border-steel-200 text-steel-600 hover:bg-steel-50'
-                    }`}
-                  >
-                    <Truck className="w-4 h-4 text-primary-dark" />
-                    <span>{t('machines.mode_rent_option')}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setListingMode('sale')}
-                    className={`p-3 rounded-2xl border text-xs font-bold flex flex-col items-center justify-center gap-1 min-h-[56px] transition-all cursor-pointer ${
-                      listingMode === 'sale'
-                        ? 'border-primary bg-amber-50 text-ink ring-2 ring-primary'
-                        : 'border-steel-200 text-steel-600 hover:bg-steel-50'
-                    }`}
-                  >
-                    <Tag className="w-4 h-4 text-primary-dark" />
-                    <span>{t('machines.mode_sale_option')}</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* RENT LOGIC */}
-              {listingMode === 'rent' && (
-                <div className="space-y-4 pt-2">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <Input
-                      type="number"
-                      label={t('machines.hourly_rate_label')}
-                      value={hourlyRate}
-                      onChange={(e) => setHourlyRate(Number(e.target.value))}
-                      required
-                    />
-                    <Input
-                      type="number"
-                      label={t('machines.daily_rate_label')}
-                      value={dailyRate}
-                      onChange={(e) => setDailyRate(Number(e.target.value))}
-                      required
-                    />
-                    <Input
-                      type="number"
-                      label={t('machines.weekly_rate_label')}
-                      value={weeklyRate}
-                      onChange={(e) => setWeeklyRate(Number(e.target.value))}
-                      required
-                    />
+              {isSparePart ? (
+                /* SPARE PARTS SPECIFIC STEP 2: Sale only, single price, condition, delivery (NO rental, NO hourly/daily rates, NO driver, NO fuel) */
+                <div className="space-y-4">
+                  {/* Sale Only Notice Banner */}
+                  <div className="p-4 rounded-2xl bg-amber-50 border border-amber-300 text-xs text-amber-950 font-bold flex items-center justify-between shadow-2xs">
+                    <div className="flex items-center gap-2.5">
+                      <Tag className="w-5 h-5 text-amber-700 shrink-0" />
+                      <div>
+                        <span className="block font-black text-sm">
+                          {lang === 'fr' ? 'Vente ferme uniquement' : 'طريقة العرض: بيع نهائي مباشر'}
+                        </span>
+                        <span className="text-[11px] text-amber-800 font-normal">
+                          {lang === 'fr'
+                            ? 'Les pièces de rechange sont proposées à l\'achat direct (pas de location ni chauffeur ni carburant).'
+                            : 'قطع الغيار تباع لمرة واحدة فقط (تم استبعاد خيارات الكراء، السائق، والمازوت).'}
+                        </span>
+                      </div>
+                    </div>
+                    <span className="text-[10px] bg-amber-200 text-amber-950 px-2.5 py-1 rounded-lg font-black shrink-0">
+                      {lang === 'fr' ? '100% Vente' : 'بيع وشراء'}
+                    </span>
                   </div>
 
-                  {/* Toggles */}
-                  <div className="space-y-2.5 pt-2 border-t border-steel-200">
-                    <label className="flex items-center justify-between p-3 rounded-xl border border-steel-200 bg-surface cursor-pointer">
-                      <span className="text-xs font-bold text-ink">
-                        {t('machines.with_operator_toggle')}
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={withOperator}
-                        onChange={(e) => setWithOperator(e.target.checked)}
-                        className="w-5 h-5 accent-primary cursor-pointer"
-                      />
-                    </label>
-
-                    <label className="flex items-center justify-between p-3 rounded-xl border border-steel-200 bg-surface cursor-pointer">
-                      <span className="text-xs font-bold text-ink">
-                        {t('machines.fuel_included_toggle')}
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={fuelIncluded}
-                        onChange={(e) => setFuelIncluded(e.target.checked)}
-                        className="w-5 h-5 accent-primary cursor-pointer"
-                      />
-                    </label>
-
-                    <label className="flex items-center justify-between p-3 rounded-xl border border-steel-200 bg-surface cursor-pointer">
-                      <span className="text-xs font-bold text-ink">
-                        {t('machines.delivery_available_toggle')}
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={deliveryAvailable}
-                        onChange={(e) => setDeliveryAvailable(e.target.checked)}
-                        className="w-5 h-5 accent-primary cursor-pointer"
-                      />
-                    </label>
+                  {/* Single Final Sale Price */}
+                  <div>
+                    <Input
+                      type="number"
+                      label={lang === 'fr' ? 'Prix de vente de la pièce (MAD) :' : 'سعر بيع قطعة الغيار (د.م) :'}
+                      value={salePrice}
+                      onChange={(e) => setSalePrice(Number(e.target.value))}
+                      placeholder="مثال: 2500"
+                      required
+                    />
+                    <span className="text-[11px] text-steel-500 mt-1 block">
+                      {lang === 'fr' ? 'Prix d\'acquisition net pour le client (MAD)' : 'السعر الصافي لشراء القطعة بالدرهم المغربي'}
+                    </span>
                   </div>
-                </div>
-              )}
 
-              {/* SALE LOGIC */}
-              {listingMode === 'sale' && (
-                <div className="space-y-4 pt-2">
-                  <Input
-                    type="number"
-                    label={t('machines.sale_price_label')}
-                    value={salePrice}
-                    onChange={(e) => setSalePrice(Number(e.target.value))}
-                    required
-                  />
-
+                  {/* Part Condition */}
                   <div>
                     <label className="text-xs font-bold text-steel-700 block mb-1.5">
-                      {t('machines.condition_label')}
+                      {lang === 'fr' ? 'État de la pièce détachée :' : 'حالة قطعة الغيار :'}
                     </label>
                     <div className="grid grid-cols-2 gap-3">
                       <button
                         type="button"
                         onClick={() => setCondition('new')}
-                        className={`p-3 rounded-xl border text-xs font-bold transition-all min-h-[44px] cursor-pointer ${
+                        className={`p-3.5 rounded-2xl border text-xs font-bold transition-all min-h-[48px] cursor-pointer ${
                           condition === 'new'
-                            ? 'border-primary bg-amber-50 text-ink'
-                            : 'border-steel-200 text-steel-600'
+                            ? 'border-primary bg-amber-50 text-ink ring-2 ring-primary'
+                            : 'border-steel-200 text-steel-600 hover:bg-steel-50'
                         }`}
                       >
-                        {t('machines.condition_new')}
+                        <span className="block font-black">{lang === 'fr' ? '✨ Neuve d\'origine' : '✨ جديدة كلياً أصلية'}</span>
+                        <span className="text-[10px] text-steel-500 font-normal">{lang === 'fr' ? 'Sous emballage certifié' : 'في علبتها الأصلية'}</span>
                       </button>
                       <button
                         type="button"
                         onClick={() => setCondition('good')}
-                        className={`p-3 rounded-xl border text-xs font-bold transition-all min-h-[44px] cursor-pointer ${
+                        className={`p-3.5 rounded-2xl border text-xs font-bold transition-all min-h-[48px] cursor-pointer ${
                           condition !== 'new'
-                            ? 'border-primary bg-amber-50 text-ink'
-                            : 'border-steel-200 text-steel-600'
+                            ? 'border-primary bg-amber-50 text-ink ring-2 ring-primary'
+                            : 'border-steel-200 text-steel-600 hover:bg-steel-50'
                         }`}
                       >
-                        {t('machines.condition_used')}
+                        <span className="block font-black">{lang === 'fr' ? '🔧 Occasion bon état' : '🔧 مستعملة بحالة ممتازة'}</span>
+                        <span className="text-[10px] text-steel-500 font-normal">{lang === 'fr' ? 'Vérifiée et fonctionnelle' : 'مفحوصة وجاهزة للتركيب'}</span>
                       </button>
                     </div>
                   </div>
-                </div>
-              )}
 
-              {/* Spare Part Extras */}
-              {isSparePart && (
-                <div className="p-4 rounded-2xl bg-steel-50 border border-steel-200 space-y-3">
-                  <Input
-                    label={t('machines.part_number_label')}
-                    value={partNumber}
-                    onChange={(e) => setPartNumber(e.target.value)}
-                  />
-                  <Input
-                    label={t('machines.compatible_brands_label')}
-                    value={compatibleBrands}
-                    onChange={(e) => setCompatibleBrands(e.target.value)}
-                  />
+                  {/* Delivery Toggle Only */}
+                  <label className="flex items-center justify-between p-3.5 rounded-2xl border border-steel-200 bg-surface cursor-pointer">
+                    <div>
+                      <span className="text-xs font-bold text-ink block">
+                        {lang === 'fr' ? 'Expédition et livraison sur chantier disponible' : 'إمكانية الشحن والتوصيل المباشر إلى موقع الورش'}
+                      </span>
+                      <span className="text-[11px] text-steel-500">
+                        {lang === 'fr' ? 'Via transporteur, messagerie ou enlèvement sur magasin' : 'عبر الإرساليات السريعة لأي مدينة أو الاستلام المباشر'}
+                      </span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={deliveryAvailable}
+                      onChange={(e) => setDeliveryAvailable(e.target.checked)}
+                      className="w-5 h-5 accent-primary cursor-pointer shrink-0"
+                    />
+                  </label>
                 </div>
+              ) : (
+                /* MACHINERY SPECIFIC STEP 2: Dual Mode (Rent/Sale) with rates, driver, and fuel */
+                <>
+                  {/* Dual-Mode Selector */}
+                  <div>
+                    <label className="text-xs font-bold text-steel-700 block mb-1.5">
+                      {t('machines.listing_mode_label')}
+                    </label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setListingMode('rent')}
+                        className={`p-3 rounded-2xl border text-xs font-bold flex flex-col items-center justify-center gap-1 min-h-[56px] transition-all cursor-pointer ${
+                          listingMode === 'rent'
+                            ? 'border-primary bg-amber-50 text-ink ring-2 ring-primary'
+                            : 'border-steel-200 text-steel-600 hover:bg-steel-50'
+                        }`}
+                      >
+                        <Truck className="w-4 h-4 text-primary-dark" />
+                        <span>{t('machines.mode_rent_option')}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setListingMode('sale')}
+                        className={`p-3 rounded-2xl border text-xs font-bold flex flex-col items-center justify-center gap-1 min-h-[56px] transition-all cursor-pointer ${
+                          listingMode === 'sale'
+                            ? 'border-primary bg-amber-50 text-ink ring-2 ring-primary'
+                            : 'border-steel-200 text-steel-600 hover:bg-steel-50'
+                        }`}
+                      >
+                        <Tag className="w-4 h-4 text-primary-dark" />
+                        <span>{t('machines.mode_sale_option')}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* RENT LOGIC */}
+                  {listingMode === 'rent' && (
+                    <div className="space-y-4 pt-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <Input
+                          type="number"
+                          label={t('machines.hourly_rate_label')}
+                          value={hourlyRate}
+                          onChange={(e) => setHourlyRate(Number(e.target.value))}
+                          required
+                        />
+                        <Input
+                          type="number"
+                          label={t('machines.daily_rate_label')}
+                          value={dailyRate}
+                          onChange={(e) => setDailyRate(Number(e.target.value))}
+                          required
+                        />
+                        <Input
+                          type="number"
+                          label={t('machines.weekly_rate_label')}
+                          value={weeklyRate}
+                          onChange={(e) => setWeeklyRate(Number(e.target.value))}
+                          required
+                        />
+                      </div>
+
+                      {/* Toggles */}
+                      <div className="space-y-2.5 pt-2 border-t border-steel-200">
+                        <label className="flex items-center justify-between p-3 rounded-xl border border-steel-200 bg-surface cursor-pointer">
+                          <span className="text-xs font-bold text-ink">
+                            {t('machines.with_operator_toggle')}
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={withOperator}
+                            onChange={(e) => setWithOperator(e.target.checked)}
+                            className="w-5 h-5 accent-primary cursor-pointer"
+                          />
+                        </label>
+
+                        <label className="flex items-center justify-between p-3 rounded-xl border border-steel-200 bg-surface cursor-pointer">
+                          <span className="text-xs font-bold text-ink">
+                            {t('machines.fuel_included_toggle')}
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={fuelIncluded}
+                            onChange={(e) => setFuelIncluded(e.target.checked)}
+                            className="w-5 h-5 accent-primary cursor-pointer"
+                          />
+                        </label>
+
+                        <label className="flex items-center justify-between p-3 rounded-xl border border-steel-200 bg-surface cursor-pointer">
+                          <span className="text-xs font-bold text-ink">
+                            {t('machines.delivery_available_toggle')}
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={deliveryAvailable}
+                            onChange={(e) => setDeliveryAvailable(e.target.checked)}
+                            className="w-5 h-5 accent-primary cursor-pointer"
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* SALE LOGIC */}
+                  {listingMode === 'sale' && (
+                    <div className="space-y-4 pt-2">
+                      <Input
+                        type="number"
+                        label={t('machines.sale_price_label')}
+                        value={salePrice}
+                        onChange={(e) => setSalePrice(Number(e.target.value))}
+                        required
+                      />
+
+                      <div>
+                        <label className="text-xs font-bold text-steel-700 block mb-1.5">
+                          {t('machines.condition_label')}
+                        </label>
+                        <div className="grid grid-cols-2 gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setCondition('new')}
+                            className={`p-3 rounded-xl border text-xs font-bold transition-all min-h-[44px] cursor-pointer ${
+                              condition === 'new'
+                                ? 'border-primary bg-amber-50 text-ink'
+                                : 'border-steel-200 text-steel-600'
+                            }`}
+                          >
+                            {t('machines.condition_new')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setCondition('good')}
+                            className={`p-3 rounded-xl border text-xs font-bold transition-all min-h-[44px] cursor-pointer ${
+                              condition !== 'new'
+                                ? 'border-primary bg-amber-50 text-ink'
+                                : 'border-steel-200 text-steel-600'
+                            }`}
+                          >
+                            {t('machines.condition_used')}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}

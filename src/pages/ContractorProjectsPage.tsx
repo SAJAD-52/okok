@@ -1,5 +1,6 @@
 // ============================================================================
 // JADIJCB: Contractor Job Sites & Projects Management (أوراش ومشاريع المقاولة)
+// Responsive Mobile-First Layout + Interactive Map Site Picker
 // ============================================================================
 
 import React, { useState, useEffect } from 'react';
@@ -12,10 +13,10 @@ import {
   Compass,
   Phone,
   User,
-  Sparkles,
   Building,
   CheckCircle,
   X,
+  Navigation,
 } from 'lucide-react';
 import { ContractorSite, MoroccanCity } from '../types/database';
 import { MOROCCAN_CITIES } from '../data/cities';
@@ -23,6 +24,7 @@ import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { toast } from '../components/ui/Toast';
+import { MapLocationPicker } from '../components/machines/MapLocationPicker';
 import { useLanguage } from '../hooks/useLanguage';
 import { useAuth } from '../hooks/useAuth';
 
@@ -36,8 +38,8 @@ export const ContractorProjectsPage: React.FC = () => {
 
   // New Site Form
   const [siteName, setSiteName] = useState('');
+  const [cityId, setCityId] = useState('casablanca');
   const [city, setCity] = useState('الدار البيضاء');
-  const [address, setAddress] = useState('');
   const [managerName, setManagerName] = useState('');
   const [managerPhone, setManagerPhone] = useState('+2126');
   const [lat, setLat] = useState<number>(33.5731);
@@ -104,12 +106,25 @@ export const ContractorProjectsPage: React.FC = () => {
     }
   };
 
-  const handleCityChange = (cityName: string) => {
-    setCity(cityName);
-    const found = MOROCCAN_CITIES.find((c: any) => c.name_ar === cityName || c.name_fr === cityName);
+  const handleCityChange = (selectedCityId: string) => {
+    const found = MOROCCAN_CITIES.find((c: MoroccanCity) => c.id === selectedCityId);
     if (found) {
+      setCityId(found.id);
+      setCity(lang === 'fr' ? found.name_fr : found.name_ar);
       setLat(found.lat);
       setLng(found.lng);
+    }
+  };
+
+  const handleMapLocationChange = (newLat: number, newLng: number, matchedCityId?: string) => {
+    setLat(newLat);
+    setLng(newLng);
+    if (matchedCityId) {
+      const found = MOROCCAN_CITIES.find((c: MoroccanCity) => c.id === matchedCityId);
+      if (found) {
+        setCityId(found.id);
+        setCity(lang === 'fr' ? found.name_fr : found.name_ar);
+      }
     }
   };
 
@@ -120,12 +135,14 @@ export const ContractorProjectsPage: React.FC = () => {
       return;
     }
 
+    const matchedCity = MOROCCAN_CITIES.find((c: MoroccanCity) => c.id === cityId);
+    const cityLabel = matchedCity ? (lang === 'fr' ? matchedCity.name_fr : matchedCity.name_ar) : city;
+
     const newSite: ContractorSite = {
       id: 'site_' + Math.random().toString(36).substring(2, 9),
       contractor_id: user?.id || 'demo',
       name: siteName.trim(),
-      city,
-      address: address.trim(),
+      city: cityLabel,
       lat,
       lng,
       manager_name: managerName.trim() || undefined,
@@ -140,7 +157,6 @@ export const ContractorProjectsPage: React.FC = () => {
 
     // Reset form
     setSiteName('');
-    setAddress('');
     setManagerName('');
     setManagerPhone('+2126');
   };
@@ -152,18 +168,20 @@ export const ContractorProjectsPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 text-start">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-black text-ink flex items-center gap-2">
-            <HardHat className="w-6 h-6 text-primary" />
-            <span>{lang === 'fr' ? 'Mes Chantiers & Projets de Construction' : 'أوراش ومشاريع المقاولة'}</span>
+    <div className="space-y-5 sm:space-y-6 text-start">
+      {/* Page Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+        <div className="min-w-0">
+          <h1 className="text-lg sm:text-2xl font-black text-ink flex items-center gap-2">
+            <HardHat className="w-5 h-5 sm:w-6 sm:h-6 text-primary shrink-0" />
+            <span className="text-balance">
+              {lang === 'fr' ? 'Mes Chantiers & Projets de Construction' : 'أوراش ومشاريع المقاولة'}
+            </span>
           </h1>
-          <p className="text-xs text-steel-500 mt-1">
+          <p className="text-xs text-steel-500 mt-1 leading-relaxed">
             {lang === 'fr'
-              ? 'Enregistrez vos chantiers pour trouver en un clic les engins disponibles les plus proches grâce au radar.'
-              : 'احفظ مواقع أوراش البناء الخاصة بشركتك للبحث الفوري عن أقرب الآليات والشاحنات بضغطة زر واحدة.'}
+              ? 'Enregistrez vos chantiers sur la carte pour trouver en un clic les engins les plus proches grâce au radar.'
+              : 'احفظ مواقع أوراش البناء الخاصة بشركتك على الخريطة للبحث الفوري عن أقرب الآليات والشاحنات بضغطة زر واحدة.'}
           </p>
         </div>
 
@@ -173,160 +191,241 @@ export const ContractorProjectsPage: React.FC = () => {
           size="md"
           onClick={() => setIsAddModalOpen(true)}
           leftIcon={<Plus className="w-4 h-4" />}
-          className="shrink-0"
+          className="w-full sm:w-auto justify-center shrink-0 min-h-[44px] font-black"
         >
           {lang === 'fr' ? 'Ajouter un nouveau chantier' : 'إضافة ورش عمل جديد'}
         </Button>
       </div>
 
-      {/* Grid of Saved Sites */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-        {sites.map((s) => (
-          <Card
-            key={s.id}
-            className="p-5 bg-white border border-steel-200 shadow-soft rounded-3xl flex flex-col justify-between hover:shadow-md transition-shadow"
-          >
-            <div className="space-y-3">
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-10 h-10 rounded-xl bg-amber-50 text-primary-dark flex items-center justify-center font-black">
-                    <Building className="w-5 h-5" />
+      {/* Empty State */}
+      {sites.length === 0 ? (
+        <Card className="p-8 sm:p-12 bg-white border border-steel-200 rounded-3xl text-center space-y-3">
+          <MapPin className="w-12 h-12 text-steel-300 mx-auto" />
+          <h2 className="text-base font-black text-ink">
+            {lang === 'fr' ? 'Aucun chantier enregistré' : 'لا توجد أوراش مسجلة حالياً'}
+          </h2>
+          <p className="text-xs text-steel-500 max-w-md mx-auto">
+            {lang === 'fr'
+              ? 'Placez votre premier chantier sur la carte pour calculer automatiquement les distances des engins disponibles.'
+              : 'حدد موقع ورشك الأول على الخريطة لتسريع إيجاد أقرب الآليات وتوجيه السائقين بسهولة.'}
+          </p>
+          <div className="pt-2">
+            <Button
+              type="button"
+              variant="primary"
+              size="md"
+              onClick={() => setIsAddModalOpen(true)}
+              leftIcon={<Plus className="w-4 h-4" />}
+              className="min-h-[44px]"
+            >
+              {lang === 'fr' ? 'Ajouter un chantier' : 'إضافة ورش جديد'}
+            </Button>
+          </div>
+        </Card>
+      ) : (
+        /* Grid of Saved Sites */
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+          {sites.map((s) => (
+            <Card
+              key={s.id}
+              className="p-4 sm:p-5 bg-white border border-steel-200 shadow-soft rounded-2xl sm:rounded-3xl flex flex-col justify-between hover:shadow-md transition-shadow"
+            >
+              <div className="space-y-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-start gap-2.5 min-w-0">
+                    <div className="w-10 h-10 rounded-xl bg-amber-50 text-primary-dark flex items-center justify-center font-black shrink-0">
+                      <Building className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-black text-ink leading-snug break-words">{s.name}</h3>
+                      <span className="text-[11px] text-steel-500 flex items-center gap-1 font-bold mt-0.5">
+                        <MapPin className="w-3 h-3 text-steel-400 shrink-0" />
+                        <span>{s.city}</span>
+                      </span>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="text-sm font-black text-ink">{s.name}</h3>
-                    <span className="text-[11px] text-steel-500 flex items-center gap-1 font-bold">
-                      <MapPin className="w-3 h-3 text-steel-400" />
-                      <span>{s.city}</span>
+
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteSite(s.id)}
+                    className="min-w-[44px] min-h-[44px] -m-1.5 flex items-center justify-center rounded-xl text-steel-400 hover:text-rose-600 hover:bg-rose-50 transition-colors shrink-0 cursor-pointer"
+                    title={lang === 'fr' ? 'Supprimer' : 'حذف'}
+                    aria-label={lang === 'fr' ? 'Supprimer' : 'حذف'}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Location / Coordinates Row */}
+                <div className="text-xs text-steel-600 bg-steel-50 px-3 py-2 rounded-xl border border-steel-100 space-y-1">
+                  {s.address && <p className="text-steel-700 leading-relaxed">{s.address}</p>}
+                  <div className="flex items-center justify-between gap-2 text-[11px] text-steel-500">
+                    <span className="flex items-center gap-1 font-bold text-ink">
+                      <Navigation className="w-3 h-3 text-primary-dark shrink-0" />
+                      <span>{lang === 'fr' ? 'Position GPS carte' : 'موقع الخريطة'}</span>
+                    </span>
+                    <span dir="ltr" className="font-mono tabular-nums text-[11px]">
+                      {s.lat.toFixed(4)}, {s.lng.toFixed(4)}
                     </span>
                   </div>
                 </div>
 
+                {(s.manager_name || s.manager_phone) && (
+                  <div className="pt-2 border-t border-steel-100 text-xs text-steel-600 flex flex-wrap items-center justify-between gap-2">
+                    <span className="flex items-center gap-1.5 min-w-0">
+                      <User className="w-3.5 h-3.5 text-steel-400 shrink-0" />
+                      <span className="truncate">{s.manager_name || (lang === 'fr' ? 'Chef de chantier' : 'رئيس الورش')}</span>
+                    </span>
+                    {s.manager_phone && (
+                      <a
+                        href={`tel:${s.manager_phone}`}
+                        dir="ltr"
+                        className="font-bold font-mono tabular-nums text-primary-dark hover:underline flex items-center gap-1 py-1"
+                      >
+                        <Phone className="w-3 h-3 shrink-0" />
+                        <span>{s.manager_phone}</span>
+                      </a>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Direct Radar Button */}
+              <div className="pt-3.5 mt-3.5 border-t border-steel-100">
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={() =>
+                    navigate(`/entreprise/map?lat=${s.lat}&lng=${s.lng}&site=${encodeURIComponent(s.name)}`)
+                  }
+                  leftIcon={<Compass className="w-4 h-4" />}
+                  className="w-full justify-center font-black text-xs min-h-[44px]"
+                >
+                  {lang === 'fr' ? 'Radar engins pour ce chantier' : 'رادار الآليات الأقرب لهذا الورش'}
+                </Button>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* Mobile-Responsive Bottom-Sheet / Modal for Adding Site */}
+      {isAddModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <Card className="w-full sm:max-w-lg max-h-[92dvh] flex flex-col bg-white border border-steel-200 shadow-2xl rounded-t-3xl sm:rounded-3xl overflow-hidden p-0">
+            {/* Sticky Modal Header */}
+            <div className="bg-ink text-white px-4 py-3.5 sm:p-5 shrink-0">
+              <div className="sm:hidden w-10 h-1 bg-steel-600 rounded-full mx-auto mb-2.5" />
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <HardHat className="w-5 h-5 text-primary shrink-0" />
+                  <h3 className="text-sm sm:text-base font-black text-white truncate">
+                    {lang === 'fr' ? 'Nouveau Chantier' : 'إضافة ورش بناء جديد'}
+                  </h3>
+                </div>
                 <button
                   type="button"
-                  onClick={() => handleDeleteSite(s.id)}
-                  className="p-1.5 text-steel-400 hover:text-rose-600 transition-colors"
-                  title={lang === 'fr' ? 'Supprimer' : 'حذف'}
+                  onClick={() => setIsAddModalOpen(false)}
+                  className="min-w-[40px] min-h-[40px] -me-1 rounded-xl text-steel-300 hover:text-white hover:bg-steel-800 flex items-center justify-center transition-colors cursor-pointer shrink-0"
+                  aria-label={t('common.close')}
                 >
-                  <Trash2 className="w-4 h-4" />
+                  <X className="w-5 h-5" />
                 </button>
               </div>
+            </div>
 
-              {s.address && (
-                <p className="text-xs text-steel-600 bg-steel-50 p-2.5 rounded-xl border border-steel-100">
-                  {s.address}
-                </p>
-              )}
+            {/* Scrollable Form Body */}
+            <form onSubmit={handleCreateSite} className="flex flex-col flex-1 min-h-0">
+              <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+                <Input
+                  label={lang === 'fr' ? 'Nom du chantier / projet' : 'اسم الورش أو المشروع'}
+                  value={siteName}
+                  onChange={(e) => setSiteName(e.target.value)}
+                  placeholder={lang === 'fr' ? 'Ex: Chantier Bouskoura Résidences' : 'مثال: ورش تهيئة مركب بوسكورة'}
+                  required
+                />
 
-              {(s.manager_name || s.manager_phone) && (
-                <div className="pt-2 border-t border-steel-100 text-xs text-steel-600 flex items-center justify-between">
-                  <span className="flex items-center gap-1">
-                    <User className="w-3.5 h-3.5 text-steel-400" />
-                    <span>{s.manager_name || (lang === 'fr' ? 'Chef de chantier' : 'رئيس الورش')}</span>
-                  </span>
-                  {s.manager_phone && (
-                    <a
-                      href={`tel:${s.manager_phone}`}
-                      className="font-bold text-primary-dark hover:underline flex items-center gap-1"
-                    >
-                      <Phone className="w-3 h-3" />
-                      <span>{s.manager_phone}</span>
-                    </a>
-                  )}
+                <div>
+                  <label className="text-xs font-bold text-steel-700 block mb-1.5">
+                    {lang === 'fr' ? 'Ville du chantier' : 'المدينة'}
+                  </label>
+                  <select
+                    value={cityId}
+                    onChange={(e) => handleCityChange(e.target.value)}
+                    className="w-full px-3 py-2.5 text-xs font-bold bg-white border border-steel-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary min-h-[44px]"
+                  >
+                    {MOROCCAN_CITIES.map((c: MoroccanCity) => (
+                      <option key={c.id} value={c.id}>
+                        {lang === 'fr' ? c.name_fr : c.name_ar}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-              )}
-            </div>
 
-            {/* Direct Radar Button */}
-            <div className="pt-4 mt-4 border-t border-steel-100">
-              <Button
-                type="button"
-                variant="primary"
-                size="sm"
-                onClick={() =>
-                  navigate(`/entreprise/map?lat=${s.lat}&lng=${s.lng}&site=${encodeURIComponent(s.name)}`)
-                }
-                leftIcon={<Compass className="w-4 h-4" />}
-                className="w-full justify-center font-black text-xs"
-              >
-                {lang === 'fr' ? 'Radar engins pour ce chantier' : 'رادار الآليات الأقرب لهذا الورش'}
-              </Button>
-            </div>
-          </Card>
-        ))}
-      </div>
+                {/* Map Location Picker instead of typing address */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-steel-700 flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5 text-primary-dark shrink-0" />
+                    <span>
+                      {lang === 'fr'
+                        ? 'Localiser le chantier sur la carte'
+                        : 'تحديد مكان الورش على الخريطة'}
+                    </span>
+                  </label>
+                  <MapLocationPicker
+                    lat={lat}
+                    lng={lng}
+                    cityId={cityId}
+                    hideCitySelector={true}
+                    showGpsButton={true}
+                    mapHeightClass="h-48 sm:h-56"
+                    instructionText={
+                      lang === 'fr'
+                        ? 'Appuyez sur la carte ou déplacez le marqueur sur le chantier'
+                        : 'انقر على الخريطة أو اسحب العلامة لتحديد مكان الورش'
+                    }
+                    onLocationChange={handleMapLocationChange}
+                  />
+                </div>
 
-      {/* Add Site Modal */}
-      {isAddModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
-          <Card className="w-full max-w-md bg-white border border-steel-200 shadow-2xl rounded-3xl overflow-hidden p-0">
-            <div className="bg-ink text-white p-5 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <HardHat className="w-5 h-5 text-primary" />
-                <h3 className="text-base font-black text-white">
-                  {lang === 'fr' ? 'Nouveau Chantier' : 'إضافة ورش بناء جديد'}
-                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <Input
+                    label={lang === 'fr' ? 'Chef de chantier' : 'رئيس الورش'}
+                    value={managerName}
+                    onChange={(e) => setManagerName(e.target.value)}
+                    placeholder="هشام العلمي"
+                  />
+                  <Input
+                    type="tel"
+                    inputMode="tel"
+                    dir="ltr"
+                    label={lang === 'fr' ? 'Téléphone' : 'الهاتف'}
+                    value={managerPhone}
+                    onChange={(e) => setManagerPhone(e.target.value)}
+                    placeholder="+2126..."
+                  />
+                </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setIsAddModalOpen(false)}
-                className="text-steel-400 hover:text-white"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
 
-            <form onSubmit={handleCreateSite} className="p-6 space-y-4">
-              <Input
-                label={lang === 'fr' ? 'Nom du chantier / projet' : 'اسم الورش أو المشروع'}
-                value={siteName}
-                onChange={(e) => setSiteName(e.target.value)}
-                placeholder={lang === 'fr' ? 'Ex: Chantier Bouskoura Résidences' : 'مثال: ورش تهيئة مركب بوسكورة'}
-                required
-              />
-
-              <div>
-                <label className="text-xs font-bold text-steel-700 block mb-1">
-                  {lang === 'fr' ? 'Ville du chantier' : 'المدينة'}
-                </label>
-                <select
-                  value={city}
-                  onChange={(e) => handleCityChange(e.target.value)}
-                  className="w-full px-3 py-2 text-xs font-bold bg-white border border-steel-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary min-h-[42px]"
+              {/* Sticky Modal Footer */}
+              <div className="shrink-0 p-4 sm:px-6 bg-steel-50 border-t border-steel-200 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="md"
+                  onClick={() => setIsAddModalOpen(false)}
+                  className="w-full sm:w-auto justify-center min-h-[44px]"
                 >
-                  {MOROCCAN_CITIES.map((c: MoroccanCity) => (
-                    <option key={c.id} value={c.name_ar}>
-                      {lang === 'fr' ? c.name_fr : c.name_ar}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <Input
-                label={lang === 'fr' ? 'Adresse ou repère sur place' : 'العنوان أو أقرب نقطة معروفة للورش'}
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                placeholder={lang === 'fr' ? 'Ex: Route de l\'aéroport, sortie sud' : 'مثال: طريق المطار، المخرج الجنوبي'}
-              />
-
-              <div className="grid grid-cols-2 gap-3">
-                <Input
-                  label={lang === 'fr' ? 'Chef de chantier' : 'رئيس الورش'}
-                  value={managerName}
-                  onChange={(e) => setManagerName(e.target.value)}
-                  placeholder="هشام العلمي"
-                />
-                <Input
-                  label={lang === 'fr' ? 'Téléphone' : 'الهاتف'}
-                  value={managerPhone}
-                  onChange={(e) => setManagerPhone(e.target.value)}
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-3">
-                <Button type="button" variant="outline" size="md" onClick={() => setIsAddModalOpen(false)}>
                   {t('common.cancel')}
                 </Button>
-                <Button type="submit" variant="primary" size="md" leftIcon={<CheckCircle className="w-4 h-4" />}>
+                <Button
+                  type="submit"
+                  variant="primary"
+                  size="md"
+                  leftIcon={<CheckCircle className="w-4 h-4" />}
+                  className="w-full sm:w-auto justify-center min-h-[44px] font-black"
+                >
                   {lang === 'fr' ? 'Enregistrer le chantier' : 'حفظ بيانات الورش'}
                 </Button>
               </div>

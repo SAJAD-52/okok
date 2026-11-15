@@ -10,7 +10,7 @@ import path from 'path';
 import fs from 'fs';
 import { DatabaseSync } from 'node:sqlite';
 import { createServer as createViteServer } from 'vite';
-import webpush from 'web-push';
+import * as webpush from 'web-push';
 
 const app = express();
 const PRIMARY_PORT = 3000;

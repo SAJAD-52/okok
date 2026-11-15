@@ -40,12 +40,12 @@ export const HeroSection: React.FC = () => {
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Main Content Column */}
         <div className="text-center max-w-4xl mx-auto flex flex-col items-center">
-          {/* Unboxed Clean Kicker */}
+          {/* Unboxed Clean Kicker with Kinetic Entrance */}
           <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.35 }}
-            className="flex flex-wrap items-center justify-center gap-2 text-xs sm:text-sm font-bold text-primary mb-4 sm:mb-5"
+            initial={{ opacity: 0, y: 12, filter: 'blur(4px)' }}
+            animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+            transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+            className="flex flex-wrap items-center justify-center gap-2 text-xs sm:text-sm font-semibold text-primary mb-4 sm:mb-5 tracking-wide"
           >
             <span>
               {lang === 'fr'
@@ -54,58 +54,88 @@ export const HeroSection: React.FC = () => {
             </span>
           </motion.div>
 
-          {/* Headline */}
+          {/* Headline with Alexandria Display Font & Staggered Motion */}
           <motion.h1
-            initial={{ opacity: 0, y: 18 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.45, delay: 0.08 }}
-            className="text-2xl sm:text-4xl lg:text-[3.1rem] font-black tracking-tight text-white leading-[1.25] sm:leading-[1.2] text-balance mb-5"
+            initial={{ opacity: 0, y: 22, filter: 'blur(6px)' }}
+            animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+            transition={{ duration: 0.6, delay: 0.08, ease: [0.16, 1, 0.3, 1] }}
+            className="font-display text-2xl sm:text-4xl lg:text-[3rem] font-extrabold tracking-tight text-white leading-[1.5] sm:leading-[1.38] text-balance mb-5"
           >
             {lang === 'fr' ? (
               <>
-                La 1ère plateforme marocaine qui réunit{' '}
-                <span className="text-primary underline decoration-primary/40 decoration-4 underline-offset-8">
-                  chantiers, propriétaires d&apos;engins BTP
+                <span className="inline-block">La 1ère plateforme marocaine qui réunit </span>
+                <span className="relative inline-block">
+                  <span className="bg-gradient-to-r from-[#FFE082] via-[#FFB400] to-[#FFF3CD] bg-clip-text text-transparent animate-text-shimmer">
+                    chantiers, propriétaires d&apos;engins BTP
+                  </span>
+                  <motion.span
+                    initial={{ scaleX: 0 }}
+                    animate={{ scaleX: 1 }}
+                    transition={{ duration: 0.7, delay: 0.45, ease: [0.16, 1, 0.3, 1] }}
+                    className="block h-[3px] w-full origin-left rounded-full bg-gradient-to-r from-primary via-amber-300 to-transparent mt-1"
+                  />
                 </span>{' '}
-                et pièces de rechange
+                <span>et pièces de rechange</span>
               </>
             ) : (
               <>
-                أول منصة مغربية تجمع بين أصحاب الأوراش وملاك{' '}
-                <span className="text-primary underline decoration-primary/40 decoration-4 underline-offset-8">
-                  آليات الأشغال العمومية وقطع الغيار
+                <span>أول منصة مغربية تجمع بين أصحاب الأوراش وملاك </span>
+                <span className="relative inline-block">
+                  <span className="bg-gradient-to-l from-[#FFE082] via-[#FFB400] to-[#FFF3CD] bg-clip-text text-transparent animate-text-shimmer">
+                    آليات الأشغال العمومية وقطع الغيار
+                  </span>
+                  <motion.span
+                    initial={{ scaleX: 0 }}
+                    animate={{ scaleX: 1 }}
+                    transition={{ duration: 0.75, delay: 0.45, ease: [0.16, 1, 0.3, 1] }}
+                    className="block h-[3px] w-full origin-right rounded-full bg-gradient-to-l from-primary via-amber-300 to-transparent mt-1.5"
+                  />
                 </span>
               </>
             )}
           </motion.h1>
 
-          {/* Subheadline in Moroccan Darija (addressed to both owners & clients, expressing speed) */}
+          {/* Subheadline in Moroccan Darija with Smooth Motion & Crisp Readability */}
           <motion.p
             initial={{ opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.45, delay: 0.16 }}
-            className="text-sm sm:text-lg text-slate-200 max-w-3xl leading-relaxed mb-6 px-1"
+            transition={{ duration: 0.55, delay: 0.22, ease: [0.16, 1, 0.3, 1] }}
+            className="text-sm sm:text-lg text-slate-200 max-w-3xl leading-[1.85] sm:leading-[1.8] font-normal mb-6 px-1"
           >
-            {lang === 'fr'
-              ? 'Vous gérez un chantier à la recherche d’un engin immédiat ou vous possédez du matériel BTP et des pièces ? Inscrivez-vous par téléphone en 30 secondes, sans paperasse, et trouvez ou louez instantanément.'
-              : 'عندك ورش وبغيتي تكري ولا تشري آلية فالحين، ولا عندك ماتريال وقطع الغيار وبغيتي تخدمهم؟ تسجّل غير بنمرة التليفون والواتساب فـ 30 ثانية، بلا أوراق معقدة، وخدم أسطولك ولا لقى أقرب آلية لورشك في البلاصة!'}
+            {lang === 'fr' ? (
+              'Vous gérez un chantier à la recherche d’un engin immédiat ou vous possédez du matériel BTP et des pièces ? Inscrivez-vous par téléphone en 30 secondes, sans paperasse, et trouvez ou louez instantanément.'
+            ) : (
+              <>
+                عندك ورش وبغيتي تكري ولا تشري آلية فالحين، ولا عندك ماتريال وقطع الغيار وبغيتي تخدمهم؟{' '}
+                <motion.span
+                  initial={{ opacity: 0.7 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.5, delay: 0.5 }}
+                  className="text-white font-semibold"
+                >
+                  تسجّل غير بنمرة التليفون والواتساب فـ 30 ثانية، بلا أوراق معقدة،
+                </motion.span>{' '}
+                وخدم أسطولك ولا لقى أقرب آلية لورشك{' '}
+                <span className="text-primary font-semibold">في البلاصة!</span>
+              </>
+            )}
           </motion.p>
 
           {/* Dual CTA */}
           <motion.div
-            initial={{ opacity: 0, y: 18 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.45, delay: 0.24 }}
+            initial={{ opacity: 0, y: 18, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.5, delay: 0.32, ease: [0.16, 1, 0.3, 1] }}
             className="w-full max-w-2xl"
           >
             <DualCtaRow centered={true} />
           </motion.div>
 
-          {/* Trust Row */}
+          {/* Trust Row with Staggered Reveal */}
           <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.5, delay: 0.3 }}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.42, ease: [0.16, 1, 0.3, 1] }}
             className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2.5 pt-6 text-xs sm:text-sm text-slate-300 font-medium"
           >
             <div className="flex items-center gap-1.5">

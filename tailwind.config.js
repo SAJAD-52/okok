@@ -69,9 +69,10 @@ export default {
         18: '4.5rem',
       },
       fontFamily: {
-        sans: ['"Plus Jakarta Sans"', 'Cairo', 'system-ui', 'sans-serif'],
-        arabic: ['Cairo', '"Plus Jakarta Sans"', 'system-ui', 'sans-serif'],
-        cairo: ['Cairo', 'sans-serif'],
+        sans: ['"IBM Plex Sans Arabic"', 'system-ui', 'sans-serif'],
+        display: ['Alexandria', '"IBM Plex Sans Arabic"', 'system-ui', 'sans-serif'],
+        arabic: ['"IBM Plex Sans Arabic"', 'system-ui', 'sans-serif'],
+        cairo: ['"IBM Plex Sans Arabic"', 'sans-serif'],
       },
       boxShadow: {
         'soft': '0 2px 10px -2px rgba(11, 18, 32, 0.05), 0 4px 20px -2px rgba(11, 18, 32, 0.04)',

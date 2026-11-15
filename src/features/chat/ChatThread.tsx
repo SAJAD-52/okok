@@ -38,6 +38,7 @@ import {
   stripDispatchMarker,
   subscribeLocalDispatchEvents,
 } from '../../lib/dispatchService';
+import { unlockAudioContextNow } from '../../lib/opportunityAudio';
 
 interface ChatThreadProps {
   conversation: ChatConversationItem;
@@ -185,11 +186,13 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
   const isChatClosedByOtherDeal = dispatchDeal?.deal_status === 'closed_other';
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    unlockAudioContextNow();
     setInputMessage(e.target.value);
     sendTypingStatus(e.target.value.length > 0);
   };
 
   const handleSend = (textToSend?: string) => {
+    unlockAudioContextNow();
     if (isChatClosedByOtherDeal) return;
     const text = (textToSend || inputMessage).trim();
     if (!text) return;

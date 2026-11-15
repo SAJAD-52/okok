@@ -8,7 +8,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { ChatMessageItem, ChatConversationItem } from '../../types/chat';
 import { useAuth } from '../../hooks/useAuth';
-import { chatStore } from '../../lib/chatStore';
+import { chatStore, subscribeLocalChatEvents } from '../../lib/chatStore';
 
 export function useChatRealtime(activeConversation: ChatConversationItem | null) {
   const { user, profile } = useAuth();
@@ -235,7 +235,21 @@ export function useChatRealtime(activeConversation: ChatConversationItem | null)
 
     presenceChannelRef.current = presenceChannel;
 
+    const unsubBroadcast = subscribeLocalChatEvents((evt) => {
+      if (evt.type === 'NEW_MESSAGE' && evt.conversationId === convId && evt.message) {
+        const incoming = evt.message;
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === incoming.id)) return prev;
+          return [...prev, { ...incoming, is_optimistic: false }];
+        });
+        if (incoming.sender_id !== currentUserId) {
+          chatStore.markAsRead(convId, currentUserId);
+        }
+      }
+    });
+
     return () => {
+      unsubBroadcast();
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
       }
@@ -280,13 +294,16 @@ export function useChatRealtime(activeConversation: ChatConversationItem | null)
 
       const trimmed = text.trim();
       const otherId = activeConversation.other_participant.id;
+      const senderName = profile?.company_name || profile?.full_name || '';
+      const recipientRole = activeConversation.other_participant.role;
 
       // 1. Send via central chatStore
       const sentMsg = await chatStore.sendMessage(
         activeConversation.id,
         currentUserId,
         trimmed,
-        otherId
+        otherId,
+        { senderName, recipientRole }
       );
 
       // 2. Update local state optimistically
@@ -297,7 +314,7 @@ export function useChatRealtime(activeConversation: ChatConversationItem | null)
 
       sendTypingStatus(false);
     },
-    [activeConversation, currentUserId, sendTypingStatus]
+    [activeConversation, currentUserId, profile?.company_name, profile?.full_name, sendTypingStatus]
   );
 
   return {

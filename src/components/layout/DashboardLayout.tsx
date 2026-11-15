@@ -31,6 +31,7 @@ import { Logo } from '../ui/Logo';
 import { LanguageSwitcher } from '../ui/LanguageSwitcher';
 import { PWAInstallButton } from '../pwa/PWAInstallUI';
 import { OpportunityAlertListener } from '../pwa/OpportunityAlertListener';
+import { ChatAlertListener } from '../pwa/ChatAlertListener';
 import { useLanguage } from '../../hooks/useLanguage';
 import { useAuth } from '../../hooks/useAuth';
 import { useSubscription } from '../../hooks/useSubscription';
@@ -49,7 +50,7 @@ import {
   ensureDispatchConversationLinked,
   updateDispatchNotificationStatus,
 } from '../../lib/dispatchService';
-import { playOpportunitySound } from '../../lib/opportunityAudio';
+import { playChatMessageSound, playOpportunitySound } from '../../lib/opportunityAudio';
 import { registerOwnerPushNotifications } from '../../lib/pushService';
 import { formatDistanceKm } from '../../lib/geoUtils';
 
@@ -128,15 +129,96 @@ export const DashboardLayout: React.FC = () => {
     const onVisibleUnread = () => {
       if (document.visibilityState === 'visible') updateUnread();
     };
+    const onChatUnreadEvent = () => {
+      updateUnread();
+    };
     document.addEventListener('visibilitychange', onVisibleUnread);
     window.addEventListener('storage', updateUnread);
+    window.addEventListener('jadijcb_chat_unread_updated', onChatUnreadEvent);
 
     return () => {
       clearInterval(interval);
       document.removeEventListener('visibilitychange', onVisibleUnread);
       window.removeEventListener('storage', updateUnread);
+      window.removeEventListener('jadijcb_chat_unread_updated', onChatUnreadEvent);
     };
   }, [profile?.id, isSuperAdmin, isImpersonating]);
+
+  // Sync system/chat notifications for BOTH owners and contractors
+  const refreshSystemNotifications = React.useCallback(async () => {
+    const activeId = profile?.id || user?.id;
+    if (!activeId || (isSuperAdmin && !isImpersonating)) return;
+    try {
+      const merged: ServerNotification[] = [];
+      const seenIds = new Set<string>();
+
+      const notifRes = await serverApi.getNotifications({
+        user_id: activeId,
+        role: profile?.role || 'owner',
+      });
+      if (Array.isArray(notifRes.notifications)) {
+        for (const n of notifRes.notifications) {
+          if (!seenIds.has(n.id)) {
+            seenIds.add(n.id);
+            merged.push(n);
+          }
+        }
+      }
+
+      if (isSupabaseConfigured) {
+        try {
+          const { data: sbNotifs } = await supabase
+            .from('notifications')
+            .select('*')
+            .eq('user_id', activeId)
+            .order('created_at', { ascending: false })
+            .limit(20);
+          if (Array.isArray(sbNotifs)) {
+            for (const r of sbNotifs as any[]) {
+              const dedupKey = r.data?.message_id || r.id;
+              const alreadyInServer = merged.some(
+                (m) => m.id === r.id || (m.data?.message_id && m.data.message_id === dedupKey)
+              );
+              if (!alreadyInServer) {
+                merged.push({
+                  id: r.id,
+                  user_id: r.user_id,
+                  title_ar: r.title_ar || '',
+                  title_fr: r.title_fr || '',
+                  body_ar: r.body_ar || '',
+                  body_fr: r.body_fr || '',
+                  type: r.type || 'info',
+                  is_read: Boolean(r.is_read),
+                  read: Boolean(r.is_read),
+                  data: r.data || {},
+                  created_at: r.created_at,
+                });
+              }
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      merged.sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+      setSystemNotifications(merged.slice(0, 30));
+    } catch {
+      // ignore
+    }
+  }, [profile?.id, profile?.role, user?.id, isSuperAdmin, isImpersonating]);
+
+  useEffect(() => {
+    refreshSystemNotifications();
+    const timer = setInterval(refreshSystemNotifications, 20000);
+    window.addEventListener('jadijcb_chat_unread_updated', refreshSystemNotifications);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('jadijcb_chat_unread_updated', refreshSystemNotifications);
+    };
+  }, [refreshSystemNotifications]);
 
   // Sync pending bookings for owner notification badge with real-time updates
   useEffect(() => {
@@ -181,20 +263,6 @@ export const DashboardLayout: React.FC = () => {
           });
           if (serverBookings && serverBookings.length > 0) {
             dbBookings = serverBookings;
-          }
-
-          const notifRes = await serverApi.getNotifications({ user_id: profile.id });
-          if (notifRes.notifications && Array.isArray(notifRes.notifications)) {
-            const incoming = notifRes.notifications;
-            setSystemNotifications((prev) => {
-              if (
-                prev.length === incoming.length &&
-                prev.every((n, i) => n.id === incoming[i]?.id && n.read === incoming[i]?.read)
-              ) {
-                return prev;
-              }
-              return incoming;
-            });
           }
         } catch (serverErr) {
           console.warn('Server SQLite pending load notice:', serverErr);
@@ -723,9 +791,8 @@ export const DashboardLayout: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* Enable Mobile Audio & Push Alert Prompt for Owners */}
-                        {!isContractor &&
-                          typeof window !== 'undefined' &&
+                        {/* Enable Mobile Audio & Push Alert Prompt for Both Owners & Contractors */}
+                        {typeof window !== 'undefined' &&
                           'Notification' in window &&
                           notifPermission === 'default' && (
                             <div className="p-2.5 bg-amber-50 border-b border-amber-200 flex items-center justify-between gap-2">
@@ -740,15 +807,20 @@ export const DashboardLayout: React.FC = () => {
                               <button
                                 type="button"
                                 onClick={async () => {
-                                  const ownerTargetId = profile?.id || user?.id || '';
-                                  const perm = await registerOwnerPushNotifications(ownerTargetId);
+                                  const targetUserId = profile?.id || user?.id || '';
+                                  const targetRole = profile?.role || 'owner';
+                                  const perm = await registerOwnerPushNotifications(targetUserId, targetRole);
                                   setNotifPermission(perm);
                                   if (perm === 'granted') {
-                                    playOpportunitySound();
+                                    if (isContractor) {
+                                      playChatMessageSound();
+                                    } else {
+                                      playOpportunitySound();
+                                    }
                                     toast.success(
                                       lang === 'fr'
                                         ? 'Notifications activées sur votre téléphone !'
-                                        : 'تم تفعيل إشعارات الهاتف بنجاح! ستصلك الفرص في شريط الإشعارات حتى خارج التطبيق.'
+                                        : 'تم تفعيل إشعارات الهاتف بنجاح! ستصلك الرسائل والتنبيهات في شريط الإشعارات حتى خارج التطبيق.'
                                     );
                                   }
                                 }}
@@ -922,37 +994,67 @@ export const DashboardLayout: React.FC = () => {
                                 </div>
                               ))}
 
-                              {/* 2. System notifications from SQLite DB */}
-                              {generalSystemNotifs.map((notif) => (
-                                <div
-                                  key={notif.id}
-                                  onClick={async () => {
-                                    if (!notif.is_read) {
-                                      await serverApi.markNotificationRead(notif.id);
-                                      setSystemNotifications((prev) =>
-                                        prev.map((n) => (n.id === notif.id ? { ...n, is_read: true, read: true } : n))
-                                      );
-                                    }
-                                    setIsNotificationsOpen(false);
-                                    navigate('/owner/bookings?tab=pending');
-                                  }}
-                                  className={`p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
-                                    !notif.is_read
-                                      ? 'bg-primary/10 border-primary/40 font-medium'
-                                      : 'bg-steel-50/70 border-steel-200 text-steel-600'
-                                  }`}
-                                >
-                                  <div className="flex items-center justify-between text-ink font-bold mb-1">
-                                    <span>{lang === 'fr' ? notif.title_fr : notif.title_ar}</span>
-                                    <span className="text-[10px] text-steel-400 font-mono">
-                                      {notif.created_at?.slice(11, 16) || ''}
-                                    </span>
+                              {/* 2. System & Chat notifications */}
+                              {generalSystemNotifs.map((notif) => {
+                                const isChatNotif = notif.type === 'chat_message';
+                                const chatConvId = notif.data?.conversation_id || '';
+                                return (
+                                  <div
+                                    key={notif.id}
+                                    onClick={async () => {
+                                      if (!notif.is_read) {
+                                        await serverApi.markNotificationRead(notif.id);
+                                        if (isSupabaseConfigured) {
+                                          Promise.resolve(
+                                            supabase
+                                              .from('notifications')
+                                              .update({ is_read: true })
+                                              .eq('id', notif.id)
+                                          ).catch(() => {});
+                                        }
+                                        setSystemNotifications((prev) =>
+                                          prev.map((n) => (n.id === notif.id ? { ...n, is_read: true, read: true } : n))
+                                        );
+                                      }
+                                      setIsNotificationsOpen(false);
+                                      if (isChatNotif) {
+                                        const baseMsgRoute = isContractor
+                                          ? '/entreprise/messages'
+                                          : '/owner/messages';
+                                        navigate(
+                                          chatConvId
+                                            ? `${baseMsgRoute}?conv=${encodeURIComponent(chatConvId)}`
+                                            : baseMsgRoute
+                                        );
+                                      } else {
+                                        navigate(isContractor ? '/entreprise/bookings' : '/owner/bookings?tab=pending');
+                                      }
+                                    }}
+                                    className={`p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
+                                      !notif.is_read
+                                        ? 'bg-primary/10 border-primary/40 font-medium'
+                                        : 'bg-steel-50/70 border-steel-200 text-steel-600'
+                                    }`}
+                                  >
+                                    <div className="flex items-center justify-between text-ink font-bold mb-1 gap-2">
+                                      <span className="flex items-center gap-1.5 min-w-0 truncate">
+                                        {isChatNotif && (
+                                          <MessageSquare className="w-3.5 h-3.5 text-primary-dark shrink-0" />
+                                        )}
+                                        <span className="truncate">
+                                          {lang === 'fr' ? notif.title_fr : notif.title_ar}
+                                        </span>
+                                      </span>
+                                      <span className="text-[10px] text-steel-400 font-mono shrink-0">
+                                        {notif.created_at?.slice(11, 16) || ''}
+                                      </span>
+                                    </div>
+                                    <p className="text-[11px] text-steel-600 line-clamp-2">
+                                      {lang === 'fr' ? notif.body_fr : notif.body_ar}
+                                    </p>
                                   </div>
-                                  <p className="text-[11px] text-steel-600 line-clamp-2">
-                                    {lang === 'fr' ? notif.body_fr : notif.body_ar}
-                                  </p>
-                                </div>
-                              ))}
+                                );
+                              })}
                             </>
                           )}
                         </div>
@@ -962,11 +1064,15 @@ export const DashboardLayout: React.FC = () => {
                             type="button"
                             onClick={() => {
                               setIsNotificationsOpen(false);
-                              navigate('/owner/bookings?tab=pending');
+                              navigate(isContractor ? '/entreprise/messages' : '/owner/bookings?tab=pending');
                             }}
                             className="text-xs text-primary-dark font-bold hover:underline cursor-pointer"
                           >
-                            {lang === 'fr'
+                            {isContractor
+                              ? lang === 'fr'
+                                ? 'Ouvrir mes messages →'
+                                : 'الانتقال إلى المحادثات ←'
+                              : lang === 'fr'
                               ? 'Accéder au gestionnaire des réservations →'
                               : 'الانتقال إلى سجل الحجوزات الكامل ←'}
                           </button>
@@ -979,9 +1085,8 @@ export const DashboardLayout: React.FC = () => {
           </div>
         </header>
 
-        {/* Prominent Top Bar to Enable Background Mobile Push Notifications for Owners */}
-        {!isContractor &&
-          typeof window !== 'undefined' &&
+        {/* Prominent Top Bar to Enable Background Mobile Push Notifications for Both Roles */}
+        {typeof window !== 'undefined' &&
           'Notification' in window &&
           notifPermission === 'default' &&
           !isPushPromptDismissed && (
@@ -991,24 +1096,33 @@ export const DashboardLayout: React.FC = () => {
                   <Volume2 className="w-4 h-4" />
                 </span>
                 <p className="font-bold text-ink leading-snug">
-                  {lang === 'fr'
-                    ? 'Activez les notifications push pour recevoir les alertes de chantiers même quand l’application est fermée.'
-                    : 'فعّل إشعارات الهاتف لتصلك طلبات الأوراش الجديدة في شريط الإشعارات حتى عندما يكون التطبيق مغلقاً.'}
+                  {isContractor
+                    ? lang === 'fr'
+                      ? 'Activez les notifications pour recevoir les messages des propriétaires dans votre barre mobile même hors application.'
+                      : 'فعّل إشعارات الهاتف لتصلك رسائل ملاك الآليات مع صوت تنبيه في القائمة المنسدلة حتى خارج التطبيق.'
+                    : lang === 'fr'
+                    ? 'Activez les notifications push pour recevoir les alertes de chantiers et messages même quand l’application est fermée.'
+                    : 'فعّل إشعارات الهاتف لتصلك طلبات الأوراش والرسائل في القائمة المنسدلة حتى عندما يكون التطبيق مغلقاً.'}
                 </p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <button
                   type="button"
                   onClick={async () => {
-                    const ownerTargetId = profile?.id || user?.id || '';
-                    const perm = await registerOwnerPushNotifications(ownerTargetId);
+                    const targetUserId = profile?.id || user?.id || '';
+                    const targetRole = profile?.role || 'owner';
+                    const perm = await registerOwnerPushNotifications(targetUserId, targetRole);
                     setNotifPermission(perm);
                     if (perm === 'granted') {
-                      playOpportunitySound();
+                      if (isContractor) {
+                        playChatMessageSound();
+                      } else {
+                        playOpportunitySound();
+                      }
                       toast.success(
                         lang === 'fr'
                           ? 'Notifications activées sur votre téléphone !'
-                          : 'تم تفعيل إشعارات الهاتف بنجاح! ستصلك التنبيهات في القائمة المنسدلة حتى خارج التطبيق.'
+                          : 'تم تفعيل إشعارات الهاتف بنجاح! ستصلك التنبيهات والرسائل في القائمة المنسدلة حتى خارج التطبيق.'
                       );
                     }
                   }}
@@ -1407,6 +1521,15 @@ export const DashboardLayout: React.FC = () => {
         <OpportunityAlertListener
           ownerId={profile?.id || user?.id || ''}
           onNotificationsSync={setOpportunityNotifications}
+        />
+      )}
+
+      {/* Global Real-Time Chat Message Sound & Mobile Notification Shade Listener (Owners & Contractors) */}
+      {(profile?.id || user?.id) && !(isSuperAdmin && !isImpersonating) && (
+        <ChatAlertListener
+          userId={profile?.id || user?.id || ''}
+          userRole={profile?.role || 'owner'}
+          onNotificationsChanged={refreshSystemNotifications}
         />
       )}
     </div>

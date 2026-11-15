@@ -157,9 +157,9 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
   // Keep Service Worker push context & Web Push subscription synced for closed-app phone alerts
   useEffect(() => {
     if (!ownerId) return;
-    syncServiceWorkerPushContext(ownerId).catch(() => {});
+    syncServiceWorkerPushContext(ownerId, 'owner').catch(() => {});
     if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-      subscribeOwnerWebPush(ownerId).catch(() => {});
+      subscribeOwnerWebPush(ownerId, 'owner').catch(() => {});
     }
   }, [ownerId]);
 
@@ -287,7 +287,7 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
         syncFromSource(true);
-        syncServiceWorkerPushContext(ownerId).catch(() => {});
+        syncServiceWorkerPushContext(ownerId, 'owner').catch(() => {});
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);

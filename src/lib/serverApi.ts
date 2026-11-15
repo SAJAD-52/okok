@@ -98,11 +98,13 @@ export const serverApi = {
   async getNotifications(params?: {
     user_id?: string;
     unread_only?: boolean;
+    role?: string;
   }): Promise<{ notifications: ServerNotification[]; unread_count: number }> {
     try {
       const searchParams = new URLSearchParams();
       if (params?.user_id) searchParams.set('user_id', params.user_id);
       if (params?.unread_only) searchParams.set('unread_only', 'true');
+      if (params?.role) searchParams.set('role', params.role);
 
       const res = await fetch(`${BASE_URL}/api/notifications?${searchParams.toString()}`);
       if (!res.ok) {
@@ -138,6 +140,20 @@ export const serverApi = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id }),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  },
+
+  // 6b. Mark Chat Conversation Notifications Read
+  async markConversationNotificationsRead(user_id: string, conversation_id: string): Promise<boolean> {
+    try {
+      const res = await fetch(`${BASE_URL}/api/notifications/mark-conversation-read`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id, conversation_id }),
       });
       return res.ok;
     } catch {
@@ -247,10 +263,13 @@ export const serverApi = {
 
   // 13. Send Message on Server
   async sendMessage(payload: {
+    id?: string;
     conversation_id: string;
     sender_id: string;
     body: string;
     recipient_id?: string;
+    sender_name?: string;
+    recipient_role?: string;
   }): Promise<any | null> {
     try {
       const res = await fetch(`${BASE_URL}/api/messages`, {

@@ -8,9 +8,62 @@ import { supabase, isSupabaseConfigured } from './supabase';
 import { ChatConversationItem, ChatMessageItem } from '../types/chat';
 import { Machine, UserProfile } from '../types/database';
 import { serverApi } from './serverApi';
+import { sendWebPushToUsers } from './pushService';
 
 const LOCAL_STORAGE_CONVERSATIONS_KEY = 'jadijcb_chat_conversations';
 const LOCAL_STORAGE_MESSAGES_KEY = 'jadijcb_chat_messages';
+const CHAT_BROADCAST_CHANNEL = 'jadijcb_chat_channel';
+
+export interface LocalChatBroadcastEvent {
+  type: 'NEW_MESSAGE' | 'MARK_READ';
+  conversationId: string;
+  senderId: string;
+  recipientId?: string;
+  senderName?: string;
+  recipientRole?: string;
+  message?: ChatMessageItem;
+}
+
+function stripMarkersInline(text: string): string {
+  return String(text || '')
+    .replace(/\s*\[JADIJCB_DISPATCH:[^\]]+\]\s*/g, '')
+    .replace(/\s*\[JADIJCB_DEAL:[^\]]+\]\s*/g, '')
+    .trim();
+}
+
+export function broadcastChatEvent(event: LocalChatBroadcastEvent): void {
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      const ch = new BroadcastChannel(CHAT_BROADCAST_CHANNEL);
+      ch.postMessage(event);
+      ch.close();
+    }
+  } catch {
+    // ignore BroadcastChannel errors
+  }
+}
+
+export function subscribeLocalChatEvents(
+  handler: (event: LocalChatBroadcastEvent) => void
+): () => void {
+  if (typeof BroadcastChannel === 'undefined') return () => {};
+  let ch: BroadcastChannel | null = null;
+  try {
+    ch = new BroadcastChannel(CHAT_BROADCAST_CHANNEL);
+    ch.onmessage = (e) => {
+      if (e?.data) handler(e.data as LocalChatBroadcastEvent);
+    };
+  } catch {
+    ch = null;
+  }
+  return () => {
+    try {
+      ch?.close();
+    } catch {
+      // ignore
+    }
+  };
+}
 
 class ChatStore {
   private conversations: ChatConversationItem[] = [];
@@ -132,9 +185,18 @@ class ChatStore {
     conversationId: string,
     senderId: string,
     text: string,
-    otherParticipantId?: string
+    otherParticipantId?: string,
+    meta?: {
+      senderName?: string;
+      recipientRole?: string;
+    }
   ): Promise<ChatMessageItem> {
     const trimmed = text.trim();
+    const cleanPreview = stripMarkersInline(trimmed) || 'رسالة جديدة';
+    const shortPreview =
+      cleanPreview.length > 90 ? cleanPreview.slice(0, 90) + '...' : cleanPreview;
+    const isRawDispatchLaunch = trimmed.includes('[JADIJCB_DISPATCH:');
+
     const newMsg: ChatMessageItem = {
       id: crypto.randomUUID ? crypto.randomUUID() : 'msg_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
       conversation_id: conversationId,
@@ -154,9 +216,19 @@ class ChatStore {
 
     // Update conversation last_message in local cache
     const convIdx = this.conversations.findIndex((c) => c.id === conversationId);
+    let resolvedRecipientId = otherParticipantId;
+    let resolvedRecipientRole = meta?.recipientRole;
     if (convIdx >= 0) {
-      this.conversations[convIdx].last_message = trimmed;
-      this.conversations[convIdx].last_message_at = newMsg.created_at;
+      const conv = this.conversations[convIdx];
+      conv.last_message = cleanPreview;
+      conv.last_message_at = newMsg.created_at;
+      if (!resolvedRecipientId) {
+        resolvedRecipientId =
+          conv.participant_a === senderId ? conv.participant_b : conv.participant_a;
+      }
+      if (!resolvedRecipientRole) {
+        resolvedRecipientRole = conv.other_participant?.role;
+      }
       this.saveConvsSilently();
     }
 
@@ -191,15 +263,76 @@ class ChatStore {
       }
     }
 
-    // Persist to Server fallback
-    serverApi
-      .sendMessage({
-        conversation_id: conversationId,
-        sender_id: senderId,
-        body: trimmed,
-        recipient_id: otherParticipantId,
-      })
-      .catch(() => {});
+    // Deliver notification + Web Push to the recipient (skip duplicate for raw dispatch launch which already sends dispatch_opportunity push)
+    if (resolvedRecipientId && !isRawDispatchLaunch) {
+      const isRecipientContractor =
+        resolvedRecipientRole === 'client' || resolvedRecipientRole === 'contractor';
+      const targetUrl = isRecipientContractor
+        ? `/entreprise/messages?conv=${encodeURIComponent(conversationId)}`
+        : `/owner/messages?conv=${encodeURIComponent(conversationId)}`;
+      const titleAr = meta?.senderName
+        ? `رسالة من ${meta.senderName} 💬`
+        : 'رسالة جديدة في المحادثة 💬';
+      const titleFr = meta?.senderName
+        ? `Message de ${meta.senderName} 💬`
+        : 'Nouveau message 💬';
+
+      if (isSupabaseConfigured) {
+        Promise.resolve(
+          supabase.from('notifications').insert({
+            user_id: resolvedRecipientId,
+            title_ar: titleAr,
+            title_fr: titleFr,
+            body_ar: shortPreview,
+            body_fr: shortPreview,
+            type: 'chat_message',
+            data: {
+              conversation_id: conversationId,
+              message_id: newMsg.id,
+              sender_id: senderId,
+              sender_name: meta?.senderName || '',
+              url: targetUrl,
+            },
+            is_read: false,
+          })
+        ).catch(() => {});
+      }
+
+      sendWebPushToUsers({
+        userIds: [resolvedRecipientId],
+        id: newMsg.id,
+        type: 'chat_message',
+        title: titleAr,
+        body: shortPreview,
+        tag: `jadijcb-chat-${conversationId}`,
+        url: targetUrl,
+      }).catch(() => {});
+
+      broadcastChatEvent({
+        type: 'NEW_MESSAGE',
+        conversationId,
+        senderId,
+        recipientId: resolvedRecipientId,
+        senderName: meta?.senderName,
+        recipientRole: resolvedRecipientRole,
+        message: newMsg,
+      });
+    }
+
+    // Persist to Server SQLite fallback (also inserts notification & dispatches SQLite Web Push)
+    if (!isRawDispatchLaunch) {
+      serverApi
+        .sendMessage({
+          id: newMsg.id,
+          conversation_id: conversationId,
+          sender_id: senderId,
+          body: trimmed,
+          recipient_id: resolvedRecipientId,
+          sender_name: meta?.senderName,
+          recipient_role: resolvedRecipientRole,
+        })
+        .catch(() => {});
+    }
 
     return newMsg;
   }
@@ -380,6 +513,14 @@ class ChatStore {
     if (conv && conv.unread_count > 0) {
       conv.unread_count = 0;
       this.saveConvsSilently();
+    }
+
+    if (currentUserId && conversationId) {
+      serverApi.markConversationNotificationsRead(currentUserId, conversationId).catch(() => {});
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('jadijcb_chat_unread_updated'));
     }
   }
 

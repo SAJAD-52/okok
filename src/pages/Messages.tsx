@@ -353,6 +353,36 @@ export const Messages: React.FC = () => {
     };
   }, [currentUserId]);
 
+  // 2b. Sync active conversation when URL ?conv= / ?conversationId= changes after mount (e.g. notification tap)
+  const requestedConvIdParam = searchParams.get('conversationId') || searchParams.get('conv');
+  const lastHandledConvParamRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!requestedConvIdParam) {
+      lastHandledConvParamRef.current = null;
+      return;
+    }
+    if (!initialParsedRef.current) return;
+    if (lastHandledConvParamRef.current === requestedConvIdParam) return;
+    lastHandledConvParamRef.current = requestedConvIdParam;
+    if (activeConvIdRef.current === requestedConvIdParam) return;
+    const matched = conversations.find((c) => c.id === requestedConvIdParam);
+    if (matched) {
+      setActiveConversation(matched);
+      chatStore.markAsRead(matched.id, currentUserId);
+      setConversations((prev) =>
+        prev.map((c) => (c.id === matched.id ? { ...c, unread_count: 0 } : c))
+      );
+    } else {
+      loadConversations(true).then((fresh) => {
+        const found = fresh.find((c) => c.id === requestedConvIdParam);
+        if (found) {
+          setActiveConversation(found);
+          chatStore.markAsRead(found.id, currentUserId);
+        }
+      });
+    }
+  }, [requestedConvIdParam, conversations, currentUserId, loadConversations]);
+
   // 3. Supabase Realtime Subscriptions on Conversations & Messages
   useEffect(() => {
     if (!isSupabaseConfigured || !currentUserId) return;
@@ -429,6 +459,7 @@ export const Messages: React.FC = () => {
     try {
       const newUrl = new URL(window.location.href);
       newUrl.searchParams.set('conversationId', conv.id);
+      newUrl.searchParams.delete('conv');
       newUrl.searchParams.delete('target');
       newUrl.searchParams.delete('target_user');
       newUrl.searchParams.delete('machine');
@@ -449,6 +480,7 @@ export const Messages: React.FC = () => {
     try {
       const newUrl = new URL(window.location.href);
       newUrl.searchParams.delete('conversationId');
+      newUrl.searchParams.delete('conv');
       newUrl.searchParams.delete('campaign');
       window.history.replaceState({}, '', newUrl.toString());
     } catch {

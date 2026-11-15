@@ -17,8 +17,11 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
   return outputArray;
 }
 
-export async function syncServiceWorkerPushContext(ownerId: string): Promise<void> {
-  if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !ownerId) return;
+export async function syncServiceWorkerPushContext(
+  userId: string,
+  userRole: string = 'owner'
+): Promise<void> {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !userId) return;
 
   try {
     const reg = await navigator.serviceWorker.ready;
@@ -36,7 +39,9 @@ export async function syncServiceWorkerPushContext(ownerId: string): Promise<voi
     }
 
     const payload = {
-      ownerId,
+      ownerId: userId,
+      userId,
+      userRole,
       supabaseUrl,
       supabaseAnonKey,
       accessToken,
@@ -100,12 +105,15 @@ async function resolveVapidPublicKey(): Promise<string | null> {
   return null;
 }
 
-export async function subscribeOwnerWebPush(ownerId: string): Promise<boolean> {
-  if (typeof window === 'undefined' || !ownerId) return false;
+export async function subscribeOwnerWebPush(
+  userId: string,
+  userRole: string = 'owner'
+): Promise<boolean> {
+  if (typeof window === 'undefined' || !userId) return false;
   if (!('Notification' in window) || Notification.permission !== 'granted') return false;
   if (!('serviceWorker' in navigator)) return false;
 
-  await syncServiceWorkerPushContext(ownerId);
+  await syncServiceWorkerPushContext(userId, userRole);
 
   if (!('PushManager' in window)) return false;
 
@@ -133,7 +141,7 @@ export async function subscribeOwnerWebPush(ownerId: string): Promise<boolean> {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        user_id: ownerId,
+        user_id: userId,
         subscription: subJson,
       }),
     }).catch(() => {});
@@ -143,7 +151,7 @@ export async function subscribeOwnerWebPush(ownerId: string): Promise<boolean> {
       try {
         await supabase.from('push_subscriptions').upsert(
           {
-            user_id: ownerId,
+            user_id: userId,
             endpoint: subscription.endpoint,
             p256dh,
             auth,
@@ -164,7 +172,8 @@ export async function subscribeOwnerWebPush(ownerId: string): Promise<boolean> {
 }
 
 export async function registerOwnerPushNotifications(
-  ownerId: string
+  userId: string,
+  userRole: string = 'owner'
 ): Promise<NotificationPermission> {
   if (typeof window === 'undefined' || !('Notification' in window)) {
     return 'denied';
@@ -179,21 +188,23 @@ export async function registerOwnerPushNotifications(
     }
   }
 
-  if (perm === 'granted' && ownerId) {
-    await subscribeOwnerWebPush(ownerId);
+  if (perm === 'granted' && userId) {
+    await subscribeOwnerWebPush(userId, userRole);
   }
 
   return perm;
 }
 
-export async function sendWebPushForDispatch(params: {
-  ownerIds: string[];
+export async function sendWebPushToUsers(params: {
+  userIds: string[];
   title: string;
   body: string;
   tag: string;
   url?: string;
+  id?: string;
+  type?: string;
 }): Promise<void> {
-  if (!params.ownerIds || params.ownerIds.length === 0) return;
+  if (!params.userIds || params.userIds.length === 0) return;
 
   try {
     let remoteSubs: any[] = [];
@@ -202,7 +213,7 @@ export async function sendWebPushForDispatch(params: {
         const { data } = await supabase
           .from('push_subscriptions')
           .select('user_id, endpoint, p256dh, auth')
-          .in('user_id', params.ownerIds);
+          .in('user_id', params.userIds);
         if (Array.isArray(data)) {
           remoteSubs = data;
         }
@@ -215,10 +226,11 @@ export async function sendWebPushForDispatch(params: {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        owner_ids: params.ownerIds,
+        owner_ids: params.userIds,
         subscriptions: remoteSubs,
         payload: {
-          id: params.tag,
+          id: params.id || params.tag,
+          type: params.type || 'chat_message',
           title: params.title,
           body: params.body,
           tag: params.tag,
@@ -230,4 +242,21 @@ export async function sendWebPushForDispatch(params: {
   } catch {
     // ignore network failure
   }
+}
+
+export async function sendWebPushForDispatch(params: {
+  ownerIds: string[];
+  title: string;
+  body: string;
+  tag: string;
+  url?: string;
+}): Promise<void> {
+  return sendWebPushToUsers({
+    userIds: params.ownerIds,
+    title: params.title,
+    body: params.body,
+    tag: params.tag,
+    url: params.url || '/owner/messages',
+    type: 'dispatch_opportunity',
+  });
 }

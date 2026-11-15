@@ -618,13 +618,19 @@ app.delete('/api/bookings/:id', (req, res) => {
 // 6. Notifications - GET List
 app.get('/api/notifications', (req, res) => {
   try {
-    const { user_id, unread_only } = req.query;
+    const { user_id, unread_only, role } = req.query;
 
     let query = 'SELECT * FROM notifications WHERE 1=1';
     const params: any[] = [];
 
     if (user_id) {
-      query += ` AND (user_id = ? OR user_id = 'owner' OR user_id IS NULL OR user_id = '')`;
+      const roleStr = String(role || '');
+      const isContractorRole = roleStr === 'client' || roleStr === 'contractor';
+      if (isContractorRole) {
+        query += ` AND user_id = ?`;
+      } else {
+        query += ` AND (user_id = ? OR user_id = 'owner' OR user_id IS NULL OR user_id = '')`;
+      }
       params.push(String(user_id));
     }
     if (unread_only === 'true') {
@@ -667,6 +673,30 @@ app.post('/api/notifications/mark-all-read', (req, res) => {
       db.prepare(`UPDATE notifications SET is_read = 1 WHERE user_id = ? OR user_id = 'owner'`).run(user_id);
     } else {
       db.prepare('UPDATE notifications SET is_read = 1').run();
+    }
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 8a. Notifications - Mark Conversation Chat Notifications Read
+app.post('/api/notifications/mark-conversation-read', (req, res) => {
+  try {
+    const { user_id, conversation_id } = req.body || {};
+    if (!user_id || !conversation_id) {
+      return res.status(400).json({ success: false, error: 'user_id and conversation_id required' });
+    }
+    const rows = db
+      .prepare(`SELECT id, data_json FROM notifications WHERE user_id = ? AND type = 'chat_message' AND is_read = 0`)
+      .all(String(user_id)) as any[];
+    for (const r of rows) {
+      try {
+        const parsed = r.data_json ? JSON.parse(r.data_json) : {};
+        if (parsed.conversation_id === conversation_id) {
+          db.prepare('UPDATE notifications SET is_read = 1 WHERE id = ?').run(r.id);
+        }
+      } catch {}
     }
     res.json({ success: true });
   } catch (err: any) {
@@ -974,20 +1004,95 @@ app.get('/api/messages', (req, res) => {
   }
 });
 
+async function sendWebPushToTargets(
+  targetIds: string[],
+  payload: Record<string, any>,
+  externalSubs?: any[]
+): Promise<{ sent: number; total: number }> {
+  const subsMap = new Map<string, any>();
+  if (targetIds.length > 0) {
+    const placeholders = targetIds.map(() => '?').join(',');
+    const rows = db
+      .prepare(`SELECT * FROM push_subscriptions WHERE user_id IN (${placeholders})`)
+      .all(...targetIds);
+    for (const r of rows as any[]) {
+      try {
+        subsMap.set(r.endpoint, JSON.parse(r.subscription_json));
+      } catch {
+        subsMap.set(r.endpoint, {
+          endpoint: r.endpoint,
+          keys: { p256dh: r.p256dh, auth: r.auth },
+        });
+      }
+    }
+  }
+
+  if (Array.isArray(externalSubs)) {
+    for (const s of externalSubs) {
+      if (s?.endpoint && s?.p256dh && s?.auth) {
+        subsMap.set(s.endpoint, {
+          endpoint: s.endpoint,
+          keys: { p256dh: s.p256dh, auth: s.auth },
+        });
+      }
+    }
+  }
+
+  const bodyStr = JSON.stringify(payload || {});
+  let sent = 0;
+
+  await Promise.all(
+    Array.from(subsMap.entries()).map(async ([endpoint, sub]) => {
+      try {
+        await webpush.sendNotification(sub, bodyStr);
+        sent += 1;
+      } catch (pushErr: any) {
+        if (pushErr?.statusCode === 404 || pushErr?.statusCode === 410) {
+          try {
+            db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(endpoint);
+          } catch {}
+        }
+      }
+    })
+  );
+
+  return { sent, total: subsMap.size };
+}
+
+function stripDispatchMarkerServer(text: string): string {
+  return String(text || '')
+    .replace(/\s*\[JADIJCB_DISPATCH:[^\]]+\]\s*/g, '')
+    .replace(/\s*\[JADIJCB_DEAL:[^\]]+\]\s*/g, '')
+    .trim();
+}
+
 // 15. Messages - POST Send Message
 app.post('/api/messages', (req, res) => {
   try {
-    const { conversation_id, sender_id, body, recipient_id } = req.body || {};
+    const {
+      id: clientMsgId,
+      conversation_id,
+      sender_id,
+      body,
+      recipient_id,
+      sender_name,
+      recipient_role,
+    } = req.body || {};
     if (!conversation_id || !sender_id || !body) {
       return res.status(400).json({ success: false, error: 'Missing required fields' });
     }
 
-    const msgId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const msgId = clientMsgId
+      ? String(clientMsgId)
+      : `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const now = new Date().toISOString();
     const trimmed = String(body).trim();
+    const cleanPreview = stripDispatchMarkerServer(trimmed) || 'رسالة جديدة';
+    const shortPreview =
+      cleanPreview.length > 90 ? cleanPreview.substring(0, 90) + '...' : cleanPreview;
 
     db.prepare(`
-      INSERT INTO messages (id, conversation_id, sender_id, body, read_at, created_at)
+      INSERT OR IGNORE INTO messages (id, conversation_id, sender_id, body, read_at, created_at)
       VALUES (?, ?, ?, ?, NULL, ?)
     `).run(msgId, conversation_id, sender_id, trimmed, now);
 
@@ -996,25 +1101,50 @@ app.post('/api/messages', (req, res) => {
       UPDATE conversations
       SET last_message = ?, last_message_at = ?
       WHERE id = ?
-    `).run(trimmed, now, conversation_id);
+    `).run(cleanPreview, now, conversation_id);
 
-    // If recipient is known, insert an in-app notification
+    // If recipient is known, insert an in-app notification & trigger Web Push
     if (recipient_id) {
       const notifId = `notif_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const titleAr = sender_name ? `رسالة من ${sender_name} 💬` : 'رسالة جديدة في المحادثة 💬';
+      const titleFr = sender_name ? `Message de ${sender_name} 💬` : 'Nouveau message 💬';
+      const isRecipientContractor =
+        recipient_role === 'client' || recipient_role === 'contractor';
+      const targetUrl = isRecipientContractor
+        ? `/entreprise/messages?conv=${encodeURIComponent(String(conversation_id))}`
+        : `/owner/messages?conv=${encodeURIComponent(String(conversation_id))}`;
+
       db.prepare(`
         INSERT INTO notifications (id, user_id, title_ar, title_fr, body_ar, body_fr, type, is_read, data_json, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
       `).run(
         notifId,
         recipient_id,
-        'رسالة جديدة في المحادثة',
-        'Nouveau message dans le chat',
-        trimmed.length > 70 ? trimmed.substring(0, 70) + '...' : trimmed,
-        trimmed.length > 70 ? trimmed.substring(0, 70) + '...' : trimmed,
+        titleAr,
+        titleFr,
+        shortPreview,
+        shortPreview,
         'chat_message',
-        JSON.stringify({ conversation_id, message_id: msgId, sender_id }),
+        JSON.stringify({
+          conversation_id,
+          message_id: msgId,
+          sender_id,
+          sender_name: sender_name || '',
+          url: targetUrl,
+        }),
         now
       );
+
+      // Fire background Web Push to recipient's registered devices
+      sendWebPushToTargets([String(recipient_id)], {
+        id: msgId,
+        type: 'chat_message',
+        title: titleAr,
+        body: shortPreview,
+        tag: `jadijcb-chat-${conversation_id}`,
+        url: targetUrl,
+        icon: '/pwa-icon-192.png',
+      }).catch(() => {});
     }
 
     res.json({
@@ -1070,58 +1200,14 @@ app.post('/api/push/subscribe', (req, res) => {
   }
 });
 
-// 18. Web Push - Send Background Notification to Target Owner IDs
+// 18. Web Push - Send Background Notification to Target User IDs
 app.post('/api/push/dispatch', async (req, res) => {
   try {
     const { owner_ids, subscriptions: externalSubs, payload } = req.body || {};
     const targetIds: string[] = Array.isArray(owner_ids) ? owner_ids.map(String) : [];
 
-    const subsMap = new Map<string, any>();
-    if (targetIds.length > 0) {
-      const placeholders = targetIds.map(() => '?').join(',');
-      const rows = db.prepare(`SELECT * FROM push_subscriptions WHERE user_id IN (${placeholders})`).all(...targetIds);
-      for (const r of rows as any[]) {
-        try {
-          subsMap.set(r.endpoint, JSON.parse(r.subscription_json));
-        } catch {
-          subsMap.set(r.endpoint, {
-            endpoint: r.endpoint,
-            keys: { p256dh: r.p256dh, auth: r.auth },
-          });
-        }
-      }
-    }
-
-    if (Array.isArray(externalSubs)) {
-      for (const s of externalSubs) {
-        if (s?.endpoint && s?.p256dh && s?.auth) {
-          subsMap.set(s.endpoint, {
-            endpoint: s.endpoint,
-            keys: { p256dh: s.p256dh, auth: s.auth },
-          });
-        }
-      }
-    }
-
-    const bodyStr = JSON.stringify(payload || {});
-    let sent = 0;
-
-    await Promise.all(
-      Array.from(subsMap.entries()).map(async ([endpoint, sub]) => {
-        try {
-          await webpush.sendNotification(sub, bodyStr);
-          sent += 1;
-        } catch (pushErr: any) {
-          if (pushErr?.statusCode === 404 || pushErr?.statusCode === 410) {
-            try {
-              db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(endpoint);
-            } catch {}
-          }
-        }
-      })
-    );
-
-    res.json({ success: true, sent, total: subsMap.size });
+    const result = await sendWebPushToTargets(targetIds, payload || {}, externalSubs);
+    res.json({ success: true, sent: result.sent, total: result.total });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }

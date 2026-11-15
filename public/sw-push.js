@@ -33,11 +33,20 @@ async function writeCacheJson(keyReq, data) {
   }
 }
 
+function getDefaultMessagesBase(userRole) {
+  return userRole === 'client' || userRole === 'contractor'
+    ? '/entreprise/messages'
+    : '/owner/messages';
+}
+
 async function displayShadeNotification(payload) {
-  const title = payload.title || 'فرصة جديدة 🎉';
-  const body = payload.body || 'طلب كراء آلية قريب من موقعك على JADIJCB';
-  const tag = payload.tag || 'jadijcb-dispatch-' + Date.now();
-  const targetUrl = payload.url || '/owner/messages';
+  const ctx = await readCacheJson(PUSH_CTX_REQ, null);
+  const isChat = payload.type === 'chat_message';
+  const title = payload.title || (isChat ? 'رسالة جديدة 💬' : 'فرصة جديدة 🎉');
+  const body = payload.body || (isChat ? 'لديك رسالة جديدة في المحادثة على JADIJCB' : 'طلب كراء آلية قريب من موقعك على JADIJCB');
+  const tag = payload.tag || ((isChat ? 'jadijcb-chat-' : 'jadijcb-dispatch-') + Date.now());
+  const defaultBase = getDefaultMessagesBase(ctx && ctx.userRole);
+  const targetUrl = payload.url || defaultBase;
 
   try {
     await self.registration.showNotification(title, {
@@ -46,16 +55,17 @@ async function displayShadeNotification(payload) {
       badge: '/pwa-icon-192.png',
       dir: 'rtl',
       lang: 'ar',
-      vibrate: [240, 100, 240, 100, 320],
-      requireInteraction: true,
+      vibrate: isChat ? [180, 70, 180] : [240, 100, 240, 100, 320],
+      requireInteraction: !isChat,
       renotify: true,
       tag,
       data: {
         url: targetUrl,
+        type: payload.type || 'dispatch_opportunity',
         ...(payload.data || {}),
       },
       actions: [
-        { action: 'open', title: 'فتح المحادثة الآن' },
+        { action: 'open', title: isChat ? 'رد أو فتح المحادثة' : 'فتح المحادثة الآن' },
       ],
     });
   } catch {
@@ -65,7 +75,12 @@ async function displayShadeNotification(payload) {
 
 async function checkBackgroundDispatchAlerts() {
   const ctx = await readCacheJson(PUSH_CTX_REQ, null);
-  if (!ctx || !ctx.ownerId) return;
+  const activeUserId = (ctx && (ctx.userId || ctx.ownerId)) || '';
+  if (!activeUserId) return;
+
+  const userRole = (ctx && ctx.userRole) || 'owner';
+  const isContractorRole = userRole === 'client' || userRole === 'contractor';
+  const messagesBase = getDefaultMessagesBase(userRole);
 
   const seenIds = await readCacheJson(PUSH_SEEN_REQ, []);
   const seenSet = new Set(Array.isArray(seenIds) ? seenIds : []);
@@ -74,21 +89,36 @@ async function checkBackgroundDispatchAlerts() {
   // 1. Check Express /api/notifications if hosted on full-stack origin
   try {
     const apiRes = await fetch(
-      `/api/notifications?user_id=${encodeURIComponent(ctx.ownerId)}&unread_only=true`,
+      `/api/notifications?user_id=${encodeURIComponent(activeUserId)}&role=${encodeURIComponent(userRole)}&unread_only=true`,
       { cache: 'no-store' }
     );
     if (apiRes.ok) {
       const json = await apiRes.json();
       const list = Array.isArray(json.notifications) ? json.notifications : [];
       for (const n of list) {
-        if (n && !n.is_read && n.type === 'dispatch_opportunity' && !seenSet.has(n.id)) {
+        if (!n || n.is_read) continue;
+        if (n.type === 'dispatch_opportunity' && !isContractorRole && !seenSet.has(n.id)) {
           newlyFound.push({
             id: n.id,
+            type: 'dispatch_opportunity',
             title: n.title_ar || 'فرصة جديدة 🎉',
             body: n.body_ar || 'طلب آلية جديد قريب من موقعك',
             tag: (n.data && n.data.campaign_id) || n.id,
             url: `/owner/messages?target=${(n.data && n.data.contractor_id) || ''}&machine=${(n.data && n.data.machine_id) || ''}&campaign=${(n.data && n.data.campaign_id) || ''}`,
           });
+        } else if (n.type === 'chat_message') {
+          const msgKey = (n.data && n.data.message_id) || n.id;
+          if (!seenSet.has(n.id) && !seenSet.has(msgKey)) {
+            const convId = (n.data && n.data.conversation_id) || '';
+            newlyFound.push({
+              id: msgKey,
+              type: 'chat_message',
+              title: n.title_ar || 'رسالة جديدة 💬',
+              body: n.body_ar || 'لديك رسالة جديدة في المحادثة',
+              tag: convId ? `jadijcb-chat-${convId}` : msgKey,
+              url: convId ? `${messagesBase}?conv=${encodeURIComponent(convId)}` : messagesBase,
+            });
+          }
         }
       }
     }
@@ -106,25 +136,41 @@ async function checkBackgroundDispatchAlerts() {
 
     try {
       const notifUrl = `${ctx.supabaseUrl}/rest/v1/notifications?user_id=eq.${encodeURIComponent(
-        ctx.ownerId
-      )}&type=eq.dispatch_opportunity&is_read=eq.false&order=created_at.desc&limit=10`;
+        activeUserId
+      )}&is_read=eq.false&order=created_at.desc&limit=15`;
       const res = await fetch(notifUrl, { headers, cache: 'no-store' });
       if (res.ok) {
         const rows = await res.json();
         if (Array.isArray(rows)) {
           for (const r of rows) {
             const d = r.data || {};
-            const key = d.campaign_id || r.id;
-            if (!seenSet.has(r.id) && !seenSet.has(key)) {
-              newlyFound.push({
-                id: r.id,
-                title: r.title_ar || 'فرصة جديدة 🎉',
-                body:
-                  r.body_ar ||
-                  `«${d.company_name || 'مقاولة'}» محتاجة «${d.machine_name || 'آلية'}» ديالك`,
-                tag: key,
-                url: `/owner/messages?target=${d.contractor_id || ''}&machine=${d.machine_id || ''}&campaign=${d.campaign_id || ''}`,
-              });
+            if (r.type === 'dispatch_opportunity' && !isContractorRole) {
+              const key = d.campaign_id || r.id;
+              if (!seenSet.has(r.id) && !seenSet.has(key)) {
+                newlyFound.push({
+                  id: r.id,
+                  type: 'dispatch_opportunity',
+                  title: r.title_ar || 'فرصة جديدة 🎉',
+                  body:
+                    r.body_ar ||
+                    `«${d.company_name || 'مقاولة'}» محتاجة «${d.machine_name || 'آلية'}» ديالك`,
+                  tag: key,
+                  url: `/owner/messages?target=${d.contractor_id || ''}&machine=${d.machine_id || ''}&campaign=${d.campaign_id || ''}`,
+                });
+              }
+            } else if (r.type === 'chat_message') {
+              const msgKey = d.message_id || r.id;
+              const convId = d.conversation_id || '';
+              if (!seenSet.has(r.id) && !seenSet.has(msgKey)) {
+                newlyFound.push({
+                  id: msgKey,
+                  type: 'chat_message',
+                  title: r.title_ar || 'رسالة جديدة 💬',
+                  body: r.body_ar || 'لديك رسالة جديدة في المحادثة',
+                  tag: convId ? `jadijcb-chat-${convId}` : msgKey,
+                  url: convId ? `${messagesBase}?conv=${encodeURIComponent(convId)}` : messagesBase,
+                });
+              }
             }
           }
         }
@@ -133,36 +179,39 @@ async function checkBackgroundDispatchAlerts() {
       // ignore
     }
 
-    try {
-      const dispUrl = `${ctx.supabaseUrl}/rest/v1/dispatch_notifications?owner_id=eq.${encodeURIComponent(
-        ctx.ownerId
-      )}&is_read=eq.false&status=eq.sent&order=created_at.desc&limit=10`;
-      const res = await fetch(dispUrl, { headers, cache: 'no-store' });
-      if (res.ok) {
-        const rows = await res.json();
-        if (Array.isArray(rows)) {
-          for (const d of rows) {
-            const key = d.campaign_id || d.id;
-            if (!seenSet.has(d.id) && !seenSet.has(key)) {
-              newlyFound.push({
-                id: d.id,
-                title: 'فرصة جديدة 🎉',
-                body: `«${d.company_name || 'مقاولة'}» محتاجة «${d.machine_name || 'آلية'}» ديالك`,
-                tag: key,
-                url: `/owner/messages?target=${d.contractor_id || ''}&machine=${d.machine_id || ''}&campaign=${d.campaign_id || ''}`,
-              });
+    if (!isContractorRole) {
+      try {
+        const dispUrl = `${ctx.supabaseUrl}/rest/v1/dispatch_notifications?owner_id=eq.${encodeURIComponent(
+          activeUserId
+        )}&is_read=eq.false&status=eq.sent&order=created_at.desc&limit=10`;
+        const res = await fetch(dispUrl, { headers, cache: 'no-store' });
+        if (res.ok) {
+          const rows = await res.json();
+          if (Array.isArray(rows)) {
+            for (const d of rows) {
+              const key = d.campaign_id || d.id;
+              if (!seenSet.has(d.id) && !seenSet.has(key)) {
+                newlyFound.push({
+                  id: d.id,
+                  type: 'dispatch_opportunity',
+                  title: 'فرصة جديدة 🎉',
+                  body: `«${d.company_name || 'مقاولة'}» محتاجة «${d.machine_name || 'آلية'}» ديالك`,
+                  tag: key,
+                  url: `/owner/messages?target=${d.contractor_id || ''}&machine=${d.machine_id || ''}&campaign=${d.campaign_id || ''}`,
+                });
+              }
             }
           }
         }
+      } catch {
+        // ignore
       }
-    } catch {
-      // ignore
     }
   }
 
   for (const item of newlyFound) {
     seenSet.add(item.id);
-    if (item.tag) seenSet.add(item.tag);
+    if (item.tag && item.type === 'dispatch_opportunity') seenSet.add(item.tag);
     await displayShadeNotification(item);
   }
 

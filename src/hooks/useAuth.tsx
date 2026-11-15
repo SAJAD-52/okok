@@ -19,9 +19,9 @@ interface AuthContextType {
   isSuperAdmin: boolean;
   impersonatedUser: UserProfile | null;
   isImpersonating: boolean;
-  loginWithPhone: (phone: string, pass: string) => Promise<{ success: boolean; error?: string }>;
-  loginWithEmail: (email: string, pass: string) => Promise<{ success: boolean; error?: string }>;
-  loginAsSuperAdmin: (email?: string, pass?: string) => Promise<{ success: boolean; error?: string }>;
+  loginWithPhone: (phone: string, pass: string) => Promise<{ success: boolean; error?: string; role?: UserRole }>;
+  loginWithEmail: (email: string, pass: string) => Promise<{ success: boolean; error?: string; role?: UserRole }>;
+  loginAsSuperAdmin: (email?: string, pass?: string) => Promise<{ success: boolean; error?: string; role?: UserRole }>;
   impersonateUser: (target: UserProfile) => void;
   stopImpersonating: () => void;
   signupWithPhone: (
@@ -171,6 +171,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           .then(() => {}, () => {});
       }
 
+      // Throttled last_active_at & activation_at heartbeat (once per browser session)
+      try {
+        const pingKey = `jadijcb_active_ping_${userId}`;
+        if (!sessionStorage.getItem(pingKey)) {
+          sessionStorage.setItem(pingKey, '1');
+          const nowIso = new Date().toISOString();
+          const activePatch: Record<string, string> = { last_active_at: nowIso };
+          if (!(data as any)?.activation_at) {
+            activePatch.activation_at = nowIso;
+          }
+          supabase.from('profiles').update(activePatch).eq('id', userId).then(() => {}, () => {});
+        }
+      } catch {
+        // ignore sessionStorage / network errors
+      }
+
       const normalized: UserProfile = {
         id: userId,
         phone: mergedPhone,
@@ -259,7 +275,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const loginWithPhone = async (
     rawPhone: string,
     pass: string
-  ): Promise<{ success: boolean; error?: string }> => {
+  ): Promise<{ success: boolean; error?: string; role?: UserRole }> => {
     setIsLoading(true);
 
     const norm = normalizeMoroccanPhone(rawPhone);
@@ -315,7 +331,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
         setIsLoading(false);
-        return { success: true };
+        return {
+          success: true,
+          role: (prof?.role || data.user.user_metadata?.role || 'client') as UserRole,
+        };
       }
 
       setIsLoading(false);
@@ -329,85 +348,81 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const loginAsSuperAdmin = async (
     customEmail = SUPER_ADMIN_EMAIL,
     pass?: string
-  ): Promise<{ success: boolean; error?: string }> => {
+  ): Promise<{ success: boolean; error?: string; role?: UserRole }> => {
     setIsLoading(true);
     const email = customEmail.trim().toLowerCase().replace('٠', '0');
 
-    // If password provided, try real Supabase authentication first
-    if (pass) {
-      try {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email,
-          password: pass,
-        });
-
-        if (!error && data?.user) {
-          setUser(data.user);
-          const adminProf: UserProfile = {
-            id: data.user.id,
-            email,
-            phone: '+212600000001',
-            full_name: 'سعيد (Super Admin)',
-            company_name: 'الإدارة العامة لمنصة JADIJCB MAROC',
-            role: 'admin',
-            city: 'Casablanca',
-            subscription_status: 'active',
-            verified: true,
-            whatsapp_verified: true,
-            created_at: new Date().toISOString(),
-          };
-
-          saveProfileLocally(adminProf);
-          try {
-            await supabase.from('profiles').upsert(adminProf);
-          } catch (e) {
-            console.warn('Admin profile upsert notice:', e);
-          }
-
-          setIsLoading(false);
-          return { success: true };
-        }
-      } catch (err) {
-        console.warn('Supabase signIn password warning for admin:', err);
-      }
+    if (!isSuperAdminEmail(email)) {
+      setIsLoading(false);
+      return { success: false, error: 'auth.invalid_credentials' };
     }
 
-    // Direct verified Super Admin session (Fail-safe for said.cpge24@gmail.com)
-    const adminUser = {
-      id: 'super_admin_said_root',
-      email,
-      role: 'admin',
-      user_metadata: {
-        full_name: 'سعيد (Super Admin)',
-        company_name: 'الإدارة العامة لمنصة JADIJCB',
+    if (!pass || !pass.trim()) {
+      setIsLoading(false);
+      return { success: false, error: 'auth.invalid_credentials' };
+    }
+
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password: pass,
+      });
+
+      if (error || !data?.user) {
+        setIsLoading(false);
+        return {
+          success: false,
+          error: mapSupabaseAuthError(error?.message || 'auth.invalid_credentials'),
+        };
+      }
+
+      // Verify account holds admin privilege in DB or matches verified SUPER_ADMIN_EMAIL
+      const { data: existingProf } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', data.user.id)
+        .maybeSingle();
+
+      const hasAdminPrivilege =
+        isSuperAdminEmail(data.user.email) || existingProf?.role === 'admin';
+
+      if (!hasAdminPrivilege) {
+        await supabase.auth.signOut();
+        setIsLoading(false);
+        return { success: false, error: 'auth.invalid_credentials' };
+      }
+
+      setUser(data.user);
+      const adminProf: UserProfile = {
+        id: data.user.id,
+        email,
+        phone: existingProf?.phone || '+212600000001',
+        full_name: existingProf?.full_name || 'سعيد (Super Admin)',
+        company_name: existingProf?.company_name || 'الإدارة العامة لمنصة JADIJCB MAROC',
         role: 'admin',
-      },
-    };
+        city: existingProf?.city || 'Casablanca',
+        subscription_status: 'active',
+        verified: true,
+        whatsapp_verified: true,
+        created_at: existingProf?.created_at || new Date().toISOString(),
+      };
 
-    const adminProf: UserProfile = {
-      id: 'super_admin_said_root',
-      email,
-      phone: '+212600000001',
-      full_name: 'سعيد (Super Admin)',
-      company_name: 'الإدارة العامة لمنصة JADIJCB MAROC',
-      role: 'admin',
-      city: 'Casablanca',
-      subscription_status: 'active',
-      verified: true,
-      whatsapp_verified: true,
-      created_at: new Date().toISOString(),
-    };
-
-    setUser(adminUser);
-    saveProfileLocally(adminProf);
-    setIsLoading(false);
-    return { success: true };
+      saveProfileLocally(adminProf);
+      setIsLoading(false);
+      return { success: true, role: 'admin' };
+    } catch (err: any) {
+      setIsLoading(false);
+      return {
+        success: false,
+        error: mapSupabaseAuthError(err?.message || 'auth.auth_failed'),
+      };
+    }
   };
 
   const loginWithEmail = async (
     rawEmail: string,
     pass: string
-  ): Promise<{ success: boolean; error?: string }> => {
+  ): Promise<{ success: boolean; error?: string; role?: UserRole }> => {
     setIsLoading(true);
     const email = rawEmail.trim().toLowerCase().replace('٠', '0');
 
@@ -428,9 +443,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (data?.user) {
         setUser(data.user);
-        await fetchProfile(data.user.id);
+        const prof = await fetchProfile(data.user.id);
         setIsLoading(false);
-        return { success: true };
+        return { success: true, role: prof?.role };
       }
 
       setIsLoading(false);
@@ -772,10 +787,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const isSuperAdmin =
-    isSuperAdminEmail(user?.email) ||
-    isSuperAdminEmail(profile?.email) ||
-    profile?.role === 'admin' ||
-    user?.id === 'super_admin_said_root';
+    Boolean(user) &&
+    (isSuperAdminEmail(user?.email) || profile?.role === 'admin');
 
   const isAuthenticated = Boolean(user);
   const effectiveProfile = impersonatedUser || profile;

@@ -7,7 +7,6 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ShieldAlert,
-  ShieldCheck,
   Lock,
   Mail,
   ArrowRight,
@@ -28,7 +27,7 @@ import { useAuth, SUPER_ADMIN_EMAIL } from '../hooks/useAuth';
 export const AdminLoginPage: React.FC = () => {
   const { lang, isRTL } = useLanguage();
   const navigate = useNavigate();
-  const { loginAsSuperAdmin, loginWithEmail } = useAuth();
+  const { loginWithEmail } = useAuth();
 
   const [email, setEmail] = useState<string>(SUPER_ADMIN_EMAIL);
   const [password, setPassword] = useState<string>('');
@@ -37,8 +36,16 @@ export const AdminLoginPage: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
+    if (!password.trim()) {
+      toast.error(
+        lang === 'fr'
+          ? 'Veuillez saisir votre mot de passe administrateur'
+          : 'يرجى إدخال كلمة مرور المشرف العام'
+      );
+      return;
+    }
 
+    setIsLoading(true);
     const cleanEmail = email.trim().toLowerCase().replace('٠', '0');
 
     try {
@@ -49,32 +56,20 @@ export const AdminLoginPage: React.FC = () => {
         toast.success(
           lang === 'fr'
             ? 'Bienvenue dans la tour de contrôle Super Admin !'
-            : 'مرحباً بك يا سعيد في قمة هرم منصة JADIJCB (Super Admin)!'
+            : 'مرحباً بك في لوحة التحكم العليا لمنصة JADIJCB!'
         );
         navigate('/admin');
       } else {
         toast.error(
           lang === 'fr'
             ? 'Identifiants invalides ou mot de passe incorrect'
-            : 'بيانات غير صحيحة، يرجى التحقق من كلمة المرور أو استخدام الدخول السريع'
+            : 'بيانات الدخول غير صحيحة، يرجى التحقق من البريد الإلكتروني وكلمة المرور'
         );
       }
     } catch (err: any) {
       setIsLoading(false);
       toast.error(err?.message || 'Erreur d\'authentification');
     }
-  };
-
-  const handleDirectAccess = async () => {
-    setIsLoading(true);
-    await loginAsSuperAdmin(email);
-    setIsLoading(false);
-    toast.success(
-      lang === 'fr'
-        ? 'Accès immédiat Super Admin accordé avec succès !'
-        : 'تم تفعيل الدخول المباشر للسوبر أدمن المعتمد بنجاح!'
-    );
-    navigate('/admin');
   };
 
   return (
@@ -154,6 +149,8 @@ export const AdminLoginPage: React.FC = () => {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••••••"
+                  required
+                  minLength={6}
                   className="w-full ps-10 pe-11 py-3 rounded-xl bg-steel-800 border border-steel-600 text-white font-mono text-xs focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all min-h-[48px]"
                 />
                 <Lock className="w-4 h-4 text-steel-400 absolute start-3.5 top-3.5" />
@@ -181,27 +178,12 @@ export const AdminLoginPage: React.FC = () => {
             </Button>
           </form>
 
-          {/* Quick Direct Bypass / Emergency Super Admin Access */}
-          <div className="mt-6 pt-5 border-t border-steel-800 text-center space-y-3">
+          <div className="mt-5 pt-4 border-t border-steel-800 text-center">
             <span className="text-[11px] text-steel-400 block">
               {lang === 'fr'
-                ? 'Accès immédiat direct avec validation de l\'adresse e-mail :'
-                : 'أو الدخول المباشر الفوري بالبريد المعتمد :'}
+                ? 'Authentification chiffrée requise via Supabase Auth'
+                : 'دخول محمي ومشفر بكلمة المرور عبر نظام المصادقة الرسمي'}
             </span>
-
-            <button
-              type="button"
-              onClick={handleDirectAccess}
-              disabled={isLoading}
-              className="w-full py-2.5 px-3 rounded-xl bg-steel-800 hover:bg-steel-700 border border-primary/40 text-primary hover:text-amber-300 font-black text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm"
-            >
-              <ShieldCheck className="w-4 h-4" />
-              <span>
-                {lang === 'fr'
-                  ? 'Accès Rapide Sécurisé (said.cpge24@gmail.com)'
-                  : 'دخول فوري مباشر (said.cpge24@gmail.com) ⚡'}
-              </span>
-            </button>
           </div>
         </Card>
       </main>

@@ -404,28 +404,43 @@ export const ChatAlertListener: React.FC<ChatAlertListenerProps> = ({
 
     // 1. Express Server-Sent Events (SSE) for instant 0ms cross-device delivery
     let sse: EventSource | null = null;
-    try {
-      sse = new EventSource(`/api/events?user_id=${encodeURIComponent(userId)}`);
-      sse.addEventListener('chat_message', (ev: MessageEvent) => {
-        try {
-          const data = JSON.parse(ev.data || '{}');
-          if (!data?.conversation_id || data.sender_id === userId) return;
-          myConvIdsRef.current.add(data.conversation_id);
-          window.dispatchEvent(new CustomEvent('jadijcb_sse_chat_message', { detail: data }));
-          triggerChatAlert({
-            messageId: data.id || `sse_${Date.now()}`,
-            conversationId: data.conversation_id,
-            senderId: data.sender_id,
-            senderName: data.sender_name,
-            rawBody: data.body || data.preview || '',
-          });
-        } catch {
-          // ignore malformed SSE frame
+    let sseDisposed = false;
+    (async () => {
+      try {
+        let tokenParam = '';
+        if (isSupabaseConfigured) {
+          try {
+            const { data: sessData } = await supabase.auth.getSession();
+            if (sessData?.session?.access_token) {
+              tokenParam = `&token=${encodeURIComponent(sessData.session.access_token)}`;
+            }
+          } catch {}
         }
-      });
-    } catch {
-      sse = null;
-    }
+        if (sseDisposed) return;
+        sse = new EventSource(
+          `/api/events?user_id=${encodeURIComponent(userId)}${tokenParam}`
+        );
+        sse.addEventListener('chat_message', (ev: MessageEvent) => {
+          try {
+            const data = JSON.parse(ev.data || '{}');
+            if (!data?.conversation_id || data.sender_id === userId) return;
+            myConvIdsRef.current.add(data.conversation_id);
+            window.dispatchEvent(new CustomEvent('jadijcb_sse_chat_message', { detail: data }));
+            triggerChatAlert({
+              messageId: data.id || `sse_${Date.now()}`,
+              conversationId: data.conversation_id,
+              senderId: data.sender_id,
+              senderName: data.sender_name,
+              rawBody: data.body || data.preview || '',
+            });
+          } catch {
+            // ignore malformed SSE frame
+          }
+        });
+      } catch {
+        sse = null;
+      }
+    })();
 
     // 2. Same-browser BroadcastChannel listener
     const unsubBroadcast = subscribeLocalChatEvents((evt) => {
@@ -560,6 +575,7 @@ export const ChatAlertListener: React.FC<ChatAlertListenerProps> = ({
     document.addEventListener('visibilitychange', onVisible);
 
     return () => {
+      sseDisposed = true;
       if (sse) sse.close();
       unsubBroadcast();
       clearInterval(pollInterval);

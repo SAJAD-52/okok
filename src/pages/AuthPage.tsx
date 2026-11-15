@@ -39,6 +39,7 @@ import {
 } from '../lib/authHelpers';
 import { MOROCCAN_CITIES } from '../data/cities';
 import { UserRole } from '../types/database';
+import { platformSettingsStore } from '../lib/platformSettings';
 
 export const AuthPage: React.FC = () => {
   const { t, lang } = useLanguage();
@@ -98,11 +99,12 @@ export const AuthPage: React.FC = () => {
         toast.success(
           lang === 'fr' ? 'Connexion réussie !' : 'تم تسجيل الدخول بنجاح!'
         );
-        if (profile?.role === 'admin' || isSuperAdmin) {
+        const actualRole = res.role || profile?.role;
+        if (actualRole === 'admin' || isSuperAdmin) {
           navigate('/admin');
           return;
         }
-        const isClient = role === 'client';
+        const isClient = actualRole === 'client' || actualRole === 'contractor';
         navigate(isClient ? '/entreprise' : '/owner');
       } else {
         toast.error(t(res.error || 'auth.auth_failed'));
@@ -409,6 +411,18 @@ export const AuthPage: React.FC = () => {
                 </button>
               </div>
 
+              {/* Inline Password Minimum Length Indicator (Mobile UX) */}
+              {isPasswordTouched && password.length < 8 && (
+                <p className="mt-1.5 text-[11px] font-bold text-red-600 flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  <span>
+                    {lang === 'fr'
+                      ? `Minimum 8 caractères (${password.length}/8)`
+                      : `كلمة المرور يجب أن تحتوي على 8 أحرف على الأقل (${password.length}/8)`}
+                  </span>
+                </p>
+              )}
+
               {/* Password Strength Meter (Shown on Register mode or when entering password) */}
               {mode === 'register' && isPasswordTouched && (
                 <div className="mt-2 space-y-1">
@@ -448,6 +462,26 @@ export const AuthPage: React.FC = () => {
                         : t('auth.password_weak')}
                     </span>
                   </div>
+                </div>
+              )}
+
+              {/* Forgot Password Support via WhatsApp */}
+              {mode === 'login' && (
+                <div className="mt-2 flex justify-end">
+                  <a
+                    href={`https://wa.me/${(platformSettingsStore.getSettings().whatsapp_number || '+212661234567').replace(/\D/g, '')}?text=${encodeURIComponent(
+                      lang === 'fr'
+                        ? `Bonjour, j'ai oublié mon mot de passe JADIJCB pour le numéro: ${phone || '...'}`
+                        : `السلام عليكم، نسيت كلمة المرور لحسابي في منصة JADIJCB المرتبط بالرقم: ${phone || '...'}`
+                    )}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[11px] font-bold text-primary-dark hover:underline"
+                  >
+                    {lang === 'fr'
+                      ? 'Mot de passe oublié ? Contacter le support'
+                      : 'نسيت كلمة المرور؟ تواصل مع الدعم لإعادة التعيين'}
+                  </a>
                 </div>
               )}
             </div>

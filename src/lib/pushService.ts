@@ -173,9 +173,18 @@ export async function subscribeOwnerWebPush(
     const auth = subJson.keys?.auth || '';
 
     // 1. Persist to Express SQLite backend (when available)
+    const authHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (isSupabaseConfigured) {
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (sessionData?.session?.access_token) {
+          authHeaders['Authorization'] = `Bearer ${sessionData.session.access_token}`;
+        }
+      } catch {}
+    }
     fetch('/api/push/subscribe', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders,
       body: JSON.stringify({
         user_id: userId,
         subscription: subJson,
@@ -258,9 +267,19 @@ export async function sendWebPushToUsers(params: {
       }
     }
 
+    const dispatchHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (isSupabaseConfigured) {
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (sessionData?.session?.access_token) {
+          dispatchHeaders['Authorization'] = `Bearer ${sessionData.session.access_token}`;
+        }
+      } catch {}
+    }
+
     await fetch('/api/push/dispatch', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: dispatchHeaders,
       body: JSON.stringify({
         owner_ids: params.userIds,
         subscriptions: remoteSubs,

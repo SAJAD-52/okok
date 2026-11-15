@@ -4,8 +4,28 @@
 // ============================================================================
 
 import { Booking, BookingStatus, Machine } from '../types/database';
+import { supabase, isSupabaseConfigured } from './supabase';
 
 const BASE_URL = typeof window !== 'undefined' ? window.location.origin : '';
+
+async function getAuthHeaders(withJson = false): Promise<Record<string, string>> {
+  const headers: Record<string, string> = {};
+  if (withJson) {
+    headers['Content-Type'] = 'application/json';
+  }
+  if (isSupabaseConfigured) {
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data?.session?.access_token;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+    } catch {
+      // ignore session lookup failure
+    }
+  }
+  return headers;
+}
 
 export interface ServerNotification {
   id: string;
@@ -36,7 +56,9 @@ export const serverApi = {
       if (params?.client_id) searchParams.set('client_id', params.client_id);
       if (params?.status) searchParams.set('status', params.status);
 
-      const res = await fetch(`${BASE_URL}/api/bookings?${searchParams.toString()}`);
+      const res = await fetch(`${BASE_URL}/api/bookings?${searchParams.toString()}`, {
+        headers: await getAuthHeaders(false),
+      });
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
@@ -53,7 +75,7 @@ export const serverApi = {
     try {
       const res = await fetch(`${BASE_URL}/api/bookings`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await getAuthHeaders(true),
         body: JSON.stringify(booking),
       });
 
@@ -78,7 +100,7 @@ export const serverApi = {
     try {
       const res = await fetch(`${BASE_URL}/api/bookings/${id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await getAuthHeaders(true),
         body: JSON.stringify({ status, notes }),
       });
 
@@ -106,7 +128,9 @@ export const serverApi = {
       if (params?.unread_only) searchParams.set('unread_only', 'true');
       if (params?.role) searchParams.set('role', params.role);
 
-      const res = await fetch(`${BASE_URL}/api/notifications?${searchParams.toString()}`);
+      const res = await fetch(`${BASE_URL}/api/notifications?${searchParams.toString()}`, {
+        headers: await getAuthHeaders(false),
+      });
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
@@ -126,6 +150,7 @@ export const serverApi = {
     try {
       const res = await fetch(`${BASE_URL}/api/notifications/${id}/read`, {
         method: 'PATCH',
+        headers: await getAuthHeaders(false),
       });
       return res.ok;
     } catch {
@@ -138,7 +163,7 @@ export const serverApi = {
     try {
       const res = await fetch(`${BASE_URL}/api/notifications/mark-all-read`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await getAuthHeaders(true),
         body: JSON.stringify({ user_id }),
       });
       return res.ok;
@@ -152,7 +177,7 @@ export const serverApi = {
     try {
       const res = await fetch(`${BASE_URL}/api/notifications/mark-conversation-read`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await getAuthHeaders(true),
         body: JSON.stringify({ user_id, conversation_id }),
       });
       return res.ok;
@@ -166,7 +191,7 @@ export const serverApi = {
     try {
       const res = await fetch(`${BASE_URL}/api/machines`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await getAuthHeaders(true),
         body: JSON.stringify(machine),
       });
       return res.ok;
@@ -181,7 +206,9 @@ export const serverApi = {
       const searchParams = new URLSearchParams();
       if (owner_id) searchParams.set('owner_id', owner_id);
 
-      const res = await fetch(`${BASE_URL}/api/machines?${searchParams.toString()}`);
+      const res = await fetch(`${BASE_URL}/api/machines?${searchParams.toString()}`, {
+        headers: await getAuthHeaders(false),
+      });
       if (!res.ok) return [];
       const data = await res.json();
       return Array.isArray(data.machines) ? data.machines : [];
@@ -203,7 +230,7 @@ export const serverApi = {
     try {
       const res = await fetch(`${BASE_URL}/api/notifications`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await getAuthHeaders(true),
         body: JSON.stringify(payload),
       });
       return res.ok;
@@ -217,7 +244,9 @@ export const serverApi = {
     try {
       const searchParams = new URLSearchParams();
       if (userId) searchParams.set('user_id', userId);
-      const res = await fetch(`${BASE_URL}/api/conversations?${searchParams.toString()}`);
+      const res = await fetch(`${BASE_URL}/api/conversations?${searchParams.toString()}`, {
+        headers: await getAuthHeaders(false),
+      });
       if (!res.ok) return [];
       const data = await res.json();
       return Array.isArray(data.conversations) ? data.conversations : [];
@@ -238,7 +267,7 @@ export const serverApi = {
     try {
       const res = await fetch(`${BASE_URL}/api/conversations`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await getAuthHeaders(true),
         body: JSON.stringify(payload),
       });
       if (!res.ok) return null;
@@ -252,7 +281,9 @@ export const serverApi = {
   // 12. Fetch Messages from Server
   async getMessages(conversationId: string): Promise<any[]> {
     try {
-      const res = await fetch(`${BASE_URL}/api/messages?conversation_id=${encodeURIComponent(conversationId)}`);
+      const res = await fetch(`${BASE_URL}/api/messages?conversation_id=${encodeURIComponent(conversationId)}`, {
+        headers: await getAuthHeaders(false),
+      });
       if (!res.ok) return [];
       const data = await res.json();
       return Array.isArray(data.messages) ? data.messages : [];
@@ -274,7 +305,7 @@ export const serverApi = {
     try {
       const res = await fetch(`${BASE_URL}/api/messages`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await getAuthHeaders(true),
         body: JSON.stringify(payload),
       });
       if (!res.ok) return null;

@@ -216,9 +216,152 @@ try {
   console.warn('Web Push VAPID configuration notice:', err);
 }
 
-// Middlewares
+// Security Headers & CORS
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
+
+// Lightweight In-Memory Rate Limiter (safe for shared mobile carrier IPs)
+const rateBuckets = new Map<string, { count: number; resetAt: number }>();
+function createRateLimiter(windowMs: number, maxRequests: number) {
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const ip =
+      String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() ||
+      req.socket.remoteAddress ||
+      'unknown';
+    const key = `${ip}:${windowMs}:${maxRequests}`;
+    const now = Date.now();
+    const bucket = rateBuckets.get(key);
+    if (!bucket || now > bucket.resetAt) {
+      rateBuckets.set(key, { count: 1, resetAt: now + windowMs });
+      return next();
+    }
+    bucket.count += 1;
+    if (bucket.count > maxRequests) {
+      return res.status(429).json({
+        success: false,
+        error: 'RATE_LIMIT_EXCEEDED',
+        message_ar: 'تم تجاوز الحد المسموح من الطلبات، يرجى الانتظار قليلاً',
+      });
+    }
+    return next();
+  };
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of rateBuckets.entries()) {
+    if (now > v.resetAt) rateBuckets.delete(k);
+  }
+}, 60_000);
+
+const apiGeneralLimiter = createRateLimiter(60_000, 600);
+const apiMutationLimiter = createRateLimiter(60_000, 60);
+app.use('/api', apiGeneralLimiter);
+
+// Supabase JWT Verification Middleware
+const SUPABASE_URL = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '').trim();
+const SUPABASE_ANON_KEY = (process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '').trim();
+const isSupabaseAuthEnabled = Boolean(
+  SUPABASE_URL && SUPABASE_ANON_KEY && !SUPABASE_URL.includes('placeholder')
+);
+if (!isSupabaseAuthEnabled) {
+  console.warn('⚠️ [SECURITY] Supabase env vars not configured on server; JWT auth running in local-sandbox mode.');
+}
+
+interface VerifiedUser {
+  id: string;
+  email?: string;
+  role?: string;
+  isAdmin: boolean;
+}
+interface AuthedRequest extends express.Request {
+  authUser?: VerifiedUser | null;
+}
+
+const tokenCache = new Map<string, { user: VerifiedUser; expiresAt: number }>();
+async function resolveVerifiedUser(token: string): Promise<VerifiedUser | null> {
+  if (!token || !isSupabaseAuthEnabled) return null;
+  const cached = tokenCache.get(token);
+  if (cached && Date.now() < cached.expiresAt) {
+    return cached.user;
+  }
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    if (!resp.ok) return null;
+    const userJson: any = await resp.json();
+    if (!userJson?.id) return null;
+    const email = String(userJson.email || '').toLowerCase().trim();
+    const metaRole = String(userJson.user_metadata?.role || userJson.role || '');
+    const isAdmin =
+      email === 'said.cpge24@gmail.com' ||
+      email === 'said.cpge240@gmail.com' ||
+      metaRole === 'admin';
+    const verified: VerifiedUser = {
+      id: String(userJson.id),
+      email,
+      role: metaRole,
+      isAdmin,
+    };
+    tokenCache.set(token, { user: verified, expiresAt: Date.now() + 30_000 });
+    return verified;
+  } catch {
+    return null;
+  }
+}
+
+function extractBearerToken(req: express.Request): string {
+  const auth = String(req.headers.authorization || '');
+  if (auth.startsWith('Bearer ')) return auth.slice(7).trim();
+  if (req.query?.token) return String(req.query.token).trim();
+  return '';
+}
+
+async function optionalAuth(req: AuthedRequest, _res: express.Response, next: express.NextFunction) {
+  const token = extractBearerToken(req);
+  if (token) {
+    req.authUser = await resolveVerifiedUser(token);
+  }
+  next();
+}
+
+async function requireAuth(req: AuthedRequest, res: express.Response, next: express.NextFunction) {
+  // Reject forged legacy mock admin ID anywhere
+  const claimedIds = [
+    req.query?.user_id,
+    req.query?.owner_id,
+    req.body?.user_id,
+    req.body?.sender_id,
+    req.body?.owner_id,
+  ].map((v) => String(v || ''));
+  if (claimedIds.includes('super_admin_said_root')) {
+    return res.status(403).json({ success: false, error: 'Forbidden invalid identity' });
+  }
+
+  const token = extractBearerToken(req);
+  if (isSupabaseAuthEnabled) {
+    if (!token) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
+    const verified = await resolveVerifiedUser(token);
+    if (!verified) {
+      return res.status(401).json({ success: false, error: 'Invalid or expired session token' });
+    }
+    req.authUser = verified;
+  } else if (token) {
+    req.authUser = await resolveVerifiedUser(token);
+  }
+  next();
+}
 
 // Real-Time Server-Sent Events (SSE) Hub for instant cross-device chat & alerts
 const sseClients = new Map<string, Set<express.Response>>();
@@ -237,10 +380,13 @@ function pushSseEvent(userId: string, eventName: string, payload: Record<string,
   }
 }
 
-app.get('/api/events', (req, res) => {
+app.get('/api/events', requireAuth, (req: AuthedRequest, res) => {
   const userId = String(req.query.user_id || '').trim();
   if (!userId) {
     return res.status(400).json({ success: false, error: 'user_id required' });
+  }
+  if (req.authUser && !req.authUser.isAdmin && req.authUser.id !== userId) {
+    return res.status(403).json({ success: false, error: 'Forbidden SSE user_id mismatch' });
   }
 
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
@@ -361,12 +507,17 @@ app.get('/api/health', (req, res) => {
 });
 
 // 2. Bookings - GET List
-app.get('/api/bookings', (req, res) => {
+app.get('/api/bookings', requireAuth, (req: AuthedRequest, res) => {
   try {
     const { owner_id, machine_id, client_id, status } = req.query;
 
     let query = 'SELECT * FROM bookings WHERE 1=1';
     const params: any[] = [];
+
+    if (req.authUser && !req.authUser.isAdmin) {
+      query += ` AND (owner_id = ? OR client_id = ? OR machine_id IN (SELECT id FROM machines WHERE owner_id = ?))`;
+      params.push(req.authUser.id, req.authUser.id, req.authUser.id);
+    }
 
     if (machine_id) {
       query += ' AND machine_id = ?';
@@ -381,9 +532,12 @@ app.get('/api/bookings', (req, res) => {
       params.push(String(status));
     }
     if (owner_id) {
-      // If owner_id specified, also match bookings where owner_id is null or 'owner' or matches
+      const targetOwner = req.authUser && !req.authUser.isAdmin ? req.authUser.id : String(owner_id);
+      if (req.authUser && !req.authUser.isAdmin && String(owner_id) !== req.authUser.id) {
+        return res.status(403).json({ success: false, error: 'Forbidden owner_id' });
+      }
       query += ` AND (owner_id = ? OR owner_id IS NULL OR owner_id = '' OR owner_id = 'owner' OR owner_id = 'demo-owner' OR machine_id IN (SELECT id FROM machines WHERE owner_id = ?))`;
-      params.push(String(owner_id), String(owner_id));
+      params.push(targetOwner, targetOwner);
     }
 
     query += ' ORDER BY created_at DESC';
@@ -399,8 +553,8 @@ app.get('/api/bookings', (req, res) => {
   }
 });
 
-// 3. Bookings - POST Create New Booking
-app.post('/api/bookings', (req, res) => {
+// 3. Bookings - POST Create New Booking (allows public marketplace guest booking with rate limit)
+app.post('/api/bookings', apiMutationLimiter, optionalAuth, (req: AuthedRequest, res) => {
   try {
     const b = req.body;
     if (!b.machine_id) {
@@ -408,6 +562,15 @@ app.post('/api/bookings', (req, res) => {
     }
     if (!b.client_name || !b.client_phone) {
       return res.status(400).json({ success: false, error: 'client_name and client_phone are required' });
+    }
+    if (isSupabaseAuthEnabled && !req.authUser) {
+      // Unauthenticated guest booking cannot spoof client_id, payment status, or pre-approved status
+      b.client_id = null;
+      b.status = 'pending';
+      b.payment_status = 'unpaid';
+      b.paid_amount = 0;
+    } else if (req.authUser && !req.authUser.isAdmin && b.client_id && b.client_id !== req.authUser.id) {
+      b.client_id = req.authUser.id;
     }
 
     const id = b.id || `bkg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
@@ -601,7 +764,7 @@ app.post('/api/bookings', (req, res) => {
 });
 
 // 4. Bookings - PATCH Update Status / Details
-app.patch('/api/bookings/:id', (req, res) => {
+app.patch('/api/bookings/:id', requireAuth, (req: AuthedRequest, res) => {
   try {
     const { id } = req.params;
     const updates = req.body;
@@ -609,6 +772,16 @@ app.patch('/api/bookings/:id', (req, res) => {
     const existing: any = db.prepare('SELECT * FROM bookings WHERE id = ?').get(id);
     if (!existing) {
       return res.status(404).json({ success: false, error: 'Booking not found' });
+    }
+    if (req.authUser && !req.authUser.isAdmin) {
+      const mRow: any = db.prepare('SELECT owner_id FROM machines WHERE id = ?').get(existing.machine_id);
+      const isAuthorized =
+        existing.owner_id === req.authUser.id ||
+        existing.client_id === req.authUser.id ||
+        mRow?.owner_id === req.authUser.id;
+      if (!isAuthorized) {
+        return res.status(403).json({ success: false, error: 'Forbidden booking access' });
+      }
     }
 
     const now = new Date().toISOString();
@@ -661,9 +834,16 @@ app.patch('/api/bookings/:id', (req, res) => {
 });
 
 // 5. Bookings - DELETE
-app.delete('/api/bookings/:id', (req, res) => {
+app.delete('/api/bookings/:id', requireAuth, (req: AuthedRequest, res) => {
   try {
     const { id } = req.params;
+    const existing: any = db.prepare('SELECT * FROM bookings WHERE id = ?').get(id);
+    if (existing && req.authUser && !req.authUser.isAdmin) {
+      const mRow: any = db.prepare('SELECT owner_id FROM machines WHERE id = ?').get(existing.machine_id);
+      if (existing.owner_id !== req.authUser.id && mRow?.owner_id !== req.authUser.id) {
+        return res.status(403).json({ success: false, error: 'Forbidden booking deletion' });
+      }
+    }
     db.prepare('DELETE FROM bookings WHERE id = ?').run(id);
     res.json({ success: true, id });
   } catch (err: any) {
@@ -672,14 +852,20 @@ app.delete('/api/bookings/:id', (req, res) => {
 });
 
 // 6. Notifications - GET List
-app.get('/api/notifications', (req, res) => {
+app.get('/api/notifications', requireAuth, (req: AuthedRequest, res) => {
   try {
     const { user_id, unread_only, role } = req.query;
+    const effectiveUserId =
+      req.authUser && !req.authUser.isAdmin ? req.authUser.id : user_id ? String(user_id) : '';
+
+    if (req.authUser && !req.authUser.isAdmin && user_id && String(user_id) !== req.authUser.id) {
+      return res.status(403).json({ success: false, error: 'Forbidden notifications access' });
+    }
 
     let query = 'SELECT * FROM notifications WHERE 1=1';
     const params: any[] = [];
 
-    if (user_id) {
+    if (effectiveUserId) {
       const roleStr = String(role || '');
       const isContractorRole = roleStr === 'client' || roleStr === 'contractor';
       if (isContractorRole) {
@@ -687,7 +873,7 @@ app.get('/api/notifications', (req, res) => {
       } else {
         query += ` AND (user_id = ? OR user_id = 'owner' OR user_id IS NULL OR user_id = '')`;
       }
-      params.push(String(user_id));
+      params.push(effectiveUserId);
     }
     if (unread_only === 'true') {
       query += ' AND is_read = 0';
@@ -711,9 +897,15 @@ app.get('/api/notifications', (req, res) => {
 });
 
 // 7. Notifications - Mark Single as Read
-app.patch('/api/notifications/:id/read', (req, res) => {
+app.patch('/api/notifications/:id/read', requireAuth, (req: AuthedRequest, res) => {
   try {
     const { id } = req.params;
+    if (req.authUser && !req.authUser.isAdmin) {
+      const notifRow: any = db.prepare('SELECT user_id FROM notifications WHERE id = ?').get(id);
+      if (notifRow && notifRow.user_id && notifRow.user_id !== 'owner' && notifRow.user_id !== req.authUser.id) {
+        return res.status(403).json({ success: false, error: 'Forbidden notification update' });
+      }
+    }
     db.prepare('UPDATE notifications SET is_read = 1 WHERE id = ?').run(id);
     res.json({ success: true, id });
   } catch (err: any) {
@@ -722,12 +914,14 @@ app.patch('/api/notifications/:id/read', (req, res) => {
 });
 
 // 8. Notifications - Mark All as Read
-app.post('/api/notifications/mark-all-read', (req, res) => {
+app.post('/api/notifications/mark-all-read', requireAuth, (req: AuthedRequest, res) => {
   try {
-    const { user_id } = req.body || {};
-    if (user_id) {
-      db.prepare(`UPDATE notifications SET is_read = 1 WHERE user_id = ? OR user_id = 'owner'`).run(user_id);
-    } else {
+    const requestedId = req.body?.user_id;
+    const effectiveUserId =
+      req.authUser && !req.authUser.isAdmin ? req.authUser.id : requestedId;
+    if (effectiveUserId) {
+      db.prepare(`UPDATE notifications SET is_read = 1 WHERE user_id = ? OR user_id = 'owner'`).run(effectiveUserId);
+    } else if (!isSupabaseAuthEnabled || req.authUser?.isAdmin) {
       db.prepare('UPDATE notifications SET is_read = 1').run();
     }
     res.json({ success: true });
@@ -737,15 +931,17 @@ app.post('/api/notifications/mark-all-read', (req, res) => {
 });
 
 // 8a. Notifications - Mark Conversation Chat Notifications Read
-app.post('/api/notifications/mark-conversation-read', (req, res) => {
+app.post('/api/notifications/mark-conversation-read', requireAuth, (req: AuthedRequest, res) => {
   try {
     const { user_id, conversation_id } = req.body || {};
-    if (!user_id || !conversation_id) {
+    const effectiveUserId =
+      req.authUser && !req.authUser.isAdmin ? req.authUser.id : user_id;
+    if (!effectiveUserId || !conversation_id) {
       return res.status(400).json({ success: false, error: 'user_id and conversation_id required' });
     }
     const rows = db
       .prepare(`SELECT id, data_json FROM notifications WHERE user_id = ? AND type = 'chat_message' AND is_read = 0`)
-      .all(String(user_id)) as any[];
+      .all(String(effectiveUserId)) as any[];
     for (const r of rows) {
       try {
         const parsed = r.data_json ? JSON.parse(r.data_json) : {};
@@ -761,7 +957,7 @@ app.post('/api/notifications/mark-conversation-read', (req, res) => {
 });
 
 // 8b. Notifications - Create Custom In-App Notification
-app.post('/api/notifications', (req, res) => {
+app.post('/api/notifications', apiMutationLimiter, requireAuth, (req: AuthedRequest, res) => {
   try {
     const { user_id, title_ar, title_fr, body_ar, body_fr, type, data } = req.body || {};
     const id = `notif_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -836,11 +1032,14 @@ app.get('/api/machines', (req, res) => {
 });
 
 // 10. Machines - POST Save / Update Machine
-app.post('/api/machines', (req, res) => {
+app.post('/api/machines', apiMutationLimiter, requireAuth, (req: AuthedRequest, res) => {
   try {
     const machine = req.body;
     if (!machine || !machine.id) {
       return res.status(400).json({ success: false, error: 'Machine with id is required' });
+    }
+    if (req.authUser && !req.authUser.isAdmin) {
+      machine.owner_id = req.authUser.id;
     }
 
     const now = new Date().toISOString();
@@ -887,14 +1086,16 @@ app.post('/api/machines', (req, res) => {
 });
 
 // 11. Clients - GET & POST
-app.get('/api/clients', (req, res) => {
+app.get('/api/clients', requireAuth, (req: AuthedRequest, res) => {
   try {
     const { owner_id } = req.query;
+    const effectiveOwner =
+      req.authUser && !req.authUser.isAdmin ? req.authUser.id : owner_id ? String(owner_id) : '';
     let query = 'SELECT * FROM clients';
     const params: any[] = [];
-    if (owner_id) {
+    if (effectiveOwner) {
       query += ' WHERE owner_id = ?';
-      params.push(String(owner_id));
+      params.push(effectiveOwner);
     }
     query += ' ORDER BY created_at DESC';
 
@@ -918,11 +1119,14 @@ app.get('/api/clients', (req, res) => {
   }
 });
 
-app.post('/api/clients', (req, res) => {
+app.post('/api/clients', requireAuth, (req: AuthedRequest, res) => {
   try {
     const client = req.body;
     if (!client || !client.name || !client.phone) {
       return res.status(400).json({ success: false, error: 'Client name and phone are required' });
+    }
+    if (req.authUser && !req.authUser.isAdmin) {
+      client.owner_id = req.authUser.id;
     }
 
     const id = client.id || `cli_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -960,14 +1164,16 @@ app.post('/api/clients', (req, res) => {
 });
 
 // 12. Conversations - GET List
-app.get('/api/conversations', (req, res) => {
+app.get('/api/conversations', requireAuth, (req: AuthedRequest, res) => {
   try {
     const { user_id } = req.query;
+    const effectiveUserId =
+      req.authUser && !req.authUser.isAdmin ? req.authUser.id : user_id ? String(user_id) : '';
     let query = 'SELECT * FROM conversations WHERE 1=1';
     const params: any[] = [];
-    if (user_id) {
+    if (effectiveUserId) {
       query += ' AND (participant_a = ? OR participant_b = ?)';
-      params.push(String(user_id), String(user_id));
+      params.push(effectiveUserId, effectiveUserId);
     }
     query += ' ORDER BY last_message_at DESC LIMIT 50';
     const rows = db.prepare(query).all(...params);
@@ -994,11 +1200,19 @@ app.get('/api/conversations', (req, res) => {
 });
 
 // 13. Conversations - POST Create or Get Existing
-app.post('/api/conversations', (req, res) => {
+app.post('/api/conversations', requireAuth, (req: AuthedRequest, res) => {
   try {
     const { id, machine_id, participant_a, participant_b, machine, target_profile } = req.body || {};
     if (!participant_a || !participant_b) {
       return res.status(400).json({ success: false, error: 'Both participants are required' });
+    }
+    if (
+      req.authUser &&
+      !req.authUser.isAdmin &&
+      req.authUser.id !== participant_a &&
+      req.authUser.id !== participant_b
+    ) {
+      return res.status(403).json({ success: false, error: 'Forbidden conversation participant' });
     }
 
     // Check existing
@@ -1056,11 +1270,19 @@ app.post('/api/conversations', (req, res) => {
 });
 
 // 14. Messages - GET List by Conversation ID
-app.get('/api/messages', (req, res) => {
+app.get('/api/messages', requireAuth, (req: AuthedRequest, res) => {
   try {
     const { conversation_id } = req.query;
     if (!conversation_id) {
       return res.status(400).json({ success: false, error: 'conversation_id is required' });
+    }
+    if (req.authUser && !req.authUser.isAdmin) {
+      const conv: any = db
+        .prepare('SELECT participant_a, participant_b FROM conversations WHERE id = ?')
+        .get(String(conversation_id));
+      if (conv && conv.participant_a !== req.authUser.id && conv.participant_b !== req.authUser.id) {
+        return res.status(403).json({ success: false, error: 'Forbidden conversation messages' });
+      }
     }
     const rows = db.prepare(`
       SELECT * FROM messages
@@ -1137,7 +1359,7 @@ function stripDispatchMarkerServer(text: string): string {
 }
 
 // 15. Messages - POST Send Message
-app.post('/api/messages', (req, res) => {
+app.post('/api/messages', apiMutationLimiter, requireAuth, (req: AuthedRequest, res) => {
   try {
     const {
       id: clientMsgId,
@@ -1150,6 +1372,9 @@ app.post('/api/messages', (req, res) => {
     } = req.body || {};
     if (!conversation_id || !sender_id || !body) {
       return res.status(400).json({ success: false, error: 'Missing required fields' });
+    }
+    if (req.authUser && !req.authUser.isAdmin && String(sender_id) !== req.authUser.id) {
+      return res.status(403).json({ success: false, error: 'Forbidden sender_id spoof' });
     }
 
     const msgId = clientMsgId
@@ -1253,10 +1478,12 @@ app.get('/api/push/vapid-public-key', (_req, res) => {
 });
 
 // 17. Web Push - Save User Subscription
-app.post('/api/push/subscribe', (req, res) => {
+app.post('/api/push/subscribe', requireAuth, (req: AuthedRequest, res) => {
   try {
     const { user_id, subscription } = req.body || {};
-    if (!user_id || !subscription?.endpoint || !subscription?.keys?.p256dh || !subscription?.keys?.auth) {
+    const effectiveUserId =
+      req.authUser && !req.authUser.isAdmin ? req.authUser.id : user_id;
+    if (!effectiveUserId || !subscription?.endpoint || !subscription?.keys?.p256dh || !subscription?.keys?.auth) {
       return res.status(400).json({ success: false, error: 'Valid user_id and push subscription required' });
     }
     const now = new Date().toISOString();
@@ -1271,7 +1498,7 @@ app.post('/api/push/subscribe', (req, res) => {
         updated_at = excluded.updated_at
     `).run(
       String(subscription.endpoint),
-      String(user_id),
+      String(effectiveUserId),
       String(subscription.keys.p256dh),
       String(subscription.keys.auth),
       JSON.stringify(subscription),
@@ -1285,7 +1512,7 @@ app.post('/api/push/subscribe', (req, res) => {
 });
 
 // 18. Web Push - Send Background Notification to Target User IDs
-app.post('/api/push/dispatch', async (req, res) => {
+app.post('/api/push/dispatch', apiMutationLimiter, requireAuth, async (req: AuthedRequest, res) => {
   try {
     const { owner_ids, subscriptions: externalSubs, payload } = req.body || {};
     const targetIds: string[] = Array.isArray(owner_ids) ? owner_ids.map(String) : [];
@@ -1298,13 +1525,16 @@ app.post('/api/push/dispatch', async (req, res) => {
 });
 
 // 19. Machine Location Relocation (when dispatch deal accepted)
-app.patch('/api/machines/:id/location', (req, res) => {
+app.patch('/api/machines/:id/location', requireAuth, (req: AuthedRequest, res) => {
   try {
     const { id } = req.params;
     const { lat, lng, city } = req.body || {};
     const row: any = db.prepare('SELECT * FROM machines WHERE id = ?').get(id);
     if (!row) {
       return res.json({ success: true, updated: false });
+    }
+    if (req.authUser && !req.authUser.isAdmin && row.owner_id && row.owner_id !== req.authUser.id) {
+      return res.status(403).json({ success: false, error: 'Forbidden machine relocation' });
     }
     let data: any = {};
     try {

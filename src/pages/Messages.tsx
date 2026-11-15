@@ -17,6 +17,7 @@ import { machineStore } from '../lib/machineStore';
 import { ConversationList } from '../features/chat/ConversationList';
 import { ChatThread } from '../features/chat/ChatThread';
 import { stripDispatchMarker } from '../lib/dispatchService';
+import { serverApi } from '../lib/serverApi';
 
 export const Messages: React.FC = () => {
   const { t, lang } = useLanguage();
@@ -164,9 +165,15 @@ export const Messages: React.FC = () => {
           }
         }
 
-        // Offline fallback
+        // Server SQLite & Offline fallback
         if (resultList.length === 0) {
-          resultList = await chatStore.getConversationsForUser(currentUserId);
+          const serverConvs = await serverApi.getConversations(currentUserId);
+          if (serverConvs.length > 0) {
+            resultList = serverConvs;
+            chatStore.setConversations(resultList);
+          } else {
+            resultList = await chatStore.getConversationsForUser(currentUserId);
+          }
         } else {
           chatStore.setConversations(resultList);
         }
@@ -448,6 +455,40 @@ export const Messages: React.FC = () => {
     return () => {
       supabase.removeChannel(channel);
     };
+  }, [currentUserId, loadConversations]);
+
+  // 3b. Sync conversation list immediately on SSE incoming chat message
+  useEffect(() => {
+    if (!currentUserId) return;
+    const onSseMessage = (ev: Event) => {
+      const detail = (ev as CustomEvent)?.detail;
+      if (!detail?.conversation_id) return;
+      setConversations((prev) => {
+        const exists = prev.some((c) => c.id === detail.conversation_id);
+        if (!exists) {
+          loadConversations(true);
+          return prev;
+        }
+        return prev.map((c) => {
+          if (c.id !== detail.conversation_id) return c;
+          const isFromOther = detail.sender_id !== currentUserId;
+          const isCurrentlyActive = activeConvIdRef.current === c.id;
+          return {
+            ...c,
+            last_message: stripDispatchMarker(detail.body || detail.preview || '') || c.last_message,
+            last_message_at: detail.created_at || new Date().toISOString(),
+            unread_count:
+              isFromOther && !isCurrentlyActive
+                ? (c.unread_count || 0) + 1
+                : isCurrentlyActive
+                ? 0
+                : c.unread_count,
+          };
+        });
+      });
+    };
+    window.addEventListener('jadijcb_sse_chat_message', onSseMessage);
+    return () => window.removeEventListener('jadijcb_sse_chat_message', onSseMessage);
   }, [currentUserId, loadConversations]);
 
   // Handle selecting conversation without triggering router reload loop

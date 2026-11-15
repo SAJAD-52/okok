@@ -17,6 +17,38 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
   return outputArray;
 }
 
+export async function waitForServiceWorkerReady(
+  timeoutMs: number = 2500
+): Promise<ServiceWorkerRegistration | null> {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator)) {
+    return null;
+  }
+
+  try {
+    const existing = await navigator.serviceWorker.getRegistration();
+    if (existing && (existing.active || existing.waiting || existing.installing)) {
+      if (existing.active) return existing;
+    }
+
+    const readyOrTimeout = await Promise.race<ServiceWorkerRegistration | null>([
+      navigator.serviceWorker.ready.then((reg) => reg).catch(() => null),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+    ]);
+
+    if (readyOrTimeout) return readyOrTimeout;
+
+    // Fallback: register standalone sw-push.js if dev-sw didn't activate in time
+    try {
+      const reg = await navigator.serviceWorker.register('/sw-push.js', { scope: '/' });
+      return reg;
+    } catch {
+      return existing || null;
+    }
+  } catch {
+    return null;
+  }
+}
+
 export async function syncServiceWorkerPushContext(
   userId: string,
   userRole: string = 'owner'
@@ -24,7 +56,9 @@ export async function syncServiceWorkerPushContext(
   if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !userId) return;
 
   try {
-    const reg = await navigator.serviceWorker.ready;
+    const reg = await waitForServiceWorkerReady(2500);
+    if (!reg) return;
+
     const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
     const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
     let accessToken = '';
@@ -76,8 +110,8 @@ export async function syncServiceWorkerPushContext(
 export async function markPushKeySeenInSW(key: string): Promise<void> {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !key) return;
   try {
-    const reg = await navigator.serviceWorker.ready;
-    const targetSw = reg.active || navigator.serviceWorker.controller;
+    const reg = await waitForServiceWorkerReady(1200);
+    const targetSw = reg?.active || navigator.serviceWorker.controller;
     if (targetSw) {
       targetSw.postMessage({ type: 'MARK_PUSH_SEEN', key });
     }
@@ -118,7 +152,9 @@ export async function subscribeOwnerWebPush(
   if (!('PushManager' in window)) return false;
 
   try {
-    const reg = await navigator.serviceWorker.ready;
+    const reg = await waitForServiceWorkerReady(3000);
+    if (!reg || !reg.pushManager) return false;
+
     let subscription = await reg.pushManager.getSubscription();
 
     if (!subscription) {
@@ -189,7 +225,7 @@ export async function registerOwnerPushNotifications(
   }
 
   if (perm === 'granted' && userId) {
-    await subscribeOwnerWebPush(userId, userRole);
+    subscribeOwnerWebPush(userId, userRole).catch(() => {});
   }
 
   return perm;

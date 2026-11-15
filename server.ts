@@ -220,6 +220,62 @@ try {
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
+// Real-Time Server-Sent Events (SSE) Hub for instant cross-device chat & alerts
+const sseClients = new Map<string, Set<express.Response>>();
+
+function pushSseEvent(userId: string, eventName: string, payload: Record<string, any>) {
+  if (!userId) return;
+  const targets = sseClients.get(String(userId));
+  if (!targets || targets.size === 0) return;
+  const frame = `event: ${eventName}\ndata: ${JSON.stringify(payload)}\n\n`;
+  for (const clientRes of Array.from(targets)) {
+    try {
+      clientRes.write(frame);
+    } catch {
+      targets.delete(clientRes);
+    }
+  }
+}
+
+app.get('/api/events', (req, res) => {
+  const userId = String(req.query.user_id || '').trim();
+  if (!userId) {
+    return res.status(400).json({ success: false, error: 'user_id required' });
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+
+  res.write(`event: connected\ndata: ${JSON.stringify({ ok: true, userId })}\n\n`);
+
+  if (!sseClients.has(userId)) {
+    sseClients.set(userId, new Set());
+  }
+  sseClients.get(userId)!.add(res);
+
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(': ping\n\n');
+    } catch {
+      clearInterval(heartbeat);
+    }
+  }, 20000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    const set = sseClients.get(userId);
+    if (set) {
+      set.delete(res);
+      if (set.size === 0) {
+        sseClients.delete(userId);
+      }
+    }
+  });
+});
+
 // Helper to format booking row
 function formatBooking(row: any) {
   if (!row) return null;
@@ -709,6 +765,7 @@ app.post('/api/notifications', (req, res) => {
   try {
     const { user_id, title_ar, title_fr, body_ar, body_fr, type, data } = req.body || {};
     const id = `notif_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const now = new Date().toISOString();
     db.prepare(`
       INSERT INTO notifications (id, user_id, title_ar, title_fr, body_ar, body_fr, type, is_read, data_json, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
@@ -721,8 +778,21 @@ app.post('/api/notifications', (req, res) => {
       body_fr || '',
       type || 'info',
       data ? JSON.stringify(data) : null,
-      new Date().toISOString()
+      now
     );
+    if (user_id) {
+      pushSseEvent(String(user_id), 'notification', {
+        id,
+        user_id,
+        title_ar: title_ar || 'إشعار جديد',
+        title_fr: title_fr || 'Nouvelle notification',
+        body_ar: body_ar || '',
+        body_fr: body_fr || '',
+        type: type || 'info',
+        data: data || {},
+        created_at: now,
+      });
+    }
     res.json({ success: true, id });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -1134,6 +1204,20 @@ app.post('/api/messages', (req, res) => {
         }),
         now
       );
+
+      // Fire real-time SSE push to connected recipient tabs/devices
+      pushSseEvent(String(recipient_id), 'chat_message', {
+        id: msgId,
+        conversation_id,
+        sender_id,
+        sender_name: sender_name || '',
+        body: trimmed,
+        preview: shortPreview,
+        title_ar: titleAr,
+        title_fr: titleFr,
+        url: targetUrl,
+        created_at: now,
+      });
 
       // Fire background Web Push to recipient's registered devices
       sendWebPushToTargets([String(recipient_id)], {

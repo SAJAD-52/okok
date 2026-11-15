@@ -50,7 +50,12 @@ import {
   ensureDispatchConversationLinked,
   updateDispatchNotificationStatus,
 } from '../../lib/dispatchService';
-import { playChatMessageSound, playOpportunitySound } from '../../lib/opportunityAudio';
+import {
+  playChatMessageSound,
+  playOpportunitySound,
+  showBrowserChatNotification,
+  unlockAudioContextNow,
+} from '../../lib/opportunityAudio';
 import { registerOwnerPushNotifications } from '../../lib/pushService';
 import { formatDistanceKm } from '../../lib/geoUtils';
 
@@ -746,7 +751,12 @@ export const DashboardLayout: React.FC = () => {
                   <div className="relative shrink-0">
                     <button
                       type="button"
-                      onClick={() => setIsNotificationsOpen((prev) => !prev)}
+                      onClick={() => {
+                        if (typeof window !== 'undefined' && 'Notification' in window) {
+                          setNotifPermission(Notification.permission);
+                        }
+                        setIsNotificationsOpen((prev) => !prev);
+                      }}
                       className="p-2 text-steel-600 hover:text-ink hover:bg-steel-100 rounded-lg min-h-[40px] min-w-[40px] sm:min-h-[44px] sm:min-w-[44px] flex items-center justify-center relative cursor-pointer"
                       aria-label="Notifications"
                     >
@@ -791,10 +801,9 @@ export const DashboardLayout: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* Enable Mobile Audio & Push Alert Prompt for Both Owners & Contractors */}
-                        {typeof window !== 'undefined' &&
-                          'Notification' in window &&
-                          notifPermission === 'default' && (
+                        {/* Enable or Test Mobile Audio & Push Alerts for Owners & Contractors */}
+                        {typeof window !== 'undefined' && 'Notification' in window && (
+                          notifPermission === 'default' ? (
                             <div className="p-2.5 bg-amber-50 border-b border-amber-200 flex items-center justify-between gap-2">
                               <div className="flex items-center gap-2 min-w-0">
                                 <Volume2 className="w-4 h-4 text-primary-dark shrink-0" />
@@ -807,20 +816,32 @@ export const DashboardLayout: React.FC = () => {
                               <button
                                 type="button"
                                 onClick={async () => {
+                                  unlockAudioContextNow();
                                   const targetUserId = profile?.id || user?.id || '';
                                   const targetRole = profile?.role || 'owner';
                                   const perm = await registerOwnerPushNotifications(targetUserId, targetRole);
                                   setNotifPermission(perm);
                                   if (perm === 'granted') {
-                                    if (isContractor) {
-                                      playChatMessageSound();
-                                    } else {
-                                      playOpportunitySound();
-                                    }
+                                    playChatMessageSound();
+                                    showBrowserChatNotification({
+                                      title: lang === 'fr' ? 'Notifications activées 🔔' : 'تم تفعيل إشعارات الهاتف 🔔',
+                                      body:
+                                        lang === 'fr'
+                                          ? 'Les nouveaux messages apparaîtront ici avec sonnerie.'
+                                          : 'ستصلك إشعارات الرسائل في القائمة المنسدلة للهاتف مع صوت تنبيه.',
+                                      tag: 'jadijcb-test-notif',
+                                      url: isContractor ? '/entreprise/messages' : '/owner/messages',
+                                    }).catch(() => {});
                                     toast.success(
                                       lang === 'fr'
                                         ? 'Notifications activées sur votre téléphone !'
-                                        : 'تم تفعيل إشعارات الهاتف بنجاح! ستصلك الرسائل والتنبيهات في شريط الإشعارات حتى خارج التطبيق.'
+                                        : 'تم تفعيل إشعارات الهاتف بنجاح! ستصلك الرسائل في شريط الإشعارات.'
+                                    );
+                                  } else if (perm === 'denied') {
+                                    toast.error(
+                                      lang === 'fr'
+                                        ? 'Notifications bloquées par le navigateur.'
+                                        : 'المتصفح منع الإشعارات، يرجى تفعيلها من إعدادات الموقع.'
                                     );
                                   }
                                 }}
@@ -829,7 +850,48 @@ export const DashboardLayout: React.FC = () => {
                                 {lang === 'fr' ? 'Activer' : 'تفعيل 🔔'}
                               </button>
                             </div>
-                          )}
+                          ) : notifPermission === 'granted' ? (
+                            <div className="px-3 py-2 bg-emerald-50 border-b border-emerald-200 flex items-center justify-between gap-2">
+                              <span className="text-[11px] font-bold text-emerald-800 truncate">
+                                {lang === 'fr'
+                                  ? 'Notifications mobiles actives ✓'
+                                  : 'إشعارات الهاتف مفعّلة ✓'}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  unlockAudioContextNow();
+                                  playChatMessageSound();
+                                  const shown = await showBrowserChatNotification({
+                                    title: lang === 'fr' ? 'Test notification JADIJCB 💬' : 'تجربة إشعار الرسائل JADIJCB 💬',
+                                    body:
+                                      lang === 'fr'
+                                        ? 'Sonnerie et notification dans la barre mobile prêtes.'
+                                        : 'الصوت وإشعار القائمة المنسدلة للهاتف يعملان بنجاح!',
+                                    tag: 'jadijcb-test-notif',
+                                    url: isContractor ? '/entreprise/messages' : '/owner/messages',
+                                  });
+                                  if (shown) {
+                                    toast.success(
+                                      lang === 'fr'
+                                        ? 'Notification test envoyée !'
+                                        : 'تم إرسال إشعار تجريبي بصوت التنبيه إلى شريط الهاتف!'
+                                    );
+                                  }
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white text-[10px] font-black shrink-0 cursor-pointer hover:bg-emerald-700"
+                              >
+                                {lang === 'fr' ? 'Tester 🔔' : 'اختبار الإشعار 🔔'}
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="px-3 py-2 bg-rose-50 border-b border-rose-200 text-[10px] font-bold text-rose-700">
+                              {lang === 'fr'
+                                ? 'Notifications bloquées dans les paramètres du navigateur (autorisez-les pour les alertes hors-app).'
+                                : 'إشعارات النظام محظورة في إعدادات المتصفح — اسمح بالإشعارات في إعدادات الموقع لتظهر في القائمة المنسدلة.'}
+                            </div>
+                          )
+                        )}
 
                         <div className="max-h-80 overflow-y-auto p-2 space-y-2">
                           {opportunityNotifications.length === 0 &&
@@ -1524,8 +1586,8 @@ export const DashboardLayout: React.FC = () => {
         />
       )}
 
-      {/* Global Real-Time Chat Message Sound & Mobile Notification Shade Listener (Owners & Contractors) */}
-      {(profile?.id || user?.id) && !(isSuperAdmin && !isImpersonating) && (
+      {/* Global Real-Time Chat Message Sound & Mobile Notification Shade Listener (All Users) */}
+      {(profile?.id || user?.id) && (
         <ChatAlertListener
           userId={profile?.id || user?.id || ''}
           userRole={profile?.role || 'owner'}

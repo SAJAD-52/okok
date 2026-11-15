@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Sparkles, MessageCircle } from 'lucide-react';
+import { Compass, Truck } from 'lucide-react';
 import { useLanguage } from '../../hooks/useLanguage';
 
 export const StickyMobileCta: React.FC = () => {
@@ -10,7 +10,6 @@ export const StickyMobileCta: React.FC = () => {
 
   useEffect(() => {
     const handleScroll = () => {
-      // Show when scrolled past 480px (past hero)
       if (window.scrollY > 480) {
         setIsVisible(true);
       } else {
@@ -29,28 +28,30 @@ export const StickyMobileCta: React.FC = () => {
           initial={{ y: 80, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: 80, opacity: 0 }}
-          transition={{ duration: 0.25, ease: 'easeOut' }}
-          className="md:hidden fixed bottom-0 start-0 end-0 z-40 bg-ink/95 backdrop-blur-md border-t border-steel-700/80 px-4 py-2.5 shadow-2xl safe-area-pb"
+          transition={{ duration: 0.2, ease: 'easeOut' }}
+          className="md:hidden fixed bottom-0 start-0 end-0 z-40 bg-ink/95 backdrop-blur-md border-t border-slate-700/90 px-3 py-2 shadow-2xl"
         >
           <div className="flex items-center gap-2 max-w-md mx-auto">
-            {/* Primary Action Button */}
+            {/* Primary Action: Register / Owner Trial */}
             <Link
               to="/auth?mode=signup"
-              className="flex-1 min-h-[44px] px-4 py-2.5 rounded-xl bg-primary hover:bg-primary-hover active:scale-[0.98] text-ink font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-sm truncate"
+              className="flex-1 min-h-[44px] px-3 py-2 rounded-xl bg-primary hover:bg-primary-hover active:scale-[0.98] text-ink font-black text-xs flex items-center justify-center gap-1.5 shadow-sm truncate"
             >
-              <Sparkles className="w-4 h-4 shrink-0 fill-ink" />
+              <Truck className="w-4 h-4 shrink-0" />
               <span className="truncate">
-                {lang === 'fr' ? 'Essai gratuit 3 jours' : 'جرب مجاناً لمدة 3 أيام'}
+                {lang === 'fr' ? 'Inscrire mes engins' : 'سجّل فـ 30 ثانية'}
               </span>
             </Link>
 
-            {/* WhatsApp Direct Action Button */}
+            {/* Secondary Action: Marketplace / Radar */}
             <Link
-              to="/auth?mode=signup"
-              className="min-h-[44px] min-w-[44px] px-3 py-2.5 rounded-xl bg-steel-800 hover:bg-steel-700 active:scale-[0.98] text-white border border-steel-600 flex items-center justify-center shrink-0"
-              aria-label={lang === 'fr' ? 'Commencer avec WhatsApp' : 'ابدأ الآن برقم واتسابك'}
+              to="/marketplace"
+              className="flex-1 min-h-[44px] px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-[0.98] text-white border border-slate-600 font-bold text-xs flex items-center justify-center gap-1.5 truncate"
             >
-              <MessageCircle className="w-5 h-5 text-emerald-400" />
+              <Compass className="w-4 h-4 text-primary shrink-0" />
+              <span className="truncate">
+                {lang === 'fr' ? 'Trouver un engin' : 'تصفح الآليات'}
+              </span>
             </Link>
           </div>
         </motion.div>

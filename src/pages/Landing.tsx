@@ -15,7 +15,7 @@ import { StickyMobileCta } from '../components/landing/StickyMobileCta';
 
 export const Landing: React.FC = () => {
   return (
-    <div className="min-h-screen bg-surface flex flex-col selection:bg-primary selection:text-ink">
+    <div className="min-h-screen bg-surface flex flex-col overflow-x-hidden selection:bg-primary selection:text-ink">
       {/* 1. Sticky Navigation Header */}
       <PublicHeader />
 

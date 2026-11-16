@@ -34,6 +34,9 @@ interface AuthContextType {
       city?: string;
       clientSegment?: ClientSegment;
       clientActivityNote?: string;
+      driverMachines?: string[];
+      driverExperienceYears?: string;
+      driverAvailable?: boolean;
     }
   ) => Promise<{ success: boolean; error?: string; isNewUser?: boolean }>;
   logout: () => Promise<void>;
@@ -193,19 +196,48 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // ignore sessionStorage / network errors
       }
 
+      const dbRole = (data as any)?.role;
+      const metaRole = meta?.role || localCached?.role;
+      const resolvedRole: UserRole =
+        dbRole === 'admin'
+          ? 'admin'
+          : metaRole === 'driver' || dbRole === 'driver'
+          ? 'driver'
+          : dbRole || metaRole || 'client';
+
       const normalized: UserProfile = {
         id: userId,
         phone: mergedPhone,
         full_name: (data as any)?.full_name || meta.full_name || meta.fullName || localCached.full_name || '',
         company_name: (data as any)?.company_name || meta.company_name || meta.companyName || localCached.company_name || '',
         city: (data as any)?.city || meta.city || localCached.city || 'Casablanca',
-        role: (data as any)?.role || meta.role || localCached.role || 'client',
+        role: resolvedRole,
         client_segment: (data as any)?.client_segment || meta.client_segment || meta.clientSegment || localCached.client_segment || undefined,
         client_activity_note: (data as any)?.client_activity_note || meta.client_activity_note || meta.clientActivityNote || localCached.client_activity_note || '',
+        driver_machines: Array.isArray((data as any)?.driver_machines) && (data as any).driver_machines.length > 0
+          ? (data as any).driver_machines
+          : Array.isArray(meta.driver_machines)
+          ? meta.driver_machines
+          : Array.isArray(localCached.driver_machines)
+          ? localCached.driver_machines
+          : [],
+        driver_experience_years:
+          (data as any)?.driver_experience_years ||
+          meta.driver_experience_years ||
+          localCached.driver_experience_years ||
+          undefined,
+        driver_available:
+          (data as any)?.driver_available ??
+          meta.driver_available ??
+          localCached.driver_available ??
+          true,
+        driver_bio: (data as any)?.driver_bio || meta.driver_bio || localCached.driver_bio || '',
         ice_number: (data as any)?.ice_number || meta.ice_number || meta.iceNumber || localCached.ice_number || '',
         onboarding_completed: (data as any)?.onboarding_completed ?? meta.onboarding_completed ?? localCached.onboarding_completed ?? true,
         whatsapp_verified: Boolean((data as any)?.whatsapp_verified ?? meta.whatsapp_verified ?? localCached.whatsapp_verified ?? true),
         subscription_status: isLifetimeVip
+          ? 'active'
+          : resolvedRole === 'driver' || resolvedRole === 'client' || resolvedRole === 'contractor'
           ? 'active'
           : (data as any)?.subscription_status || localCached.subscription_status || 'trial',
         trial_started_at: (data as any)?.trial_started_at || localCached.trial_started_at || new Date().toISOString(),
@@ -339,9 +371,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
         setIsLoading(false);
+        const finalRole =
+          data.user.user_metadata?.role === 'driver' && prof?.role !== 'admin'
+            ? 'driver'
+            : prof?.role || data.user.user_metadata?.role || 'client';
         return {
           success: true,
-          role: (prof?.role || data.user.user_metadata?.role || 'client') as UserRole,
+          role: finalRole as UserRole,
         };
       }
 
@@ -474,6 +510,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       city?: string;
       clientSegment?: ClientSegment;
       clientActivityNote?: string;
+      driverMachines?: string[];
+      driverExperienceYears?: string;
+      driverAvailable?: boolean;
     }
   ): Promise<{ success: boolean; error?: string; isNewUser?: boolean }> => {
     setIsLoading(true);
@@ -485,6 +524,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     const syntheticEmail = phoneToSyntheticEmail(norm.e164);
+    const resolvedRole: UserRole =
+      role === 'owner' ? 'owner' : role === 'driver' ? 'driver' : 'client';
 
     try {
       const { data, error } = await supabase.auth.signUp({
@@ -494,12 +535,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           data: {
             phone: norm.e164,
             phone_number: norm.e164,
-            role: role === 'owner' ? 'owner' : 'client',
+            role: resolvedRole,
             full_name: meta?.fullName || '',
             company_name: meta?.companyName || '',
             city: meta?.city || 'Casablanca',
-            client_segment: role === 'owner' ? undefined : meta?.clientSegment || 'individual',
-            client_activity_note: role === 'owner' ? undefined : meta?.clientActivityNote || '',
+            client_segment: resolvedRole === 'client' ? meta?.clientSegment || 'individual' : undefined,
+            client_activity_note: resolvedRole === 'client' ? meta?.clientActivityNote || '' : undefined,
+            driver_machines: resolvedRole === 'driver' ? meta?.driverMachines || [] : undefined,
+            driver_experience_years:
+              resolvedRole === 'driver' ? meta?.driverExperienceYears || '3_5' : undefined,
+            driver_available:
+              resolvedRole === 'driver' ? meta?.driverAvailable ?? true : undefined,
             preferred_lang: 'ar',
           },
         },
@@ -569,10 +615,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           phone_number: norm.e164,
           full_name: meta?.fullName || '',
           company_name: meta?.companyName || '',
-          role: role === 'owner' ? 'owner' : 'client',
+          role: resolvedRole,
           city: meta?.city || 'Casablanca',
           whatsapp_verified: false,
-          subscription_status: isVipSignup ? 'active' : 'trial',
+          subscription_status: isVipSignup || resolvedRole !== 'owner' ? 'active' : 'trial',
           trial_started_at: new Date().toISOString(),
           trial_ends_at: new Date(Date.now() + 72 * 3600 * 1000).toISOString(),
           subscription_ends_at: isVipSignup ? '2099-12-31T23:59:59.000Z' : undefined,
@@ -590,7 +636,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           loadedProfile = insertedProf as UserProfile;
         } else if (insertErr) {
           console.warn('Profile creation fallback warning:', insertErr);
-          // Try minimal payload without extra columns
+          // Try minimal payload without enum role in case 'driver' isn't migrated in Postgres yet
           try {
             const minPayload = {
               id: activeUser.id,
@@ -598,7 +644,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               full_name: meta?.fullName || '',
               company_name: meta?.companyName || '',
               city: meta?.city || 'Casablanca',
-              role: role === 'owner' ? 'owner' : 'client',
+              role: resolvedRole === 'owner' ? 'owner' : 'client',
             };
             const { data: minData } = await supabase
               .from('profiles')
@@ -609,24 +655,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           } catch (minErr) {
             console.warn('Minimal profile creation warning:', minErr);
           }
-
-          if (!loadedProfile) {
-            // Synthesize guaranteed local profile so user is never blocked
-            loadedProfile = {
-              id: activeUser.id,
-              phone: norm.e164,
-              full_name: meta?.fullName || '',
-              company_name: meta?.companyName || '',
-              role: role === 'owner' ? 'owner' : 'client',
-              city: meta?.city || 'Casablanca',
-              whatsapp_verified: false,
-              subscription_status: 'trial',
-              trial_started_at: new Date().toISOString(),
-              trial_ends_at: new Date(Date.now() + 72 * 3600 * 1000).toISOString(),
-              preferred_lang: 'ar',
-              created_at: new Date().toISOString(),
-            };
-          }
         }
       }
 
@@ -636,12 +664,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           phone: norm.e164,
           full_name: meta?.fullName || '',
           company_name: meta?.companyName || '',
-          role: role === 'owner' ? 'owner' : 'client',
+          role: resolvedRole,
           client_segment: meta?.clientSegment,
           client_activity_note: meta?.clientActivityNote || '',
+          driver_machines: resolvedRole === 'driver' ? meta?.driverMachines || [] : undefined,
+          driver_experience_years:
+            resolvedRole === 'driver' ? meta?.driverExperienceYears || '3_5' : undefined,
+          driver_available: resolvedRole === 'driver' ? meta?.driverAvailable ?? true : undefined,
           city: meta?.city || 'Casablanca',
           whatsapp_verified: false,
-          subscription_status: 'trial',
+          subscription_status: resolvedRole === 'owner' ? 'trial' : 'active',
           trial_started_at: new Date().toISOString(),
           trial_ends_at: new Date(Date.now() + 72 * 3600 * 1000).toISOString(),
           preferred_lang: 'ar',
@@ -650,8 +682,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         loadedProfile = {
           ...loadedProfile,
+          role: resolvedRole === 'driver' ? 'driver' : loadedProfile.role,
           client_segment: loadedProfile.client_segment || meta?.clientSegment,
           client_activity_note: loadedProfile.client_activity_note || meta?.clientActivityNote || '',
+          driver_machines:
+            resolvedRole === 'driver'
+              ? loadedProfile.driver_machines?.length
+                ? loadedProfile.driver_machines
+                : meta?.driverMachines || []
+              : loadedProfile.driver_machines,
+          driver_experience_years:
+            resolvedRole === 'driver'
+              ? loadedProfile.driver_experience_years || meta?.driverExperienceYears || '3_5'
+              : loadedProfile.driver_experience_years,
+          driver_available:
+            resolvedRole === 'driver'
+              ? loadedProfile.driver_available ?? meta?.driverAvailable ?? true
+              : loadedProfile.driver_available,
         };
       }
 
@@ -720,6 +767,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         'trial_ends_at',
         'subscription_ends_at',
         'preferred_lang',
+        'driver_machines',
+        'driver_experience_years',
+        'driver_available',
+        'driver_bio',
       ];
 
       const dbPayload: any = {};
@@ -734,7 +785,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         dbPayload.phone_number = updates.phone;
       }
 
-      // 2. Update Supabase auth user_metadata with ALL fields (including ice_number, onboarding_completed, etc.)
+      // 2. Update Supabase auth user_metadata with ALL fields
       try {
         await supabase.auth.updateUser({
           data: {
@@ -757,43 +808,63 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (error) {
           console.warn('Supabase profiles update warning:', error.message);
-          // If error is about a missing column in schema cache, fallback to minimal core columns
-          if (error.message?.includes('column') && error.message?.includes('schema cache')) {
-            const minimalPayload: any = {};
-            if (updates.full_name) minimalPayload.full_name = updates.full_name;
-            if (updates.company_name) minimalPayload.company_name = updates.company_name;
-            if (updates.city) minimalPayload.city = updates.city;
+          // Fallback to minimal core columns if schema cache lacks newer columns or enum value
+          const minimalPayload: any = {};
+          if (updates.full_name !== undefined) minimalPayload.full_name = updates.full_name;
+          if (updates.company_name !== undefined) minimalPayload.company_name = updates.company_name;
+          if (updates.city !== undefined) minimalPayload.city = updates.city;
 
-            if (Object.keys(minimalPayload).length > 0) {
-              const { data: retryData } = await supabase
-                .from('profiles')
-                .update(minimalPayload)
-                .eq('id', targetId)
-                .select()
-                .maybeSingle();
-              dbData = retryData;
-            }
+          if (Object.keys(minimalPayload).length > 0) {
+            const { data: retryData } = await supabase
+              .from('profiles')
+              .update(minimalPayload)
+              .eq('id', targetId)
+              .select()
+              .maybeSingle();
+            dbData = retryData;
           }
         } else {
           dbData = data;
         }
       }
 
-      // 4. Update local state and localStorage
+      // 4. Update local state and localStorage (always preserve resolved driver role & fields)
+      const resolvedMergedRole =
+        profile?.role === 'driver' && updates.role === undefined
+          ? 'driver'
+          : updates.role || profile?.role || 'client';
+
       const merged: UserProfile = {
-        ...(profile || {} as UserProfile),
+        ...(profile || ({} as UserProfile)),
         ...(dbData || {}),
         ...updates,
         id: targetId,
-        role: updates.role || profile?.role || 'client',
+        role: resolvedMergedRole,
         phone: updates.phone || profile?.phone || '',
-        full_name: updates.full_name !== undefined ? updates.full_name : (profile?.full_name || ''),
-        company_name: updates.company_name !== undefined ? updates.company_name : (profile?.company_name || ''),
-        city: updates.city !== undefined ? updates.city : (profile?.city || 'Casablanca'),
+        full_name: updates.full_name !== undefined ? updates.full_name : profile?.full_name || '',
+        company_name: updates.company_name !== undefined ? updates.company_name : profile?.company_name || '',
+        city: updates.city !== undefined ? updates.city : profile?.city || 'Casablanca',
         client_segment: updates.client_segment !== undefined ? updates.client_segment : profile?.client_segment,
-        client_activity_note: updates.client_activity_note !== undefined ? updates.client_activity_note : (profile?.client_activity_note || ''),
-        ice_number: updates.ice_number !== undefined ? updates.ice_number : (profile?.ice_number || ''),
-        onboarding_completed: updates.onboarding_completed !== undefined ? updates.onboarding_completed : (profile?.onboarding_completed ?? true),
+        client_activity_note:
+          updates.client_activity_note !== undefined
+            ? updates.client_activity_note
+            : profile?.client_activity_note || '',
+        driver_machines:
+          updates.driver_machines !== undefined ? updates.driver_machines : profile?.driver_machines || [],
+        driver_experience_years:
+          updates.driver_experience_years !== undefined
+            ? updates.driver_experience_years
+            : profile?.driver_experience_years,
+        driver_available:
+          updates.driver_available !== undefined
+            ? updates.driver_available
+            : profile?.driver_available ?? true,
+        driver_bio: updates.driver_bio !== undefined ? updates.driver_bio : profile?.driver_bio || '',
+        ice_number: updates.ice_number !== undefined ? updates.ice_number : profile?.ice_number || '',
+        onboarding_completed:
+          updates.onboarding_completed !== undefined
+            ? updates.onboarding_completed
+            : profile?.onboarding_completed ?? true,
       };
 
       saveProfileLocally(merged);

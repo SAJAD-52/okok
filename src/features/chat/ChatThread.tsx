@@ -351,6 +351,10 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
                       ? lang === 'fr'
                         ? "Propriétaire d'engins"
                         : 'مالك آليات ومعدات'
+                      : other.role === 'driver'
+                      ? lang === 'fr'
+                        ? "Conducteur d'engins"
+                        : 'سائق آليات ومعدات'
                       : lang === 'fr'
                       ? 'Client / Demandeur'
                       : 'زبون / صاحب موقع عمل'}

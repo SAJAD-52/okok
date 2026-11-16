@@ -59,6 +59,7 @@ import {
 import { registerOwnerPushNotifications } from '../../lib/pushService';
 import { formatDistanceKm } from '../../lib/geoUtils';
 import { getClientSegmentOption } from '../../data/clientSegments';
+import { fetchDriverJobOffers, subscribeDriverJobOffers } from '../../lib/driverOfferService';
 
 export const DashboardLayout: React.FC = () => {
   const { t, isRTL, lang } = useLanguage();
@@ -71,6 +72,7 @@ export const DashboardLayout: React.FC = () => {
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
   const [pendingBookingsCount, setPendingBookingsCount] = useState<number>(0);
+  const [driverOpenOffersCount, setDriverOpenOffersCount] = useState<number>(0);
   const [pendingBookingsList, setPendingBookingsList] = useState<Booking[]>([]);
   const [systemNotifications, setSystemNotifications] = useState<ServerNotification[]>([]);
   const [opportunityNotifications, setOpportunityNotifications] = useState<DispatchNotification[]>([]);
@@ -81,9 +83,10 @@ export const DashboardLayout: React.FC = () => {
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
 
   const isContractor = profile?.role === 'client' || profile?.role === 'contractor';
+  const isDriver = profile?.role === 'driver';
   const isChatRoute = location.pathname.includes('/messages');
-  // Contractors (clients) renting machinery are NEVER blocked by owner trial soft-lock!
-  const shouldShowLock = !isContractor && isLocked && !isChatRoute;
+  // Contractors and drivers are NEVER blocked by owner 72h trial soft-lock!
+  const shouldShowLock = !isContractor && !isDriver && isLocked && !isChatRoute;
 
   const [unreadMessagesCount, setUnreadMessagesCount] = useState<number>(0);
 
@@ -226,9 +229,30 @@ export const DashboardLayout: React.FC = () => {
     };
   }, [refreshSystemNotifications]);
 
+  // Sync open driver job offers badge count
+  useEffect(() => {
+    if (!isDriver || !profile?.id) {
+      setDriverOpenOffersCount(0);
+      return;
+    }
+
+    const syncDriverBadge = async () => {
+      try {
+        const list = await fetchDriverJobOffers(profile.id);
+        setDriverOpenOffersCount(list.filter((o) => o.status === 'open' && !o.has_applied).length);
+      } catch {
+        // ignore
+      }
+    };
+
+    syncDriverBadge();
+    const unsub = subscribeDriverJobOffers(profile.driver_machines || [], syncDriverBadge);
+    return unsub;
+  }, [isDriver, profile?.id, profile?.driver_machines]);
+
   // Sync pending bookings for owner notification badge with real-time updates
   useEffect(() => {
-    if (!profile?.id || isContractor || (isSuperAdmin && !isImpersonating)) return;
+    if (!profile?.id || isContractor || isDriver || (isSuperAdmin && !isImpersonating)) return;
 
     let previousCount = -1;
 
@@ -406,7 +430,7 @@ export const DashboardLayout: React.FC = () => {
       clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [profile?.id, isContractor, lang]);
+  }, [profile?.id, isContractor, isDriver, lang]);
 
   const contractorNavigationItems = [
     {
@@ -489,7 +513,35 @@ export const DashboardLayout: React.FC = () => {
     },
   ];
 
-  const navigationItems = isContractor ? contractorNavigationItems : ownerNavigationItems;
+  const driverNavigationItems = [
+    {
+      to: '/driver',
+      exact: true,
+      label: lang === 'fr' ? 'Espace Conducteur' : 'لوحة السائق',
+      mobileLabel: lang === 'fr' ? 'Accueil' : 'لوحتي',
+      icon: <HardHat className="w-5 h-5" />,
+    },
+    {
+      to: '/driver/joboffer',
+      label: lang === 'fr' ? 'Offres d’emploi' : 'عروض العمل والطلبات',
+      mobileLabel: lang === 'fr' ? 'Offres' : 'عروض العمل',
+      icon: <Briefcase className="w-5 h-5" />,
+      badge: driverOpenOffersCount,
+    },
+    {
+      to: '/driver/messages',
+      label: t('nav.messages'),
+      mobileLabel: t('nav.messages'),
+      icon: <MessageSquare className="w-5 h-5" />,
+      badge: unreadMessagesCount,
+    },
+  ];
+
+  const navigationItems = isDriver
+    ? driverNavigationItems
+    : isContractor
+    ? contractorNavigationItems
+    : ownerNavigationItems;
 
   const handleLogout = async () => {
     await logout();
@@ -500,7 +552,11 @@ export const DashboardLayout: React.FC = () => {
   const displayName =
     profile?.company_name ||
     profile?.full_name ||
-    (isContractor
+    (isDriver
+      ? lang === 'fr'
+        ? 'Conducteur JADIJCB'
+        : 'سائق محترف JADIJCB'
+      : isContractor
       ? lang === 'fr'
         ? 'Client JADIJCB'
         : 'زبون JADIJCB'
@@ -510,6 +566,10 @@ export const DashboardLayout: React.FC = () => {
       ? t('auth.role_owner')
       : profile?.role === 'admin'
       ? 'Super Admin'
+      : isDriver
+      ? lang === 'fr'
+        ? 'Conducteur d’engins'
+        : 'سائق آليات الحفر'
       : profile?.client_segment
       ? lang === 'fr'
         ? clientSegOpt.labelFr
@@ -632,7 +692,7 @@ export const DashboardLayout: React.FC = () => {
           <PWAInstallButton variant="sidebar" />
 
           {/* Subscription Mini Pill (Only for machinery owners) */}
-          {isTrial && !isLocked && !isContractor && (
+          {isTrial && !isLocked && !isContractor && !isDriver && (
             <button
               type="button"
               onClick={() => setIsPaymentModalOpen(true)}
@@ -687,7 +747,9 @@ export const DashboardLayout: React.FC = () => {
         )}
 
         {/* Trial Live Banner: only for machinery owners */}
-        {!isContractor && <TrialBanner onOpenPaymentModal={() => setIsPaymentModalOpen(true)} />}
+        {!isContractor && !isDriver && (
+          <TrialBanner onOpenPaymentModal={() => setIsPaymentModalOpen(true)} />
+        )}
 
         {/* Mobile & Tablet Header Bar */}
         <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-steel-200/80 px-3 sm:px-6 h-16 flex items-center justify-between gap-2 sm:gap-4 max-w-full">
@@ -705,7 +767,15 @@ export const DashboardLayout: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {isContractor ? (
+            {isDriver ? (
+              <NavLink
+                to="/driver/joboffer"
+                className="text-[11px] sm:text-xs font-black text-ink px-2.5 sm:px-3 py-1.5 rounded-xl border border-primary/50 bg-primary hover:bg-primary-hover min-h-[40px] sm:min-h-[44px] flex items-center gap-1 sm:gap-1.5 shadow-sm whitespace-nowrap shrink-0"
+              >
+                <Briefcase className="w-3.5 h-3.5 shrink-0" />
+                <span>{lang === 'fr' ? 'Offres d’emploi' : 'عروض العمل'}</span>
+              </NavLink>
+            ) : isContractor ? (
               <NavLink
                 to="/entreprise/map"
                 className="text-[11px] sm:text-xs font-black text-ink px-2.5 sm:px-3 py-1.5 rounded-xl border border-primary/50 bg-primary hover:bg-primary-hover min-h-[40px] sm:min-h-[44px] flex items-center gap-1 sm:gap-1.5 shadow-sm whitespace-nowrap shrink-0"
@@ -845,7 +915,11 @@ export const DashboardLayout: React.FC = () => {
                                           ? 'Les nouveaux messages apparaîtront ici avec sonnerie.'
                                           : 'ستصلك إشعارات الرسائل في القائمة المنسدلة للهاتف مع صوت تنبيه.',
                                       tag: 'jadijcb-test-notif',
-                                      url: isContractor ? '/entreprise/messages' : '/owner/messages',
+                                      url: isDriver
+                                        ? '/driver/messages'
+                                        : isContractor
+                                        ? '/entreprise/messages'
+                                        : '/owner/messages',
                                     }).catch(() => {});
                                     toast.success(
                                       lang === 'fr'
@@ -884,7 +958,11 @@ export const DashboardLayout: React.FC = () => {
                                         ? 'Sonnerie et notification dans la barre mobile prêtes.'
                                         : 'الصوت وإشعار القائمة المنسدلة للهاتف يعملان بنجاح!',
                                     tag: 'jadijcb-test-notif',
-                                    url: isContractor ? '/entreprise/messages' : '/owner/messages',
+                                    url: isDriver
+                                      ? '/driver/messages'
+                                      : isContractor
+                                      ? '/entreprise/messages'
+                                      : '/owner/messages',
                                   });
                                   if (shown) {
                                     toast.success(
@@ -1107,7 +1185,9 @@ export const DashboardLayout: React.FC = () => {
                                       }
                                       setIsNotificationsOpen(false);
                                       if (isChatNotif) {
-                                        const baseMsgRoute = isContractor
+                                        const baseMsgRoute = isDriver
+                                          ? '/driver/messages'
+                                          : isContractor
                                           ? '/entreprise/messages'
                                           : '/owner/messages';
                                         navigate(
@@ -1116,7 +1196,13 @@ export const DashboardLayout: React.FC = () => {
                                             : baseMsgRoute
                                         );
                                       } else {
-                                        navigate(isContractor ? '/entreprise/bookings' : '/owner/bookings?tab=pending');
+                                        navigate(
+                                          isDriver
+                                            ? '/driver/joboffer'
+                                            : isContractor
+                                            ? '/entreprise/bookings'
+                                            : '/owner/bookings?tab=pending'
+                                        );
                                       }
                                     }}
                                     className={`p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
@@ -1153,11 +1239,21 @@ export const DashboardLayout: React.FC = () => {
                             type="button"
                             onClick={() => {
                               setIsNotificationsOpen(false);
-                              navigate(isContractor ? '/entreprise/messages' : '/owner/bookings?tab=pending');
+                              navigate(
+                                isDriver
+                                  ? '/driver/joboffer'
+                                  : isContractor
+                                  ? '/entreprise/messages'
+                                  : '/owner/bookings?tab=pending'
+                              );
                             }}
                             className="text-xs text-primary-dark font-bold hover:underline cursor-pointer"
                           >
-                            {isContractor
+                            {isDriver
+                              ? lang === 'fr'
+                                ? 'Voir les offres d’emploi →'
+                                : 'الانتقال إلى عروض العمل ←'
+                              : isContractor
                               ? lang === 'fr'
                                 ? 'Ouvrir mes messages →'
                                 : 'الانتقال إلى المحادثات ←'
@@ -1174,7 +1270,7 @@ export const DashboardLayout: React.FC = () => {
           </div>
         </header>
 
-        {/* Prominent Top Bar to Enable Background Mobile Push Notifications for Both Roles */}
+        {/* Prominent Top Bar to Enable Background Mobile Push Notifications */}
         {typeof window !== 'undefined' &&
           'Notification' in window &&
           notifPermission === 'default' &&
@@ -1185,7 +1281,11 @@ export const DashboardLayout: React.FC = () => {
                   <Volume2 className="w-4 h-4" />
                 </span>
                 <p className="font-bold text-ink leading-snug">
-                  {isContractor
+                  {isDriver
+                    ? lang === 'fr'
+                      ? 'Activez les alertes pour recevoir instantanément les offres urgentes de conducteurs avec tarif et ville sur votre mobile.'
+                      : 'فعّل إشعارات الهاتف ليصلك صوت وتنبيه فوري بعروض العمل العاجلة (نوع الآلية، الثمن والمدينة) فور إطلاقها.'
+                    : isContractor
                     ? lang === 'fr'
                       ? 'Activez les notifications pour recevoir les messages des propriétaires dans votre barre mobile même hors application.'
                       : 'فعّل إشعارات الهاتف لتصلك رسائل ملاك الآليات مع صوت تنبيه في القائمة المنسدلة حتى خارج التطبيق.'
@@ -1246,7 +1346,66 @@ export const DashboardLayout: React.FC = () => {
         aria-label="Mobile Navigation"
         className="md:hidden fixed bottom-0 start-0 end-0 bg-white border-t border-steel-200 shadow-elevated z-40 px-1 py-1 flex items-center justify-around overflow-hidden"
       >
-        {isContractor ? (
+        {isDriver ? (
+          <>
+            {driverNavigationItems.map((item) => {
+              const isItemActive = item.exact
+                ? location.pathname === item.to
+                : location.pathname.startsWith(item.to);
+
+              return (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  className={`flex flex-col items-center justify-center flex-1 min-w-0 px-0.5 py-1.5 min-h-[50px] transition-colors relative ${
+                    isItemActive ? 'text-ink font-bold' : 'text-steel-400 hover:text-steel-700'
+                  }`}
+                >
+                  <div
+                    className={`p-1 rounded-xl transition-all relative ${
+                      isItemActive ? 'bg-primary text-ink' : ''
+                    }`}
+                  >
+                    {item.icon}
+                    {item.badge && item.badge > 0 && (
+                      <span className="absolute -top-1 -end-1 w-2.5 h-2.5 rounded-full bg-primary ring-2 ring-white" />
+                    )}
+                  </div>
+                  <span className="text-[10px] mt-0.5 tracking-tight truncate max-w-full">
+                    {item.mobileLabel || item.label}
+                  </span>
+                </NavLink>
+              );
+            })}
+
+            <button
+              type="button"
+              onClick={() => setIsProfileModalOpen(true)}
+              className="flex flex-col items-center justify-center flex-1 min-w-0 px-0.5 py-1.5 min-h-[50px] text-steel-400 hover:text-ink rounded-xl transition-colors cursor-pointer"
+            >
+              <div className="p-1 rounded-xl">
+                <User className="w-5 h-5" />
+              </div>
+              <span className="text-[10px] font-bold mt-0.5 tracking-tight truncate max-w-full">
+                {lang === 'fr' ? 'Profil' : 'حسابي'}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="flex flex-col items-center justify-center flex-1 min-w-0 px-0.5 py-1.5 min-h-[50px] text-danger hover:bg-rose-50/70 rounded-xl transition-colors cursor-pointer"
+              aria-label={t('nav.logout')}
+            >
+              <div className="p-1 rounded-xl">
+                <LogOut className="w-5 h-5" />
+              </div>
+              <span className="text-[10px] font-bold mt-0.5 tracking-tight truncate max-w-full">
+                {lang === 'fr' ? 'Quitter' : 'خروج'}
+              </span>
+            </button>
+          </>
+        ) : isContractor ? (
           <>
             {contractorNavigationItems.map((item) => {
               const isItemActive = item.exact
@@ -1606,7 +1765,7 @@ export const DashboardLayout: React.FC = () => {
       />
 
       {/* Real-Time InDrive Opportunity Listener (Audio + Push + Celebration Popup for Owners) */}
-      {!isContractor && (profile?.id || user?.id) && !(isSuperAdmin && !isImpersonating) && (
+      {!isContractor && !isDriver && (profile?.id || user?.id) && !(isSuperAdmin && !isImpersonating) && (
         <OpportunityAlertListener
           ownerId={profile?.id || user?.id || ''}
           onNotificationsSync={setOpportunityNotifications}

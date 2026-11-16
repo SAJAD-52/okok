@@ -89,7 +89,12 @@ export const ChatAlertListener: React.FC<ChatAlertListenerProps> = ({
   onChangedRef.current = onNotificationsChanged;
 
   const isContractor = userRole === 'client' || userRole === 'contractor';
-  const messagesBaseRoute = isContractor ? '/entreprise/messages' : '/owner/messages';
+  const isDriver = userRole === 'driver';
+  const messagesBaseRoute = isDriver
+    ? '/driver/messages'
+    : isContractor
+    ? '/entreprise/messages'
+    : '/owner/messages';
 
   const resolveSenderName = useCallback(
     async (senderId?: string, hintName?: string): Promise<string> => {

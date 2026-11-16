@@ -31,6 +31,8 @@ import { ContractorDashboardPage } from './pages/ContractorDashboardPage';
 import { SiteRadarMapPage } from './pages/SiteRadarMapPage';
 import { ContractorBookingsPage } from './pages/ContractorBookingsPage';
 import { ContractorProjectsPage } from './pages/ContractorProjectsPage';
+import { DriverDashboardPage } from './pages/DriverDashboardPage';
+import { DriverJobOffersPage } from './pages/DriverJobOffersPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -130,6 +132,20 @@ export const App: React.FC = () => {
               <Route path="map" element={<SiteRadarMapPage />} />
               <Route path="bookings" element={<ContractorBookingsPage />} />
               <Route path="projects" element={<ContractorProjectsPage />} />
+              <Route path="messages" element={<MessagesPage />} />
+            </Route>
+
+            {/* Protected Professional Machinery Driver Portal Routes (/driver) */}
+            <Route
+              path="/driver"
+              element={
+                <ProtectedRoute>
+                  <DashboardLayout />
+                </ProtectedRoute>
+              }
+            >
+              <Route index element={<DriverDashboardPage />} />
+              <Route path="joboffer" element={<DriverJobOffersPage />} />
               <Route path="messages" element={<MessagesPage />} />
             </Route>
 

@@ -267,7 +267,10 @@ class ChatStore {
     if (resolvedRecipientId && !isRawDispatchLaunch) {
       const isRecipientContractor =
         resolvedRecipientRole === 'client' || resolvedRecipientRole === 'contractor';
-      const targetUrl = isRecipientContractor
+      const isRecipientDriver = resolvedRecipientRole === 'driver';
+      const targetUrl = isRecipientDriver
+        ? `/driver/messages?conv=${encodeURIComponent(conversationId)}`
+        : isRecipientContractor
         ? `/entreprise/messages?conv=${encodeURIComponent(conversationId)}`
         : `/owner/messages?conv=${encodeURIComponent(conversationId)}`;
       const titleAr = meta?.senderName

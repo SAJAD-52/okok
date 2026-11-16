@@ -2,7 +2,14 @@
 // JADIJCB: Database & Domain TypeScript Definitions
 // ============================================================================
 
-export type UserRole = 'owner' | 'client' | 'admin' | 'contractor' | 'equipment_owner' | 'dealer';
+export type UserRole =
+  | 'owner'
+  | 'client'
+  | 'driver'
+  | 'admin'
+  | 'contractor'
+  | 'equipment_owner'
+  | 'dealer';
 export type ClientSegment =
   | 'company'
   | 'farmer'
@@ -44,6 +51,10 @@ export interface UserProfile {
   subscription_ends_at?: string;
   preferred_lang?: 'ar' | 'fr';
   onboarding_completed?: boolean;
+  driver_machines?: string[];
+  driver_experience_years?: string;
+  driver_available?: boolean;
+  driver_bio?: string;
   last_active_at?: string;
   activation_at?: string;
   created_at: string;
@@ -444,3 +455,34 @@ export interface DispatchDealContext {
   deal_status: DispatchDealStatus;
   booking_id?: string | null;
 }
+
+export type DriverJobOfferStatus = 'open' | 'applied' | 'accepted' | 'closed';
+export type DriverSalaryUnit = 'day' | 'month';
+
+export interface DriverJobOffer {
+  id: string;
+  campaign_id?: string;
+  owner_id: string;
+  owner_name: string;
+  owner_company?: string;
+  owner_phone?: string;
+  machine_category: string;
+  machine_label_ar: string;
+  machine_label_fr: string;
+  offered_salary: number;
+  salary_unit: DriverSalaryUnit;
+  city: string;
+  work_location_note?: string;
+  duration_label: string;
+  is_urgent: boolean;
+  accommodation_included?: boolean;
+  meals_included?: boolean;
+  experience_required?: string;
+  description_ar: string;
+  description_fr: string;
+  status: DriverJobOfferStatus;
+  has_applied?: boolean;
+  is_demo?: boolean;
+  created_at: string;
+}
+

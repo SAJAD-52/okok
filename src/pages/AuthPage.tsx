@@ -25,6 +25,8 @@ import {
   Handshake,
   Landmark,
   Briefcase,
+  HardHat,
+  Award,
 } from 'lucide-react';
 import { PublicHeader } from '../components/layout/PublicHeader';
 import { Footer } from '../components/layout/Footer';
@@ -33,6 +35,7 @@ import { Button } from '../components/ui/Button';
 import { toast } from '../components/ui/Toast';
 import { WelcomeModal } from '../components/dashboard/WelcomeModal';
 import { ClientNextStepsModal } from '../components/auth/ClientNextStepsModal';
+import { DriverMachineChecklist } from '../components/driver/DriverMachineChecklist';
 import { useLanguage } from '../hooks/useLanguage';
 import { useAuth } from '../hooks/useAuth';
 import {
@@ -41,6 +44,7 @@ import {
 } from '../lib/authHelpers';
 import { MOROCCAN_CITIES } from '../data/cities';
 import { CLIENT_SEGMENTS } from '../data/clientSegments';
+import { DRIVER_EXPERIENCE_LEVELS } from '../data/driverMachines';
 import { UserRole, ClientSegment } from '../types/database';
 import { platformSettingsStore } from '../lib/platformSettings';
 
@@ -67,9 +71,11 @@ export const AuthPage: React.FC = () => {
   );
 
   // Form State
-  const [role, setRole] = useState<UserRole>('owner'); // 'owner' or 'client'
+  const [role, setRole] = useState<UserRole>('owner'); // 'owner' | 'client' | 'driver'
   const [clientSegment, setClientSegment] = useState<ClientSegment>('company');
   const [clientActivityNote, setClientActivityNote] = useState('');
+  const [driverMachines, setDriverMachines] = useState<string[]>(['tractopelle']);
+  const [driverExperienceYears, setDriverExperienceYears] = useState<string>('3_5');
   const [fullName, setFullName] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [cityId, setCityId] = useState('casablanca');
@@ -122,6 +128,10 @@ export const AuthPage: React.FC = () => {
           navigate('/admin');
           return;
         }
+        if (actualRole === 'driver') {
+          navigate('/driver');
+          return;
+        }
         const isClient = actualRole === 'client' || actualRole === 'contractor';
         navigate(isClient ? '/entreprise' : '/owner');
       } else {
@@ -140,6 +150,25 @@ export const AuthPage: React.FC = () => {
             lang === 'fr'
               ? 'Veuillez saisir le nom de votre entreprise'
               : 'يرجى إدخال اسم الشركة أو المقاولة'
+          );
+          setIsLoading(false);
+          return;
+        }
+      } else if (role === 'driver') {
+        if (!fullName.trim()) {
+          toast.error(
+            lang === 'fr'
+              ? 'Veuillez saisir votre nom complet'
+              : 'يرجى إدخال اسمك الكامل'
+          );
+          setIsLoading(false);
+          return;
+        }
+        if (driverMachines.length === 0) {
+          toast.error(
+            lang === 'fr'
+              ? 'Veuillez cocher au moins un engin que vous maîtrisez'
+              : 'يرجى اختيار آلية واحدة على الأقل من الآليات التي تحترف قيادتها'
           );
           setIsLoading(false);
           return;
@@ -183,6 +212,9 @@ export const AuthPage: React.FC = () => {
           role === 'client' && clientSegment === 'other'
             ? clientActivityNote.trim()
             : undefined,
+        driverMachines: role === 'driver' ? driverMachines : undefined,
+        driverExperienceYears: role === 'driver' ? driverExperienceYears : undefined,
+        driverAvailable: role === 'driver' ? true : undefined,
       });
 
       if (res.success) {
@@ -190,17 +222,24 @@ export const AuthPage: React.FC = () => {
           full_name: fullName.trim(),
           company_name: finalCompanyName,
           city: cityName,
-          role: role === 'owner' ? 'owner' : 'client',
+          role: role === 'owner' ? 'owner' : role === 'driver' ? 'driver' : 'client',
           client_segment: role === 'client' ? clientSegment : undefined,
           client_activity_note:
             role === 'client' && clientSegment === 'other'
               ? clientActivityNote.trim()
               : '',
+          driver_machines: role === 'driver' ? driverMachines : undefined,
+          driver_experience_years: role === 'driver' ? driverExperienceYears : undefined,
+          driver_available: role === 'driver' ? true : undefined,
         });
 
         setIsLoading(false);
         toast.success(
-          role === 'client'
+          role === 'driver'
+            ? lang === 'fr'
+              ? 'Compte conducteur créé ! Bienvenue sur votre espace offres.'
+              : 'تم إنشاء حساب السائق بنجاح! مرحباً بك في بوابة عروض العمل.'
+            : role === 'client'
             ? lang === 'fr'
               ? 'Compte créé avec succès !'
               : 'تم إنشاء حسابك وحفظ معلوماتك بنجاح!'
@@ -209,7 +248,9 @@ export const AuthPage: React.FC = () => {
             : 'تم إنشاء الحساب وتفعيل التجربة المجانية بنجاح!'
         );
 
-        if (role === 'client') {
+        if (role === 'driver') {
+          navigate('/driver');
+        } else if (role === 'client') {
           setShowClientNextStepsModal(true);
         } else {
           setShowWelcomeModal(true);
@@ -269,7 +310,7 @@ export const AuthPage: React.FC = () => {
             </button>
           </div>
 
-          {/* Registration Role Selection: Owner vs Inclusive Client */}
+          {/* Registration Role Selection: Owner vs Client vs Driver */}
           {mode === 'register' && (
             <div className="mb-5">
               <label className="text-xs font-black text-steel-700 block mb-2.5">
@@ -334,6 +375,39 @@ export const AuthPage: React.FC = () => {
                         : 'مقاولة، فلاح، مهني، فرد، تعاونية أو أخرى'}
                     </span>
                   </div>
+                </button>
+
+                {/* Role 3: Professional Heavy Machinery Driver */}
+                <button
+                  type="button"
+                  onClick={() => setRole('driver')}
+                  className={`sm:col-span-2 p-3.5 rounded-2xl border text-start flex items-center justify-between gap-3 transition-all min-h-[82px] cursor-pointer ${
+                    role === 'driver'
+                      ? 'border-primary bg-amber-50/60 ring-2 ring-primary text-ink shadow-sm'
+                      : 'border-steel-200 bg-white text-steel-700 hover:bg-steel-50'
+                  }`}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-xl bg-ink text-primary flex items-center justify-center font-black shrink-0">
+                      <HardHat className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-black text-ink">
+                          {t('auth.role_driver')}
+                        </span>
+                        <span className="text-[10px] font-bold text-emerald-700">
+                          {lang === 'fr' ? '100% Gratuit' : 'حساب مجاني'}
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-steel-500 block mt-0.5 leading-snug">
+                        {t('auth.role_driver_desc')}
+                      </span>
+                    </div>
+                  </div>
+                  {role === 'driver' && (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  )}
                 </button>
               </div>
             </div>
@@ -511,6 +585,81 @@ export const AuthPage: React.FC = () => {
                           </option>
                         ))}
                       </select>
+                    </div>
+                  </>
+                ) : role === 'driver' ? (
+                  /* Professional Machinery Driver Registration Fields */
+                  <>
+                    <div>
+                      <label className="text-xs font-bold text-steel-700 block mb-1.5">
+                        {lang === 'fr' ? 'Nom complet du conducteur *' : 'الاسم الكامل للسائق *'}
+                      </label>
+                      <input
+                        type="text"
+                        placeholder={lang === 'fr' ? 'ex. Youssef El Mansouri' : 'مثال: يوسف المنصوري'}
+                        value={fullName}
+                        onChange={(e) => setFullName(e.target.value)}
+                        required
+                        className="w-full px-3.5 py-3 rounded-xl border border-steel-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-white min-h-[46px]"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs font-bold text-steel-700 block mb-1.5">
+                          {lang === 'fr' ? 'Ville de résidence *' : 'المدينة *'}
+                        </label>
+                        <select
+                          value={cityId}
+                          onChange={(e) => setCityId(e.target.value)}
+                          className="w-full px-3.5 py-3 rounded-xl border border-steel-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-white min-h-[46px]"
+                        >
+                          {MOROCCAN_CITIES.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {lang === 'fr' ? c.name_fr : c.name_ar}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-bold text-steel-700 block mb-1.5 flex items-center gap-1.5">
+                          <Award className="w-3.5 h-3.5 text-primary-dark" />
+                          <span>{lang === 'fr' ? 'Années d’expérience *' : 'سنوات التجربة *'}</span>
+                        </label>
+                        <select
+                          value={driverExperienceYears}
+                          onChange={(e) => setDriverExperienceYears(e.target.value)}
+                          className="w-full px-3.5 py-3 rounded-xl border border-steel-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-white min-h-[46px]"
+                        >
+                          {DRIVER_EXPERIENCE_LEVELS.map((exp) => (
+                            <option key={exp.id} value={exp.id}>
+                              {lang === 'fr' ? exp.labelFr : exp.labelAr}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Mastered Machines Checklist */}
+                    <div className="p-3.5 rounded-2xl bg-steel-50/80 border border-steel-200 space-y-2.5">
+                      <div>
+                        <label className="text-xs font-black text-ink block">
+                          {lang === 'fr'
+                            ? 'Engins que vous maîtrisez au Maroc (cochez un ou plusieurs) *'
+                            : 'الآليات التي تحترف قيادتها في المغرب (اختر آلية أو أكثر) *'}
+                        </label>
+                        <p className="text-[11px] text-steel-500 mt-0.5">
+                          {lang === 'fr'
+                            ? 'Vous recevrez en priorité les offres d’emploi urgentes correspondant à ces engins.'
+                            : 'ستصلك إشعارات عروض العمل العاجلة حسب الآليات التي تختارها هنا.'}
+                        </p>
+                      </div>
+                      <DriverMachineChecklist
+                        selectedIds={driverMachines}
+                        onChange={setDriverMachines}
+                        compact
+                      />
                     </div>
                   </>
                 ) : (

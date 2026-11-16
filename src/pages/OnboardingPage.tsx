@@ -22,10 +22,12 @@ import { toast } from '../components/ui/Toast';
 import { Logo } from '../components/ui/Logo';
 import { LanguageSwitcher } from '../components/ui/LanguageSwitcher';
 import { ClientNextStepsModal } from '../components/auth/ClientNextStepsModal';
+import { DriverMachineChecklist } from '../components/driver/DriverMachineChecklist';
 import { useLanguage } from '../hooks/useLanguage';
 import { useAuth } from '../hooks/useAuth';
 import { MOROCCAN_CITIES } from '../data/cities';
 import { CLIENT_SEGMENTS } from '../data/clientSegments';
+import { DRIVER_EXPERIENCE_LEVELS } from '../data/driverMachines';
 import { ClientSegment } from '../types/database';
 import { generateUniqueStorefrontSlug } from '../lib/storefrontSlug';
 
@@ -45,12 +47,19 @@ export const OnboardingPage: React.FC = () => {
   const { profile, updateProfile } = useAuth();
 
   const isClient = profile?.role === 'client' || profile?.role === 'contractor';
+  const isDriver = profile?.role === 'driver';
 
   const [clientSegment, setClientSegment] = useState<ClientSegment>(
     profile?.client_segment || 'company'
   );
   const [clientActivityNote, setClientActivityNote] = useState(
     profile?.client_activity_note || ''
+  );
+  const [driverMachines, setDriverMachines] = useState<string[]>(
+    profile?.driver_machines || ['tractopelle']
+  );
+  const [driverExperienceYears, setDriverExperienceYears] = useState<string>(
+    profile?.driver_experience_years || '3_5'
   );
   const [fullName, setFullName] = useState(profile?.full_name || '');
   const [companyName, setCompanyName] = useState(profile?.company_name || '');
@@ -65,6 +74,12 @@ export const OnboardingPage: React.FC = () => {
       if (profile.client_segment) setClientSegment(profile.client_segment);
       if (profile.client_activity_note && !clientActivityNote) {
         setClientActivityNote(profile.client_activity_note);
+      }
+      if (Array.isArray(profile.driver_machines) && profile.driver_machines.length > 0) {
+        setDriverMachines(profile.driver_machines);
+      }
+      if (profile.driver_experience_years) {
+        setDriverExperienceYears(profile.driver_experience_years);
       }
       if (profile.full_name && !fullName) setFullName(profile.full_name);
       if (profile.company_name && !companyName) setCompanyName(profile.company_name);
@@ -101,7 +116,7 @@ export const OnboardingPage: React.FC = () => {
 
     const cityName = MOROCCAN_CITIES.find((c) => c.id === cityId)?.name_ar || cityId;
     const finalCompanyName =
-      !isClient || isClientCompany ? companyName.trim() : '';
+      !isClient && !isDriver ? companyName.trim() : isClientCompany ? companyName.trim() : '';
 
     try {
       await updateProfile({
@@ -111,12 +126,14 @@ export const OnboardingPage: React.FC = () => {
         client_segment: isClient ? clientSegment : undefined,
         client_activity_note:
           isClient && clientSegment === 'other' ? clientActivityNote.trim() : '',
-        ice_number: !isClient ? iceNumber.trim() : '',
+        driver_machines: isDriver ? driverMachines : undefined,
+        driver_experience_years: isDriver ? driverExperienceYears : undefined,
+        ice_number: !isClient && !isDriver ? iceNumber.trim() : '',
         whatsapp_verified: Boolean(whatsappPhone),
         onboarding_completed: true,
       });
 
-      if (!isClient) {
+      if (!isClient && !isDriver) {
         const existingSlug = localStorage.getItem('jadijcb_owner_storefront_slug');
         if (!existingSlug) {
           const newSlug = generateUniqueStorefrontSlug(
@@ -131,7 +148,12 @@ export const OnboardingPage: React.FC = () => {
 
     setIsSubmitting(false);
 
-    if (isClient) {
+    if (isDriver) {
+      toast.success(
+        lang === 'fr' ? 'Profil conducteur mis à jour !' : 'تم حفظ بيانات السائق بنجاح!'
+      );
+      navigate('/driver');
+    } else if (isClient) {
       toast.success(
         lang === 'fr' ? 'Vos informations ont été enregistrées !' : 'تم حفظ بياناتك بنجاح!'
       );
@@ -144,7 +166,7 @@ export const OnboardingPage: React.FC = () => {
 
   const handleSkip = async () => {
     await updateProfile({ onboarding_completed: true });
-    navigate(isClient ? '/entreprise' : '/owner');
+    navigate(isDriver ? '/driver' : isClient ? '/entreprise' : '/owner');
   };
 
   return (
@@ -235,8 +257,39 @@ export const OnboardingPage: React.FC = () => {
               </div>
             )}
 
-            {/* Conditional Company + Owner Name vs General Name */}
-            {isClient ? (
+            {/* Conditional Company + Owner Name vs Driver vs General Client Name */}
+            {isDriver ? (
+              <>
+                <Input
+                  label={lang === 'fr' ? 'Nom complet du conducteur *' : 'الاسم الكامل للسائق *'}
+                  placeholder={t('onboarding.full_name_placeholder')}
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  required
+                />
+
+                <Select
+                  label={lang === 'fr' ? 'Années d’expérience' : 'سنوات التجربة'}
+                  options={DRIVER_EXPERIENCE_LEVELS.map((exp) => ({
+                    value: exp.id,
+                    label: lang === 'fr' ? exp.labelFr : exp.labelAr,
+                  }))}
+                  value={driverExperienceYears}
+                  onChange={(e) => setDriverExperienceYears(e.target.value)}
+                />
+
+                <div className="p-3.5 rounded-2xl bg-steel-50 border border-steel-200 space-y-2">
+                  <label className="text-xs font-black text-ink block">
+                    {lang === 'fr' ? 'Engins maîtrisés *' : 'الآليات التي تحترفها *'}
+                  </label>
+                  <DriverMachineChecklist
+                    selectedIds={driverMachines}
+                    onChange={setDriverMachines}
+                    compact
+                  />
+                </div>
+              </>
+            ) : isClient ? (
               isClientCompany ? (
                 <>
                   <Input
@@ -294,7 +347,7 @@ export const OnboardingPage: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Select
                 label={
-                  isClient
+                  isClient || isDriver
                     ? lang === 'fr'
                       ? 'Ville / Région principale'
                       : 'المدينة الرئيسية'
@@ -314,8 +367,8 @@ export const OnboardingPage: React.FC = () => {
               />
             </div>
 
-            {/* ICE Tax field ONLY for machinery owners, NEVER for clients */}
-            {!isClient && (
+            {/* ICE Tax field ONLY for machinery owners, NEVER for clients or drivers */}
+            {!isClient && !isDriver && (
               <Input
                 label={t('onboarding.ice_label')}
                 placeholder={t('onboarding.ice_placeholder')}

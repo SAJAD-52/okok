@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, Link, useNavigate } from 'react-router-dom';
-import { PlusCircle, User, Menu, X, Compass, Wrench, MapPin, Building2, HardHat, ShieldCheck } from 'lucide-react';
+import { PlusCircle, User, Menu, X, Compass, Wrench, MapPin, Building2, HardHat, ShieldCheck, Briefcase } from 'lucide-react';
 import { Logo } from '../ui/Logo';
 import { LanguageSwitcher } from '../ui/LanguageSwitcher';
 import { Button } from '../ui/Button';
@@ -15,11 +15,18 @@ export const PublicHeader: React.FC = () => {
   const navigate = useNavigate();
 
   const isContractor = profile?.role === 'client' || profile?.role === 'contractor';
+  const isDriver = profile?.role === 'driver';
 
   const navLinks = isSuperAdmin
     ? [
         { to: '/marketplace', label: t('nav.marketplace'), icon: <Compass className="w-4 h-4" /> },
         { to: '/admin', label: '👑 Super Admin' },
+      ]
+    : isDriver
+    ? [
+        { to: '/driver', label: lang === 'fr' ? 'Espace Conducteur' : 'لوحة السائق', icon: <HardHat className="w-4 h-4" /> },
+        { to: '/driver/joboffer', label: lang === 'fr' ? 'Offres d’emploi' : 'عروض العمل', icon: <Briefcase className="w-4 h-4" /> },
+        { to: '/marketplace', label: t('nav.marketplace'), icon: <Compass className="w-4 h-4" /> },
       ]
     : isContractor
     ? [
@@ -68,7 +75,11 @@ export const PublicHeader: React.FC = () => {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => navigate(isSuperAdmin ? '/admin' : isContractor ? '/entreprise' : '/owner')}
+              onClick={() =>
+                navigate(
+                  isSuperAdmin ? '/admin' : isDriver ? '/driver' : isContractor ? '/entreprise' : '/owner'
+                )
+              }
               className="hidden sm:inline-flex text-xs font-bold items-center gap-2"
               leftIcon={
                 isSuperAdmin ? (
@@ -79,7 +90,7 @@ export const PublicHeader: React.FC = () => {
                     alt={profile.full_name || 'avatar'}
                     className="w-5 h-5 rounded-full object-cover border border-primary shrink-0"
                   />
-                ) : isContractor ? (
+                ) : isDriver || isContractor ? (
                   <HardHat className="w-4 h-4 text-primary" />
                 ) : (
                   <User className="w-4 h-4" />
@@ -88,6 +99,8 @@ export const PublicHeader: React.FC = () => {
             >
               {isSuperAdmin
                 ? '👑 Super Admin'
+                : isDriver
+                ? (profile?.full_name || (lang === 'fr' ? 'Mon Espace Conducteur' : 'حساب السائق'))
                 : isContractor
                 ? (profile?.company_name || profile?.full_name || (lang === 'fr' ? 'Mon Espace' : 'حساب الزبون'))
                 : (profile?.company_name || profile?.full_name || t('nav.dashboard'))}
@@ -113,6 +126,16 @@ export const PublicHeader: React.FC = () => {
               leftIcon={<ShieldCheck className="w-4 h-4 text-ink" />}
             >
               {lang === 'fr' ? 'Console Admin' : 'لوحة الإدارة 👑'}
+            </Button>
+          ) : isDriver ? (
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={() => navigate('/driver/joboffer')}
+              className="hidden sm:inline-flex font-black text-xs"
+              leftIcon={<Briefcase className="w-4 h-4" />}
+            >
+              {lang === 'fr' ? 'Offres d’emploi' : 'عروض العمل'}
             </Button>
           ) : isContractor ? (
             <Button
@@ -180,6 +203,19 @@ export const PublicHeader: React.FC = () => {
               >
                 {lang === 'fr' ? 'Console Super Admin' : 'لوحة الإدارة (Super Admin) 👑'}
               </Button>
+            ) : isDriver ? (
+              <Button
+                size="md"
+                variant="primary"
+                className="w-full justify-center font-black"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  navigate('/driver/joboffer');
+                }}
+                leftIcon={<Briefcase className="w-4 h-4" />}
+              >
+                {lang === 'fr' ? 'Offres d’emploi conducteurs' : 'عروض العمل للسائقين'}
+              </Button>
             ) : isContractor ? (
               <Button
                 size="md"
@@ -214,12 +250,32 @@ export const PublicHeader: React.FC = () => {
               className="w-full justify-center"
               onClick={() => {
                 setMobileMenuOpen(false);
-                navigate(user ? (isSuperAdmin ? '/admin' : isContractor ? '/entreprise' : '/owner') : '/auth');
+                navigate(
+                  user
+                    ? isSuperAdmin
+                      ? '/admin'
+                      : isDriver
+                      ? '/driver'
+                      : isContractor
+                      ? '/entreprise'
+                      : '/owner'
+                    : '/auth'
+                );
               }}
               leftIcon={isSuperAdmin ? <ShieldCheck className="w-4 h-4 text-amber-500" /> : <User className="w-4 h-4" />}
             >
               {user
-                ? (isSuperAdmin ? '👑 Super Admin' : isContractor ? (lang === 'fr' ? 'Mon Espace Client' : 'بوابة الزبون') : t('nav.dashboard'))
+                ? isSuperAdmin
+                  ? '👑 Super Admin'
+                  : isDriver
+                  ? lang === 'fr'
+                    ? 'Mon Espace Conducteur'
+                    : 'حساب السائق'
+                  : isContractor
+                  ? lang === 'fr'
+                    ? 'Mon Espace Client'
+                    : 'بوابة الزبون'
+                  : t('nav.dashboard')
                 : t('nav.login')}
             </Button>
 

@@ -39,11 +39,12 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     return <Navigate to="/auth" state={{ from: location }} replace />;
   }
 
-  // 3. Super Admin when not impersonating belongs strictly in /admin (never intercept owner/entreprise portals)
+  // 3. Super Admin when not impersonating belongs strictly in /admin (never intercept owner/entreprise/driver portals)
   if ((isSuperAdmin || profile?.role === 'admin') && !isImpersonating) {
     if (
       location.pathname.startsWith('/owner') ||
       location.pathname.startsWith('/entreprise') ||
+      location.pathname.startsWith('/driver') ||
       location.pathname === '/app' ||
       location.pathname.startsWith('/app/')
     ) {
@@ -57,12 +58,19 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     return children;
   }
 
-  // 4. Role-specific route gating
+  // 5. Role-specific route gating
   if (requiredRole && profile?.role !== requiredRole) {
+    if (profile?.role === 'driver') {
+      return <Navigate to="/driver" replace />;
+    }
     if (profile?.role === 'client' || profile?.role === 'contractor') {
       return <Navigate to="/entreprise" replace />;
     }
     return <Navigate to="/owner" replace />;
+  }
+
+  if (profile?.role === 'driver' && !location.pathname.startsWith('/driver')) {
+    return <Navigate to="/driver" replace />;
   }
 
   return children;

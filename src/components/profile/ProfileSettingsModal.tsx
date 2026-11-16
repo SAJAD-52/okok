@@ -24,16 +24,20 @@ import {
   Landmark,
   Briefcase,
   Users,
+  HardHat,
+  Award,
 } from 'lucide-react';
 import { Input } from '../ui/Input';
 import { Select } from '../ui/Select';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { toast } from '../ui/Toast';
+import { DriverMachineChecklist } from '../driver/DriverMachineChecklist';
 import { useLanguage } from '../../hooks/useLanguage';
 import { useAuth } from '../../hooks/useAuth';
 import { MOROCCAN_CITIES } from '../../data/cities';
 import { CLIENT_SEGMENTS, getClientSegmentOption } from '../../data/clientSegments';
+import { DRIVER_EXPERIENCE_LEVELS } from '../../data/driverMachines';
 import { ClientSegment } from '../../types/database';
 import { supabase } from '../../lib/supabase';
 import { normalizeMoroccanPhone } from '../../lib/authHelpers';
@@ -61,9 +65,13 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
   const { profile, updateProfile, refreshProfile } = useAuth();
 
   const isClient = profile?.role === 'client' || profile?.role === 'contractor';
+  const isDriver = profile?.role === 'driver';
 
   const [clientSegment, setClientSegment] = useState<ClientSegment>('company');
   const [clientActivityNote, setClientActivityNote] = useState('');
+  const [driverMachines, setDriverMachines] = useState<string[]>([]);
+  const [driverExperienceYears, setDriverExperienceYears] = useState('3_5');
+  const [driverAvailable, setDriverAvailable] = useState(true);
   const [fullName, setFullName] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [cityId, setCityId] = useState('casablanca');
@@ -78,6 +86,9 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
     if (isOpen && profile) {
       setClientSegment(profile.client_segment || (profile.company_name ? 'company' : 'individual'));
       setClientActivityNote(profile.client_activity_note || '');
+      setDriverMachines(Array.isArray(profile.driver_machines) ? profile.driver_machines : []);
+      setDriverExperienceYears(profile.driver_experience_years || '3_5');
+      setDriverAvailable(profile.driver_available ?? true);
       setFullName(profile.full_name || '');
       setCompanyName(profile.company_name || '');
       const matchedCity = MOROCCAN_CITIES.find(
@@ -108,7 +119,7 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
       return;
     }
 
-    if ((!isClient || isClientCompany) && !companyName.trim()) {
+    if (!isDriver && (!isClient || isClientCompany) && !companyName.trim()) {
       toast.error(
         lang === 'fr'
           ? 'Veuillez saisir le nom de votre entreprise'
@@ -117,8 +128,18 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
       return;
     }
 
+    if (isDriver && driverMachines.length === 0) {
+      toast.error(
+        lang === 'fr'
+          ? 'Veuillez sélectionner au moins un engin maîtrisé'
+          : 'يرجى اختيار آلية واحدة على الأقل'
+      );
+      return;
+    }
+
     const cityName = MOROCCAN_CITIES.find((c) => c.id === cityId)?.name_ar || cityId;
-    const finalCompanyName = !isClient || isClientCompany ? companyName.trim() : '';
+    const finalCompanyName =
+      !isDriver && (!isClient || isClientCompany) ? companyName.trim() : '';
 
     setIsSubmitting(true);
 
@@ -130,7 +151,10 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
         client_segment: isClient ? clientSegment : undefined,
         client_activity_note:
           isClient && clientSegment === 'other' ? clientActivityNote.trim() : '',
-        ice_number: !isClient ? iceNumber.trim() : '',
+        driver_machines: isDriver ? driverMachines : undefined,
+        driver_experience_years: isDriver ? driverExperienceYears : undefined,
+        driver_available: isDriver ? driverAvailable : undefined,
+        ice_number: !isClient && !isDriver ? iceNumber.trim() : '',
         whatsapp_verified: true,
       };
 
@@ -202,15 +226,25 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
         <div className="bg-ink p-5 sm:p-6 text-white border-b-2 border-primary flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-primary text-ink flex items-center justify-center font-black shrink-0">
-              {isClient ? <Users className="w-5 h-5" /> : <Truck className="w-5 h-5" />}
+              {isDriver ? (
+                <HardHat className="w-5 h-5" />
+              ) : isClient ? (
+                <Users className="w-5 h-5" />
+              ) : (
+                <Truck className="w-5 h-5" />
+              )}
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h2 id="profile-settings-title" className="text-base sm:text-lg font-black text-white">
                   {lang === 'fr' ? 'Modifier mes informations personnelles' : 'تعديل معلوماتي الشخصية'}
                 </h2>
-                <Badge variant={isClient ? 'info' : 'warning'} className="text-[10px] font-bold">
-                  {isClient
+                <Badge variant={isDriver ? 'success' : isClient ? 'info' : 'warning'} className="text-[10px] font-bold">
+                  {isDriver
+                    ? lang === 'fr'
+                      ? 'Conducteur d’engins'
+                      : 'سائق آليات'
+                    : isClient
                     ? lang === 'fr'
                       ? currentSegmentMeta.labelFr
                       : currentSegmentMeta.labelAr
@@ -220,7 +254,11 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
                 </Badge>
               </div>
               <p className="text-[11px] text-steel-400 mt-0.5">
-                {isClient
+                {isDriver
+                  ? lang === 'fr'
+                    ? 'Gérez votre nom, ville, expérience et engins maîtrisés'
+                    : 'تحديث اسمك، مدينتك، سنوات الخبرة والآليات التي تحترفها'
+                  : isClient
                   ? lang === 'fr'
                     ? 'Gérez votre catégorie, nom, ville et numéro de contact'
                     : 'تحديث فئة نشاطك، اسمك، مدينتك ورقم الهاتف'
@@ -284,8 +322,8 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
           )}
 
           {/* Full Name & Optional Company Name */}
-          <div className={`grid grid-cols-1 ${!isClient || isClientCompany ? 'sm:grid-cols-2' : ''} gap-3.5`}>
-            {(!isClient || isClientCompany) && (
+          <div className={`grid grid-cols-1 ${!isDriver && (!isClient || isClientCompany) ? 'sm:grid-cols-2' : ''} gap-3.5`}>
+            {!isDriver && (!isClient || isClientCompany) && (
               <div>
                 <label className="text-xs font-bold text-steel-700 block mb-1.5 flex items-center gap-1.5">
                   <Building2 className="w-3.5 h-3.5 text-primary-dark" />
@@ -306,7 +344,7 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
               <label className="text-xs font-bold text-steel-700 block mb-1.5 flex items-center gap-1.5">
                 <User className="w-3.5 h-3.5 text-primary-dark" />
                 <span>
-                  {isClient && !isClientCompany
+                  {isDriver || (isClient && !isClientCompany)
                     ? lang === 'fr'
                       ? 'Nom complet'
                       : 'الاسم الكامل'
@@ -365,8 +403,64 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
             </div>
           </div>
 
-          {/* ICE Tax Field ONLY for machinery owners, NOT for clients */}
-          {!isClient && (
+          {/* Driver Specific Fields: Experience + Mastered Machines */}
+          {isDriver && (
+            <div className="space-y-3 pt-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-steel-700 block mb-1.5 flex items-center gap-1.5">
+                    <Award className="w-3.5 h-3.5 text-primary-dark" />
+                    <span>{lang === 'fr' ? 'Années d’expérience' : 'سنوات التجربة'}</span>
+                  </label>
+                  <Select
+                    value={driverExperienceYears}
+                    onChange={(e) => setDriverExperienceYears(e.target.value)}
+                    options={DRIVER_EXPERIENCE_LEVELS.map((exp) => ({
+                      value: exp.id,
+                      label: lang === 'fr' ? exp.labelFr : exp.labelAr,
+                    }))}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-steel-700 block mb-1.5">
+                    {lang === 'fr' ? 'Disponibilité' : 'حالة التوفر للعمل'}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setDriverAvailable((prev) => !prev)}
+                    className={`w-full min-h-[42px] px-3 rounded-xl border text-xs font-bold transition-colors cursor-pointer ${
+                      driverAvailable
+                        ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                        : 'bg-steel-100 border-steel-300 text-steel-700'
+                    }`}
+                  >
+                    {driverAvailable
+                      ? lang === 'fr'
+                        ? 'Disponible pour travailler'
+                        : 'متاح للعمل الآن'
+                      : lang === 'fr'
+                      ? 'Actuellement occupé'
+                      : 'مشغول حالياً'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-2xl bg-steel-50 border border-steel-200 space-y-2">
+                <label className="text-xs font-black text-ink block">
+                  {lang === 'fr' ? 'Engins que vous maîtrisez *' : 'الآليات التي تحترف قيادتها *'}
+                </label>
+                <DriverMachineChecklist
+                  selectedIds={driverMachines}
+                  onChange={setDriverMachines}
+                  compact
+                />
+              </div>
+            </div>
+          )}
+
+          {/* ICE Tax Field ONLY for machinery owners, NOT for clients or drivers */}
+          {!isClient && !isDriver && (
             <div>
               <label className="text-xs font-bold text-steel-700 block mb-1.5 flex items-center gap-1.5">
                 <FileCheck className="w-3.5 h-3.5 text-primary-dark" />

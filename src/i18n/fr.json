@@ -24,6 +24,8 @@
     "radar_map": "Radar Engins 📍",
     "my_rentals": "Mes Locations",
     "my_projects": "Sites & Projets",
+    "driver_portal": "Espace Conducteur",
+    "job_offers": "Offres d'emploi",
     "logout": "Déconnexion"
   },
   "landing": {
@@ -245,6 +247,8 @@
     "role_client": "Client / Locataire (Entreprise, Agriculteur, Artisan, Particulier...)",
     "role_client_desc": "Je cherche des engins pour mon projet, ma ferme ou mon terrain et contacte directement les loueurs",
     "role_contractor": "Client / Locataire d'engins",
+    "role_driver": "Conducteur d'engins / Chauffeur BTP",
+    "role_driver_desc": "Je conduis des engins de terrassement et cherche des offres de travail urgentes",
     "role_dealer": "Fournisseur de pièces de rechange",
     "phone": "Numéro de mobile marocain",
     "phone_placeholder": "06 XX XX XX XX ou 07 XX XX XX XX",

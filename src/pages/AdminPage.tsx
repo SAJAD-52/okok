@@ -294,7 +294,11 @@ export const AdminPage: React.FC = () => {
 
   const handleChangeRole = async (acc: AdminAccountDetail, newRole: UserRole) => {
     await adminService.changeUserRole(acc.id, newRole);
-    toast.success(`تم تغيير صفة الحساب إلى: ${newRole === 'owner' ? 'مالك آليات' : 'مقاولة بناء'}`);
+    toast.success(
+      `تم تغيير صفة الحساب إلى: ${
+        newRole === 'owner' ? 'مالك آليات' : newRole === 'driver' ? 'سائق آليات' : 'زبون / مقاولة'
+      }`
+    );
     loadPlatformData();
   };
 
@@ -310,7 +314,9 @@ export const AdminPage: React.FC = () => {
   const handleImpersonate = (acc: AdminAccountDetail) => {
     impersonateUser(acc);
     toast.success(`أنت الآن تتصفح المنصة بصلاحية: ${acc.company_name || acc.full_name}`);
-    if (acc.role === 'client' || acc.role === 'contractor') {
+    if (acc.role === 'driver') {
+      navigate('/driver');
+    } else if (acc.role === 'client' || acc.role === 'contractor') {
       navigate('/entreprise');
     } else {
       navigate('/owner');
@@ -653,7 +659,22 @@ export const AdminPage: React.FC = () => {
                         : 'bg-steel-100 text-steel-700 hover:bg-steel-200'
                     }`}
                   >
-                    🏢 المقاولات ({accounts.filter((a) => a.role === 'client' || a.role === 'contractor').length})
+                    🏢 الزبناء والمقاولات ({accounts.filter((a) => a.role === 'client' || a.role === 'contractor').length})
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFilterRole('driver');
+                      setFilterStatus('all');
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      filterRole === 'driver' && filterStatus === 'all'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'bg-steel-100 text-steel-700 hover:bg-steel-200'
+                    }`}
+                  >
+                    👷‍♂️ السائقون ({accounts.filter((a) => a.role === 'driver').length})
                   </button>
 
                   <button
@@ -708,18 +729,22 @@ export const AdminPage: React.FC = () => {
                     {/* User Identity info */}
                     <div className="flex items-start gap-3.5">
                       <div className="w-12 h-12 rounded-2xl bg-steel-100 border border-steel-200 flex items-center justify-center font-black text-ink text-sm shrink-0">
-                        {acc.role === 'owner' ? '🚜' : '🏢'}
+                        {acc.role === 'owner' ? '🚜' : acc.role === 'driver' ? '👷‍♂️' : '🏢'}
                       </div>
 
                       <div className="space-y-1.5">
                         <div className="flex flex-wrap items-center gap-2">
                           <h3 className="font-black text-sm text-ink">{acc.full_name}</h3>
                           <Badge
-                            variant={acc.role === 'owner' ? 'warning' : 'info'}
+                            variant={acc.role === 'owner' ? 'warning' : acc.role === 'driver' ? 'success' : 'info'}
                             size="sm"
                             className="font-black"
                           >
-                            {acc.role === 'owner' ? 'مالك آليات / مؤجر' : 'مقاولة بناء / زبون'}
+                            {acc.role === 'owner'
+                              ? 'مالك آليات / مؤجر'
+                              : acc.role === 'driver'
+                              ? 'سائق آليات ومعدات'
+                              : 'زبون / مقاولة'}
                           </Badge>
                           {acc.is_suspended ? (
                             <Badge variant="danger" size="sm" className="font-bold">

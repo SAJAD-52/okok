@@ -483,6 +483,7 @@ export interface DriverJobOffer {
   status: DriverJobOfferStatus;
   has_applied?: boolean;
   is_demo?: boolean;
+  matched_drivers_count?: number;
   created_at: string;
 }
 

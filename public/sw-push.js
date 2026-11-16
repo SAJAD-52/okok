@@ -34,6 +34,7 @@ async function writeCacheJson(keyReq, data) {
 }
 
 function getDefaultMessagesBase(userRole) {
+  if (userRole === 'driver') return '/driver/messages';
   return userRole === 'client' || userRole === 'contractor'
     ? '/entreprise/messages'
     : '/owner/messages';
@@ -42,10 +43,29 @@ function getDefaultMessagesBase(userRole) {
 async function displayShadeNotification(payload) {
   const ctx = await readCacheJson(PUSH_CTX_REQ, null);
   const isChat = payload.type === 'chat_message';
-  const title = payload.title || (isChat ? 'رسالة جديدة 💬' : 'فرصة جديدة 🎉');
-  const body = payload.body || (isChat ? 'لديك رسالة جديدة في المحادثة على JADIJCB' : 'طلب كراء آلية قريب من موقعك على JADIJCB');
-  const tag = payload.tag || ((isChat ? 'jadijcb-chat-' : 'jadijcb-dispatch-') + Date.now());
-  const defaultBase = getDefaultMessagesBase(ctx && ctx.userRole);
+  const isDriverOffer = payload.type === 'driver_job_offer';
+  const title =
+    payload.title ||
+    (isChat
+      ? 'رسالة جديدة 💬'
+      : isDriverOffer
+      ? 'عرض عمل عاجل لسائق 👷'
+      : 'فرصة جديدة 🎉');
+  const body =
+    payload.body ||
+    (isChat
+      ? 'لديك رسالة جديدة في المحادثة على JADIJCB'
+      : isDriverOffer
+      ? 'مالك آلية يبحث عن سائق محترف لآليتك على JADIJCB'
+      : 'طلب كراء آلية قريب من موقعك على JADIJCB');
+  const tag =
+    payload.tag ||
+    ((isChat
+      ? 'jadijcb-chat-'
+      : isDriverOffer
+      ? 'driver-offer-'
+      : 'jadijcb-dispatch-') + Date.now());
+  const defaultBase = isDriverOffer ? '/driver/joboffer' : getDefaultMessagesBase(ctx && ctx.userRole);
   const targetUrl = payload.url || defaultBase;
 
   try {
@@ -65,7 +85,14 @@ async function displayShadeNotification(payload) {
         ...(payload.data || {}),
       },
       actions: [
-        { action: 'open', title: isChat ? 'رد أو فتح المحادثة' : 'فتح المحادثة الآن' },
+        {
+          action: 'open',
+          title: isChat
+            ? 'رد أو فتح المحادثة'
+            : isDriverOffer
+            ? 'معاينة عرض العمل'
+            : 'فتح المحادثة الآن',
+        },
       ],
     });
   } catch {
@@ -80,6 +107,8 @@ async function checkBackgroundDispatchAlerts() {
 
   const userRole = (ctx && ctx.userRole) || 'owner';
   const isContractorRole = userRole === 'client' || userRole === 'contractor';
+  const isDriverRole = userRole === 'driver';
+  const driverMachines = Array.isArray(ctx && ctx.driverMachines) ? ctx.driverMachines : [];
   const messagesBase = getDefaultMessagesBase(userRole);
 
   const seenIds = await readCacheJson(PUSH_SEEN_REQ, []);
@@ -97,7 +126,7 @@ async function checkBackgroundDispatchAlerts() {
       const list = Array.isArray(json.notifications) ? json.notifications : [];
       for (const n of list) {
         if (!n || n.is_read) continue;
-        if (n.type === 'dispatch_opportunity' && !isContractorRole && !seenSet.has(n.id)) {
+        if (n.type === 'dispatch_opportunity' && !isContractorRole && !isDriverRole && !seenSet.has(n.id)) {
           newlyFound.push({
             id: n.id,
             type: 'dispatch_opportunity',
@@ -106,6 +135,18 @@ async function checkBackgroundDispatchAlerts() {
             tag: (n.data && n.data.campaign_id) || n.id,
             url: `/owner/messages?target=${(n.data && n.data.contractor_id) || ''}&machine=${(n.data && n.data.machine_id) || ''}&campaign=${(n.data && n.data.campaign_id) || ''}`,
           });
+        } else if (n.type === 'driver_job_offer' && isDriverRole && !seenSet.has(n.id)) {
+          const offerKey = (n.data && n.data.offer_id) ? `driver-offer-${n.data.offer_id}` : n.id;
+          if (!seenSet.has(offerKey)) {
+            newlyFound.push({
+              id: n.id,
+              type: 'driver_job_offer',
+              title: n.title_ar || 'عرض عمل عاجل لسائق 👷',
+              body: n.body_ar || 'مالك آلية يبحث عن سائق محترف لآليتك على JADIJCB',
+              tag: offerKey,
+              url: '/driver/joboffer',
+            });
+          }
         } else if (n.type === 'chat_message') {
           const msgKey = (n.data && n.data.message_id) || n.id;
           if (!seenSet.has(n.id) && !seenSet.has(msgKey)) {
@@ -144,7 +185,7 @@ async function checkBackgroundDispatchAlerts() {
         if (Array.isArray(rows)) {
           for (const r of rows) {
             const d = r.data || {};
-            if (r.type === 'dispatch_opportunity' && !isContractorRole) {
+            if (r.type === 'dispatch_opportunity' && !isContractorRole && !isDriverRole) {
               const key = d.campaign_id || r.id;
               if (!seenSet.has(r.id) && !seenSet.has(key)) {
                 newlyFound.push({
@@ -156,6 +197,20 @@ async function checkBackgroundDispatchAlerts() {
                     `«${d.company_name || 'مقاولة'}» محتاجة «${d.machine_name || 'آلية'}» ديالك`,
                   tag: key,
                   url: `/owner/messages?target=${d.contractor_id || ''}&machine=${d.machine_id || ''}&campaign=${d.campaign_id || ''}`,
+                });
+              }
+            } else if (r.type === 'driver_job_offer' && isDriverRole) {
+              const key = d.offer_id ? `driver-offer-${d.offer_id}` : r.id;
+              if (!seenSet.has(r.id) && !seenSet.has(key)) {
+                newlyFound.push({
+                  id: r.id,
+                  type: 'driver_job_offer',
+                  title: r.title_ar || 'عرض عمل عاجل لسائق 👷',
+                  body:
+                    r.body_ar ||
+                    `مطلوب سائق: ${d.machine_label_ar || 'آلية بناء'} · ${d.offered_salary || ''} درهم`,
+                  tag: key,
+                  url: '/driver/joboffer',
                 });
               }
             } else if (r.type === 'chat_message') {
@@ -179,7 +234,7 @@ async function checkBackgroundDispatchAlerts() {
       // ignore
     }
 
-    if (!isContractorRole) {
+    if (!isContractorRole && !isDriverRole) {
       try {
         const dispUrl = `${ctx.supabaseUrl}/rest/v1/dispatch_notifications?owner_id=eq.${encodeURIComponent(
           activeUserId
@@ -207,11 +262,51 @@ async function checkBackgroundDispatchAlerts() {
         // ignore
       }
     }
+
+    if (isDriverRole) {
+      try {
+        const drvOffersUrl = `${ctx.supabaseUrl}/rest/v1/driver_job_offers?status=eq.open&order=created_at.desc&limit=10`;
+        const res = await fetch(drvOffersUrl, { headers, cache: 'no-store' });
+        if (res.ok) {
+          const rows = await res.json();
+          if (Array.isArray(rows)) {
+            for (const o of rows) {
+              const matchesMachine =
+                driverMachines.length === 0 || driverMachines.includes(o.machine_category);
+              const tag = `driver-offer-${o.id}`;
+              if (matchesMachine && !seenSet.has(o.id) && !seenSet.has(tag)) {
+                const salaryText =
+                  Number(o.offered_salary) > 0
+                    ? `${Number(o.offered_salary).toLocaleString('fr-FR')} درهم/${o.salary_unit === 'month' ? 'شهر' : 'يوم'}`
+                    : '';
+                newlyFound.push({
+                  id: o.id,
+                  type: 'driver_job_offer',
+                  title: `فرصة عمل لسائق: ${o.machine_label_ar} 👷`,
+                  body: [salaryText, o.duration_label, o.owner_company || o.owner_name]
+                    .filter(Boolean)
+                    .join(' · '),
+                  tag,
+                  url: '/driver/joboffer',
+                });
+              }
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
   }
 
   for (const item of newlyFound) {
     seenSet.add(item.id);
-    if (item.tag && item.type === 'dispatch_opportunity') seenSet.add(item.tag);
+    if (
+      item.tag &&
+      (item.type === 'dispatch_opportunity' || item.type === 'driver_job_offer')
+    ) {
+      seenSet.add(item.tag);
+    }
     await displayShadeNotification(item);
   }
 
@@ -289,7 +384,21 @@ self.addEventListener('sync', (event) => {
 self.addEventListener('message', (event) => {
   const msg = event.data || {};
   if (msg.type === 'SET_PUSH_CONTEXT' && msg.payload) {
-    event.waitUntil(writeCacheJson(PUSH_CTX_REQ, msg.payload));
+    event.waitUntil(
+      (async () => {
+        const prev = await readCacheJson(PUSH_CTX_REQ, {});
+        const mergedPayload = {
+          ...(prev && typeof prev === 'object' ? prev : {}),
+          ...msg.payload,
+          driverMachines: Array.isArray(msg.payload.driverMachines)
+            ? msg.payload.driverMachines
+            : Array.isArray(prev && prev.driverMachines)
+            ? prev.driverMachines
+            : [],
+        };
+        await writeCacheJson(PUSH_CTX_REQ, mergedPayload);
+      })()
+    );
   } else if (msg.type === 'MARK_PUSH_SEEN' && msg.key) {
     event.waitUntil(
       (async () => {

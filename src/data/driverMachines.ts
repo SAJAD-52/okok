@@ -279,3 +279,96 @@ export function getDriverExperienceOption(id?: string): ExperienceOption {
     DRIVER_EXPERIENCE_LEVELS.find((e) => e.id === id) || DRIVER_EXPERIENCE_LEVELS[2]
   );
 }
+
+export function inferDriverMachineCategory(machine?: {
+  category?: string;
+  category_id?: string;
+  title_ar?: string;
+  title_fr?: string;
+  brand?: string;
+  model?: string;
+} | null): string {
+  if (!machine) return 'tractopelle';
+  const cat = String(machine.category || machine.category_id || '').toLowerCase();
+  const hay = `${cat} ${machine.title_ar || ''} ${machine.title_fr || ''} ${machine.brand || ''} ${
+    machine.model || ''
+  }`.toLowerCase();
+
+  if (
+    hay.includes('tractopelle') ||
+    hay.includes('3cx') ||
+    hay.includes('4cx') ||
+    hay.includes('كاسكاطور') ||
+    hay.includes('تراكتور بيل')
+  ) {
+    return 'tractopelle';
+  }
+  if (hay.includes('mini-pelle') || hay.includes('mini pelle') || hay.includes('ميني بيل')) {
+    return 'mini_pelle';
+  }
+  if (hay.includes('brh') || hay.includes('مطرقة') || hay.includes('تكسير')) {
+    return 'brise_roche_carriere';
+  }
+  if (hay.includes('bobcat') || hay.includes('بوبكات') || hay.includes('mini-chargeuse')) {
+    return 'bobcat';
+  }
+  if (hay.includes('niveleuse') || hay.includes('grader') || hay.includes('نيفيلوز')) {
+    return 'niveleuse';
+  }
+  if (hay.includes('finisseur') || hay.includes('فينيسور') || hay.includes('enrobé')) {
+    return 'finisseur';
+  }
+  if (hay.includes('fraiseuse') || hay.includes('فريزوز')) {
+    return 'fraiseuse_route';
+  }
+  if (hay.includes('manitou') || hay.includes('telescopique') || hay.includes('تيليسكوبيك') || hay.includes('مانيتو')) {
+    return 'manitou';
+  }
+  if (hay.includes('porte-char') || hay.includes('بورت شار') || hay.includes('رمورك')) {
+    return 'porte_char';
+  }
+  if (hay.includes('pompe') || hay.includes('مضخة')) {
+    return 'pompe_beton';
+  }
+  if (hay.includes('foreuse') || hay.includes('sondeuse') || hay.includes('حفر الآبار')) {
+    return 'foreuse';
+  }
+  if (hay.includes('pneus') || hay.includes('مدولبة') || hay.includes('عجلات')) {
+    if (cat === 'excavator' || hay.includes('pelle') || hay.includes('حفارة') || hay.includes('بوكلان')) {
+      return 'pelle_pneus';
+    }
+  }
+  if (cat === 'excavator' || hay.includes('pelle') || hay.includes('بوكلان') || hay.includes('حفارة')) {
+    return 'pelle_chenilles';
+  }
+  if (hay.includes('chargeuse') || hay.includes('شارجور') || cat === 'loader') {
+    return hay.includes('jcb') ? 'tractopelle' : 'chargeuse';
+  }
+  if (cat === 'bulldozer' || hay.includes('bulldozer') || hay.includes('بلدوزر')) {
+    return 'bulldozer';
+  }
+  if (cat === 'compactor' || hay.includes('compacteur') || hay.includes('كومباكتور') || hay.includes('مدحلة')) {
+    return 'compacteur';
+  }
+  if (cat === 'forklift' || hay.includes('chariot') || hay.includes('clark') || hay.includes('شاريو')) {
+    return 'chariot_elevateur';
+  }
+  if (cat === 'crane' || hay.includes('grue') || hay.includes('رافعة')) {
+    if (hay.includes('tour') || hay.includes('برجية')) return 'grue_tour';
+    if (hay.includes('camion') || hay.includes('hiab')) return 'camion_grue';
+    return 'grue_mobile';
+  }
+  if (cat === 'concrete-mixer' || hay.includes('toupie') || hay.includes('malaxeur') || hay.includes('خلاطة')) {
+    return 'camion_toupie';
+  }
+  if (cat === 'truck' || hay.includes('benne') || hay.includes('شاحنة')) {
+    return 'camion_benne';
+  }
+  if (hay.includes('tracteur') || hay.includes('جرار')) {
+    return 'tracteur_agricole';
+  }
+  if (hay.includes('moissonneuse') || hay.includes('حصاد')) {
+    return 'moissonneuse';
+  }
+  return 'pelle_chenilles';
+}

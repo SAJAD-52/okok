@@ -31,6 +31,7 @@ import { Logo } from '../ui/Logo';
 import { LanguageSwitcher } from '../ui/LanguageSwitcher';
 import { PWAInstallButton } from '../pwa/PWAInstallUI';
 import { OpportunityAlertListener } from '../pwa/OpportunityAlertListener';
+import { DriverOpportunityAlertListener } from '../pwa/DriverOpportunityAlertListener';
 import { ChatAlertListener } from '../pwa/ChatAlertListener';
 import { useLanguage } from '../../hooks/useLanguage';
 import { useAuth } from '../../hooks/useAuth';
@@ -904,7 +905,11 @@ export const DashboardLayout: React.FC = () => {
                                   unlockAudioContextNow();
                                   const targetUserId = profile?.id || user?.id || '';
                                   const targetRole = profile?.role || 'owner';
-                                  const perm = await registerOwnerPushNotifications(targetUserId, targetRole);
+                                  const perm = await registerOwnerPushNotifications(
+                                    targetUserId,
+                                    targetRole,
+                                    profile?.driver_machines
+                                  );
                                   setNotifPermission(perm);
                                   if (perm === 'granted') {
                                     playChatMessageSound();
@@ -1283,8 +1288,8 @@ export const DashboardLayout: React.FC = () => {
                 <p className="font-bold text-ink leading-snug">
                   {isDriver
                     ? lang === 'fr'
-                      ? 'Activez les alertes pour recevoir instantanément les offres urgentes de conducteurs avec tarif et ville sur votre mobile.'
-                      : 'فعّل إشعارات الهاتف ليصلك صوت وتنبيه فوري بعروض العمل العاجلة (نوع الآلية، الثمن والمدينة) فور إطلاقها.'
+                      ? 'Activez les alertes pour recevoir instantanément les offres urgentes de conducteurs avec tarif et durée même hors application.'
+                      : 'فعّل إشعارات الهاتف ليصلك صوت وتنبيه فوري بعروض العمل العاجلة (نوع الآلية، الثمن والمدة) فور إطلاقها حتى خارج التطبيق.'
                     : isContractor
                     ? lang === 'fr'
                       ? 'Activez les notifications pour recevoir les messages des propriétaires dans votre barre mobile même hors application.'
@@ -1300,7 +1305,11 @@ export const DashboardLayout: React.FC = () => {
                   onClick={async () => {
                     const targetUserId = profile?.id || user?.id || '';
                     const targetRole = profile?.role || 'owner';
-                    const perm = await registerOwnerPushNotifications(targetUserId, targetRole);
+                    const perm = await registerOwnerPushNotifications(
+                      targetUserId,
+                      targetRole,
+                      profile?.driver_machines
+                    );
                     setNotifPermission(perm);
                     if (perm === 'granted') {
                       if (isContractor) {
@@ -1769,6 +1778,19 @@ export const DashboardLayout: React.FC = () => {
         <OpportunityAlertListener
           ownerId={profile?.id || user?.id || ''}
           onNotificationsSync={setOpportunityNotifications}
+        />
+      )}
+
+      {/* Real-Time Driver Job Offer Listener (Audio + Push + Celebration Popup for Drivers) */}
+      {isDriver && (profile?.id || user?.id) && !(isSuperAdmin && !isImpersonating) && (
+        <DriverOpportunityAlertListener
+          driverId={profile?.id || user?.id || ''}
+          driverProfile={profile || null}
+          onOffersSync={() => {
+            fetchDriverJobOffers(profile?.id || user?.id || '').then((list) => {
+              setDriverOpenOffersCount(list.filter((o) => !o.has_applied).length);
+            });
+          }}
         />
       )}
 

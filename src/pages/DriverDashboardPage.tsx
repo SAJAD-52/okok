@@ -125,7 +125,7 @@ export const DriverDashboardPage: React.FC = () => {
   const handleEnableNotifications = async () => {
     unlockAudioContextNow();
     const uid = profile?.id || user?.id || '';
-    const perm = await registerOwnerPushNotifications(uid, 'driver');
+    const perm = await registerOwnerPushNotifications(uid, 'driver', driverMachines);
     setNotifPerm(perm);
     if (perm === 'granted') {
       playOpportunitySound();
@@ -136,8 +136,8 @@ export const DriverDashboardPage: React.FC = () => {
             : 'تم تفعيل تنبيهات السائق على هاتفك',
         body:
           lang === 'fr'
-            ? 'Vous recevrez les offres urgentes des propriétaires avec tarif et ville.'
-            : 'ستصلك إشعارات عروض العمل العاجلة من ملاك الآليات مع نوع الآلية والثمن والمدينة.',
+            ? 'Vous recevrez les offres urgentes des propriétaires avec tarif et durée.'
+            : 'ستصلك إشعارات عروض العمل العاجلة من ملاك الآليات مع نوع الآلية والثمن والمدة.',
         tag: 'jadijcb-driver-ready',
         url: '/driver/joboffer',
       }).catch(() => {});

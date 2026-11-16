@@ -867,8 +867,9 @@ app.get('/api/notifications', requireAuth, (req: AuthedRequest, res) => {
 
     if (effectiveUserId) {
       const roleStr = String(role || '');
-      const isContractorRole = roleStr === 'client' || roleStr === 'contractor';
-      if (isContractorRole) {
+      const isIsolatedRole =
+        roleStr === 'client' || roleStr === 'contractor' || roleStr === 'driver';
+      if (isIsolatedRole) {
         query += ` AND user_id = ?`;
       } else {
         query += ` AND (user_id = ? OR user_id = 'owner' OR user_id IS NULL OR user_id = '')`;
@@ -1405,7 +1406,10 @@ app.post('/api/messages', apiMutationLimiter, requireAuth, (req: AuthedRequest, 
       const titleFr = sender_name ? `Message de ${sender_name} 💬` : 'Nouveau message 💬';
       const isRecipientContractor =
         recipient_role === 'client' || recipient_role === 'contractor';
-      const targetUrl = isRecipientContractor
+      const isRecipientDriver = recipient_role === 'driver';
+      const targetUrl = isRecipientDriver
+        ? `/driver/messages?conv=${encodeURIComponent(String(conversation_id))}`
+        : isRecipientContractor
         ? `/entreprise/messages?conv=${encodeURIComponent(String(conversation_id))}`
         : `/owner/messages?conv=${encodeURIComponent(String(conversation_id))}`;
 

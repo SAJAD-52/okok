@@ -1,16 +1,45 @@
 // ============================================================================
-// JADIJCB: Driver Job Offers & Applications Service (/driver & /driver/joboffer)
-// Bridges Supabase driver_job_offers (live owner dispatch campaigns) with
-// instant BroadcastChannel / local persistence for immediate multi-tab updates.
+// JADIJCB: Driver Job Offers, Owner Driver Search Campaigns & Applications
+// Bridges Supabase driver_job_offers, notifications, Web Push VAPID, Express SSE,
+// and BroadcastChannel so drivers receive live audio + mobile shade alerts
+// even when outside the app or when the app is closed.
 // ============================================================================
 
 import { DriverJobOffer } from '../types/database';
 import { supabase, isSupabaseConfigured } from './supabase';
-import { showBrowserOpportunityNotification, playOpportunitySound } from './opportunityAudio';
+import { serverApi } from './serverApi';
+import { sendWebPushToUsers } from './pushService';
+import { getDriverMachineOption } from '../data/driverMachines';
 
 const LOCAL_DRIVER_OFFERS_KEY = 'jadijcb_driver_job_offers_cache';
 const LOCAL_APPLIED_MAP_KEY = 'jadijcb_driver_applied_offers_v1';
 const DRIVER_DISPATCH_CHANNEL = 'jadijcb_driver_dispatch';
+
+export interface MatchedDriverTarget {
+  id: string;
+  full_name: string;
+  phone: string;
+  city: string;
+  driver_experience_years?: string;
+  driver_machines: string[];
+}
+
+export interface DriverJobApplicationItem {
+  id: string;
+  offer_id: string;
+  driver_id: string;
+  driver_name: string;
+  driver_phone: string;
+  driver_city: string;
+  driver_experience: string;
+  note?: string;
+  status: string;
+  created_at: string;
+}
+
+export interface OwnerDriverOfferWithApps extends DriverJobOffer {
+  applications: DriverJobApplicationItem[];
+}
 
 // Starter reference job offers so newly registered drivers immediately see the structured offer format
 // alongside any live owner-launched urgent campaigns from Supabase.
@@ -158,10 +187,321 @@ function getLocalCachedOffers(): DriverJobOffer[] {
 
 function saveLocalCachedOffers(offers: DriverJobOffer[]) {
   try {
-    localStorage.setItem(LOCAL_DRIVER_OFFERS_KEY, JSON.stringify(offers.slice(0, 60)));
+    localStorage.setItem(LOCAL_DRIVER_OFFERS_KEY, JSON.stringify(offers.slice(0, 80)));
   } catch {
     // ignore
   }
+}
+
+function mapDbRowToDriverOffer(row: any): DriverJobOffer {
+  return {
+    id: row.id,
+    campaign_id: row.campaign_id || undefined,
+    owner_id: row.owner_id,
+    owner_name: row.owner_name || '',
+    owner_company: row.owner_company || '',
+    owner_phone: row.owner_phone || '',
+    machine_category: row.machine_category,
+    machine_label_ar: row.machine_label_ar,
+    machine_label_fr: row.machine_label_fr || row.machine_label_ar,
+    offered_salary: Number(row.offered_salary) || 0,
+    salary_unit: row.salary_unit === 'month' ? 'month' : 'day',
+    city: row.city || 'المغرب (جميع المدن)',
+    work_location_note: row.work_location_note || '',
+    duration_label: row.duration_label || '',
+    is_urgent: Boolean(row.is_urgent),
+    accommodation_included: Boolean(row.accommodation_included),
+    meals_included: Boolean(row.meals_included),
+    experience_required: row.experience_required || '',
+    description_ar: row.description_ar || '',
+    description_fr: row.description_fr || '',
+    status: row.status || 'open',
+    is_demo: false,
+    created_at: row.created_at,
+  };
+}
+
+/**
+ * Finds all registered drivers across Morocco whose selected driver_machines include `machineCategory`
+ * (no city/location filtering so the alert reaches every driver registered for that machine).
+ */
+export async function findMatchingDriversForOffer(
+  machineCategory: string,
+  excludeOwnerId?: string
+): Promise<MatchedDriverTarget[]> {
+  if (!machineCategory) return [];
+  const results: MatchedDriverTarget[] = [];
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select(
+          'id, full_name, phone, phone_number, city, role, driver_machines, driver_experience_years, driver_available'
+        )
+        .contains('driver_machines', [machineCategory])
+        .limit(200);
+
+      if (!error && Array.isArray(data)) {
+        for (const row of data as any[]) {
+          if (!row?.id) continue;
+          if (excludeOwnerId && row.id === excludeOwnerId) continue;
+          if (row.driver_available === false) continue;
+          const machines: string[] = Array.isArray(row.driver_machines) ? row.driver_machines : [];
+          if (!machines.includes(machineCategory)) continue;
+          results.push({
+            id: row.id,
+            full_name: row.full_name || 'سائق محترف',
+            phone: row.phone || row.phone_number || '',
+            city: row.city || 'المغرب',
+            driver_experience_years: row.driver_experience_years || undefined,
+            driver_machines: machines,
+          });
+        }
+      }
+    } catch {
+      // Fallback if driver_machines column has not been migrated yet
+    }
+  }
+
+  return results;
+}
+
+export async function launchDriverSearchCampaign(params: {
+  ownerId: string;
+  ownerName: string;
+  ownerCompany?: string;
+  ownerPhone?: string;
+  machineCategory: string;
+  machineTitle?: string;
+  offeredSalary: number;
+  salaryUnit: 'day' | 'month';
+  durationLabel: string;
+  experienceRequired?: string;
+  accommodationIncluded: boolean;
+  mealsIncluded: boolean;
+  isUrgent: boolean;
+  descriptionAr?: string;
+}): Promise<{
+  offer: DriverJobOffer;
+  matchedDrivers: MatchedDriverTarget[];
+  persistedToSupabase: boolean;
+}> {
+  const machineMeta = getDriverMachineOption(params.machineCategory);
+  const matchedDrivers = await findMatchingDriversForOffer(
+    params.machineCategory,
+    params.ownerId
+  );
+
+  const offerId =
+    typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `drv_offer_${Date.now()}`;
+  const campaignId = `drv_camp_${Date.now()}`;
+  const now = new Date().toISOString();
+
+  const labelAr = params.machineTitle
+    ? `${machineMeta.labelAr} (${params.machineTitle})`
+    : machineMeta.labelAr;
+  const labelFr = params.machineTitle
+    ? `${machineMeta.labelFr} (${params.machineTitle})`
+    : machineMeta.labelFr;
+
+  const newOffer: DriverJobOffer = {
+    id: offerId,
+    campaign_id: campaignId,
+    owner_id: params.ownerId,
+    owner_name: params.ownerName,
+    owner_company: params.ownerCompany || params.ownerName,
+    owner_phone: params.ownerPhone || '',
+    machine_category: params.machineCategory,
+    machine_label_ar: labelAr,
+    machine_label_fr: labelFr,
+    offered_salary: Number(params.offeredSalary) || 0,
+    salary_unit: params.salaryUnit,
+    city: 'المغرب (جميع المدن)',
+    work_location_note: '',
+    duration_label: params.durationLabel.trim(),
+    is_urgent: params.isUrgent,
+    accommodation_included: params.accommodationIncluded,
+    meals_included: params.mealsIncluded,
+    experience_required: params.experienceRequired || '',
+    description_ar: (params.descriptionAr || '').trim(),
+    description_fr: (params.descriptionAr || '').trim(),
+    status: 'open',
+    is_demo: false,
+    matched_drivers_count: matchedDrivers.length,
+    created_at: now,
+  };
+
+  let persistedToSupabase = false;
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('driver_job_offers')
+        .insert({
+          id: newOffer.id,
+          campaign_id: newOffer.campaign_id,
+          owner_id: newOffer.owner_id,
+          owner_name: newOffer.owner_name,
+          owner_company: newOffer.owner_company,
+          owner_phone: newOffer.owner_phone,
+          machine_category: newOffer.machine_category,
+          machine_label_ar: newOffer.machine_label_ar,
+          machine_label_fr: newOffer.machine_label_fr,
+          offered_salary: newOffer.offered_salary,
+          salary_unit: newOffer.salary_unit,
+          city: newOffer.city,
+          work_location_note: newOffer.work_location_note,
+          duration_label: newOffer.duration_label,
+          is_urgent: newOffer.is_urgent,
+          accommodation_included: newOffer.accommodation_included,
+          meals_included: newOffer.meals_included,
+          experience_required: newOffer.experience_required,
+          description_ar: newOffer.description_ar,
+          description_fr: newOffer.description_fr,
+          status: 'open',
+        })
+        .select()
+        .maybeSingle();
+
+      if (!error) {
+        persistedToSupabase = true;
+        if (data?.id) {
+          newOffer.id = data.id;
+          newOffer.created_at = data.created_at || now;
+        }
+      }
+    } catch {
+      // Fallback to notifications + local cache if driver_job_offers table not migrated yet
+    }
+  }
+
+  const salaryStr =
+    newOffer.offered_salary > 0
+      ? `${newOffer.offered_salary.toLocaleString('fr-FR')} درهم/${
+          newOffer.salary_unit === 'month' ? 'شهر' : 'يوم'
+        }`
+      : 'حسب الاتفاق';
+  const titleAr = `عرض عمل عاجل لسائق: ${machineMeta.labelAr} 👷`;
+  const titleFr = `Offre urgente conducteur : ${machineMeta.labelFr} 👷`;
+  const bodyAr = [
+    `الأجر: ${salaryStr}`,
+    newOffer.duration_label ? `المدة: ${newOffer.duration_label}` : '',
+    newOffer.accommodation_included ? 'السكن متوفر' : '',
+    `من طرف: ${newOffer.owner_company || newOffer.owner_name}`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const bodyFr = [
+    `Tarif : ${
+      newOffer.offered_salary > 0
+        ? `${newOffer.offered_salary.toLocaleString('fr-FR')} MAD/${
+            newOffer.salary_unit === 'month' ? 'mois' : 'jour'
+          }`
+        : 'À négocier'
+    }`,
+    newOffer.duration_label ? `Durée : ${newOffer.duration_label}` : '',
+    newOffer.accommodation_included ? 'Logement inclus' : '',
+    newOffer.owner_company || newOffer.owner_name,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  const notifDataPayload = {
+    offer_id: newOffer.id,
+    campaign_id: newOffer.campaign_id,
+    owner_id: newOffer.owner_id,
+    owner_name: newOffer.owner_name,
+    owner_company: newOffer.owner_company,
+    owner_phone: newOffer.owner_phone,
+    machine_category: newOffer.machine_category,
+    machine_label_ar: newOffer.machine_label_ar,
+    machine_label_fr: newOffer.machine_label_fr,
+    offered_salary: newOffer.offered_salary,
+    salary_unit: newOffer.salary_unit,
+    city: newOffer.city,
+    duration_label: newOffer.duration_label,
+    experience_required: newOffer.experience_required,
+    accommodation_included: newOffer.accommodation_included,
+    meals_included: newOffer.meals_included,
+    description_ar: newOffer.description_ar,
+    is_urgent: newOffer.is_urgent,
+    url: '/driver/joboffer',
+  };
+
+  if (matchedDrivers.length > 0) {
+    const matchedIds = matchedDrivers.map((d) => d.id);
+
+    // 1. Supabase notifications insert for every matching driver
+    if (isSupabaseConfigured) {
+      const notifRows = matchedIds.map((driverId) => ({
+        user_id: driverId,
+        title_ar: titleAr,
+        title_fr: titleFr,
+        body_ar: bodyAr,
+        body_fr: bodyFr,
+        type: 'driver_job_offer',
+        is_read: false,
+        data: notifDataPayload,
+      }));
+      try {
+        const { error: notifErr } = await supabase.from('notifications').insert(notifRows);
+        if (!notifErr) {
+          persistedToSupabase = true;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    // 2. Express SQLite + SSE notifications for connected driver sessions
+    Promise.allSettled(
+      matchedIds.map((driverId) =>
+        serverApi.createNotification({
+          user_id: driverId,
+          title_ar: titleAr,
+          title_fr: titleFr,
+          body_ar: bodyAr,
+          body_fr: bodyFr,
+          type: 'driver_job_offer',
+          data: notifDataPayload,
+        })
+      )
+    ).catch(() => {});
+
+    // 3. Background OS Web Push VAPID (wakes closed/backgrounded driver phones)
+    sendWebPushToUsers({
+      userIds: matchedIds,
+      id: newOffer.id,
+      type: 'driver_job_offer',
+      title: titleAr,
+      body: bodyAr,
+      tag: `driver-offer-${newOffer.id}`,
+      url: '/driver/joboffer',
+    }).catch(() => {});
+  }
+
+  // 4. Local cache + BroadcastChannel instant sync across tabs
+  const existing = getLocalCachedOffers();
+  saveLocalCachedOffers([newOffer, ...existing.filter((o) => o.id !== newOffer.id)]);
+
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      const bc = new BroadcastChannel(DRIVER_DISPATCH_CHANNEL);
+      bc.postMessage({ type: 'NEW_DRIVER_OFFER', offer: newOffer });
+      bc.close();
+    }
+  } catch {
+    // ignore
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('jadijcb_driver_offers_updated', { detail: newOffer }));
+  }
+
+  return { offer: newOffer, matchedDrivers, persistedToSupabase };
 }
 
 export async function fetchDriverJobOffers(driverId?: string): Promise<DriverJobOffer[]> {
@@ -179,31 +519,7 @@ export async function fetchDriverJobOffers(driverId?: string): Promise<DriverJob
         .limit(50);
 
       if (!error && Array.isArray(data)) {
-        dbOffers = data.map((row: any) => ({
-          id: row.id,
-          campaign_id: row.campaign_id || undefined,
-          owner_id: row.owner_id,
-          owner_name: row.owner_name || '',
-          owner_company: row.owner_company || '',
-          owner_phone: row.owner_phone || '',
-          machine_category: row.machine_category,
-          machine_label_ar: row.machine_label_ar,
-          machine_label_fr: row.machine_label_fr || row.machine_label_ar,
-          offered_salary: Number(row.offered_salary) || 0,
-          salary_unit: row.salary_unit === 'month' ? 'month' : 'day',
-          city: row.city || 'الدار البيضاء',
-          work_location_note: row.work_location_note || '',
-          duration_label: row.duration_label || '',
-          is_urgent: Boolean(row.is_urgent),
-          accommodation_included: Boolean(row.accommodation_included),
-          meals_included: Boolean(row.meals_included),
-          experience_required: row.experience_required || '',
-          description_ar: row.description_ar || '',
-          description_fr: row.description_fr || '',
-          status: row.status || 'open',
-          is_demo: false,
-          created_at: row.created_at,
-        }));
+        dbOffers = data.map(mapDbRowToDriverOffer);
       }
 
       if (driverId) {
@@ -222,7 +538,7 @@ export async function fetchDriverJobOffers(driverId?: string): Promise<DriverJob
     }
   }
 
-  const localOffers = getLocalCachedOffers();
+  const localOffers = getLocalCachedOffers().filter((o) => o.status === 'open');
   const mergedMap = new Map<string, DriverJobOffer>();
 
   for (const offer of [...dbOffers, ...localOffers, ...STARTER_DRIVER_OFFERS]) {
@@ -237,6 +553,112 @@ export async function fetchDriverJobOffers(driverId?: string): Promise<DriverJob
   return Array.from(mergedMap.values()).sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   );
+}
+
+export async function fetchOwnerDriverOffers(
+  ownerId: string
+): Promise<OwnerDriverOfferWithApps[]> {
+  if (!ownerId) return [];
+  const merged = new Map<string, OwnerDriverOfferWithApps>();
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('driver_job_offers')
+        .select('*')
+        .eq('owner_id', ownerId)
+        .order('created_at', { ascending: false })
+        .limit(30);
+
+      if (!error && Array.isArray(data)) {
+        const offerIds = data.map((r: any) => r.id).filter(Boolean);
+        let appsByOffer: Record<string, DriverJobApplicationItem[]> = {};
+
+        if (offerIds.length > 0) {
+          const { data: appRows } = await supabase
+            .from('driver_job_applications')
+            .select('*')
+            .in('offer_id', offerIds)
+            .order('created_at', { ascending: false });
+
+          if (Array.isArray(appRows)) {
+            appsByOffer = appRows.reduce((acc: Record<string, DriverJobApplicationItem[]>, a: any) => {
+              const key = a.offer_id;
+              if (!acc[key]) acc[key] = [];
+              acc[key].push({
+                id: a.id,
+                offer_id: a.offer_id,
+                driver_id: a.driver_id,
+                driver_name: a.driver_name || 'سائق',
+                driver_phone: a.driver_phone || '',
+                driver_city: a.driver_city || '',
+                driver_experience: a.driver_experience || '',
+                note: a.note || '',
+                status: a.status || 'pending',
+                created_at: a.created_at,
+              });
+              return acc;
+            }, {});
+          }
+        }
+
+        for (const row of data) {
+          const mapped = mapDbRowToDriverOffer(row);
+          merged.set(mapped.id, {
+            ...mapped,
+            applications: appsByOffer[mapped.id] || [],
+          });
+        }
+      }
+    } catch {
+      // ignore if table not migrated
+    }
+  }
+
+  const localMine = getLocalCachedOffers().filter((o) => o.owner_id === ownerId);
+  for (const o of localMine) {
+    if (!merged.has(o.id)) {
+      merged.set(o.id, { ...o, applications: [] });
+    } else if (o.matched_drivers_count && !merged.get(o.id)!.matched_drivers_count) {
+      merged.get(o.id)!.matched_drivers_count = o.matched_drivers_count;
+    }
+  }
+
+  return Array.from(merged.values()).sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
+}
+
+export async function closeDriverJobOffer(offerId: string): Promise<void> {
+  if (isSupabaseConfigured) {
+    try {
+      await supabase
+        .from('driver_job_offers')
+        .update({ status: 'closed' })
+        .eq('id', offerId);
+    } catch {
+      // ignore
+    }
+  }
+
+  const existing = getLocalCachedOffers();
+  saveLocalCachedOffers(
+    existing.map((o) => (o.id === offerId ? { ...o, status: 'closed' } : o))
+  );
+
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      const bc = new BroadcastChannel(DRIVER_DISPATCH_CHANNEL);
+      bc.postMessage({ type: 'DRIVER_OFFER_CLOSED', offerId });
+      bc.close();
+    }
+  } catch {
+    // ignore
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('jadijcb_driver_offers_updated'));
+  }
 }
 
 export async function applyToDriverJobOffer(params: {
@@ -270,12 +692,17 @@ export async function applyToDriverJobOffer(params: {
 
       // Notify the equipment owner when a driver expresses interest
       if (offer.owner_id && !offer.owner_id.startsWith('starter-')) {
+        const titleAr = `سائق مهتم بعرض ${offer.machine_label_ar} 👷`;
+        const titleFr = `Conducteur intéressé · ${offer.machine_label_fr || offer.machine_label_ar} 👷`;
+        const bodyAr = `${driverName} (${driverCity}) قدّم طلباً لقيادة الآلية في عرضك.`;
+        const bodyFr = `${driverName} (${driverCity}) a postulé à votre offre de conducteur.`;
+
         await supabase.from('notifications').insert({
           user_id: offer.owner_id,
-          title_ar: `سائق مهتم بعرض ${offer.machine_label_ar} 👷`,
-          title_fr: `Conducteur intéressé · ${offer.machine_label_fr || offer.machine_label_ar} 👷`,
-          body_ar: `${driverName} (${driverCity}) قدّم طلباً لقيادة الآلية في عرضك.`,
-          body_fr: `${driverName} (${driverCity}) a postulé à votre offre de conducteur.`,
+          title_ar: titleAr,
+          title_fr: titleFr,
+          body_ar: bodyAr,
+          body_fr: bodyFr,
           type: 'driver_application',
           data: {
             offer_id: offer.id,
@@ -283,108 +710,64 @@ export async function applyToDriverJobOffer(params: {
             driver_phone: driverPhone,
           },
         });
+
+        sendWebPushToUsers({
+          userIds: [offer.owner_id],
+          id: `drv-app-${offer.id}-${driverId}`,
+          type: 'driver_application',
+          title: titleAr,
+          body: bodyAr,
+          tag: `drv-app-${offer.id}-${driverId}`,
+          url: '/owner/machines',
+        }).catch(() => {});
       }
     } catch {
       // ignore if migration not yet applied
     }
   }
 
-  window.dispatchEvent(new CustomEvent('jadijcb_driver_offers_updated'));
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('jadijcb_driver_offers_updated'));
+  }
   return { success: true };
 }
 
-/**
- * Foundation helper for upcoming urgent owner-launched driver hiring campaigns.
- * Stores offer, broadcasts via BroadcastChannel, and alerts matching drivers.
- */
-export async function broadcastUrgentDriverOffer(offerInput: Omit<DriverJobOffer, 'id' | 'created_at' | 'status'>): Promise<DriverJobOffer> {
-  const newOffer: DriverJobOffer = {
-    ...offerInput,
-    id:
-      typeof crypto !== 'undefined' && crypto.randomUUID
-        ? crypto.randomUUID()
-        : `drv_offer_${Date.now()}`,
+export function mapNotificationRowToDriverOffer(row: any): DriverJobOffer | null {
+  if (!row || row.type !== 'driver_job_offer') return null;
+  const d = row.data || {};
+  if (!d.offer_id && !row.id) return null;
+
+  return {
+    id: d.offer_id || row.id,
+    campaign_id: d.campaign_id || undefined,
+    owner_id: d.owner_id || '',
+    owner_name: d.owner_name || 'مالك آليات',
+    owner_company: d.owner_company || d.owner_name || '',
+    owner_phone: d.owner_phone || '',
+    machine_category: d.machine_category || 'tractopelle',
+    machine_label_ar: d.machine_label_ar || row.title_ar || 'آلية بناء',
+    machine_label_fr: d.machine_label_fr || d.machine_label_ar || 'Engin BTP',
+    offered_salary: Number(d.offered_salary) || 0,
+    salary_unit: d.salary_unit === 'month' ? 'month' : 'day',
+    city: d.city || 'المغرب (جميع المدن)',
+    work_location_note: '',
+    duration_label: d.duration_label || '',
+    is_urgent: d.is_urgent !== false,
+    accommodation_included: Boolean(d.accommodation_included),
+    meals_included: Boolean(d.meals_included),
+    experience_required: d.experience_required || '',
+    description_ar: d.description_ar || row.body_ar || '',
+    description_fr: d.description_ar || row.body_fr || '',
     status: 'open',
     is_demo: false,
-    created_at: new Date().toISOString(),
+    created_at: row.created_at || new Date().toISOString(),
   };
-
-  if (isSupabaseConfigured) {
-    try {
-      const { data } = await supabase
-        .from('driver_job_offers')
-        .insert({
-          campaign_id: newOffer.campaign_id,
-          owner_id: newOffer.owner_id,
-          owner_name: newOffer.owner_name,
-          owner_company: newOffer.owner_company,
-          owner_phone: newOffer.owner_phone,
-          machine_category: newOffer.machine_category,
-          machine_label_ar: newOffer.machine_label_ar,
-          machine_label_fr: newOffer.machine_label_fr,
-          offered_salary: newOffer.offered_salary,
-          salary_unit: newOffer.salary_unit,
-          city: newOffer.city,
-          work_location_note: newOffer.work_location_note,
-          duration_label: newOffer.duration_label,
-          is_urgent: newOffer.is_urgent,
-          accommodation_included: newOffer.accommodation_included,
-          meals_included: newOffer.meals_included,
-          experience_required: newOffer.experience_required,
-          description_ar: newOffer.description_ar,
-          description_fr: newOffer.description_fr,
-          status: 'open',
-        })
-        .select()
-        .maybeSingle();
-
-      if (data?.id) {
-        newOffer.id = data.id;
-        newOffer.created_at = data.created_at || newOffer.created_at;
-      }
-    } catch {
-      // Fallback to local cache when table is not yet created
-    }
-  }
-
-  const existing = getLocalCachedOffers();
-  saveLocalCachedOffers([newOffer, ...existing.filter((o) => o.id !== newOffer.id)]);
-
-  try {
-    if (typeof BroadcastChannel !== 'undefined') {
-      const bc = new BroadcastChannel(DRIVER_DISPATCH_CHANNEL);
-      bc.postMessage({ type: 'NEW_DRIVER_OFFER', offer: newOffer });
-      bc.close();
-    }
-  } catch {
-    // ignore
-  }
-
-  window.dispatchEvent(new CustomEvent('jadijcb_driver_offers_updated', { detail: newOffer }));
-  return newOffer;
 }
 
 export function subscribeDriverJobOffers(
   driverMachines: string[],
   onOffersChanged: (urgentOffer?: DriverJobOffer) => void
 ): () => void {
-  const handleNewOfferNotification = (offer: DriverJobOffer) => {
-    const matchesDriver =
-      driverMachines.length === 0 || driverMachines.includes(offer.machine_category);
-    if (matchesDriver && offer.is_urgent) {
-      playOpportunitySound();
-      showBrowserOpportunityNotification({
-        title: `عرض عمل عاجل لسائق: ${offer.machine_label_ar} 👷`,
-        body: `${offer.offered_salary.toLocaleString('fr-FR')} درهم/${
-          offer.salary_unit === 'month' ? 'شهر' : 'يوم'
-        } · ${offer.city} — ${offer.owner_company || offer.owner_name}`,
-        tag: `driver-offer-${offer.id}`,
-        url: '/driver/joboffer',
-      }).catch(() => {});
-    }
-    onOffersChanged(offer);
-  };
-
   let bc: BroadcastChannel | null = null;
   try {
     if (typeof BroadcastChannel !== 'undefined') {
@@ -396,7 +779,15 @@ export function subscribeDriverJobOffers(
           if (!existing.some((o) => o.id === offer.id)) {
             saveLocalCachedOffers([offer, ...existing]);
           }
-          handleNewOfferNotification(offer);
+          const matchesDriver =
+            driverMachines.length === 0 || driverMachines.includes(offer.machine_category);
+          onOffersChanged(matchesDriver ? offer : undefined);
+        } else if (ev.data?.type === 'DRIVER_OFFER_CLOSED' && ev.data?.offerId) {
+          const existing = getLocalCachedOffers();
+          saveLocalCachedOffers(
+            existing.map((o) => (o.id === ev.data.offerId ? { ...o, status: 'closed' } : o))
+          );
+          onOffersChanged();
         }
       };
     }
@@ -411,38 +802,23 @@ export function subscribeDriverJobOffers(
   if (isSupabaseConfigured) {
     try {
       rtChannel = supabase
-        .channel('driver_job_offers_live')
+        .channel(`driver_job_offers_feed_${Math.random().toString(36).slice(2, 7)}`)
         .on(
           'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'driver_job_offers' },
+          { event: '*', schema: 'public', table: 'driver_job_offers' },
           (payload: any) => {
-            const row = payload?.new;
-            if (!row?.id || row.status !== 'open') return;
-            const mapped: DriverJobOffer = {
-              id: row.id,
-              campaign_id: row.campaign_id || undefined,
-              owner_id: row.owner_id,
-              owner_name: row.owner_name || '',
-              owner_company: row.owner_company || '',
-              owner_phone: row.owner_phone || '',
-              machine_category: row.machine_category,
-              machine_label_ar: row.machine_label_ar,
-              machine_label_fr: row.machine_label_fr || row.machine_label_ar,
-              offered_salary: Number(row.offered_salary) || 0,
-              salary_unit: row.salary_unit === 'month' ? 'month' : 'day',
-              city: row.city || '',
-              work_location_note: row.work_location_note || '',
-              duration_label: row.duration_label || '',
-              is_urgent: Boolean(row.is_urgent),
-              accommodation_included: Boolean(row.accommodation_included),
-              meals_included: Boolean(row.meals_included),
-              experience_required: row.experience_required || '',
-              description_ar: row.description_ar || '',
-              description_fr: row.description_fr || '',
-              status: row.status || 'open',
-              created_at: row.created_at,
-            };
-            handleNewOfferNotification(mapped);
+            if (payload?.eventType === 'INSERT') {
+              const row = payload?.new;
+              if (row?.id && row.status === 'open') {
+                const mapped = mapDbRowToDriverOffer(row);
+                const matchesDriver =
+                  driverMachines.length === 0 ||
+                  driverMachines.includes(mapped.machine_category);
+                onOffersChanged(matchesDriver ? mapped : undefined);
+                return;
+              }
+            }
+            onOffersChanged();
           }
         )
         .subscribe();

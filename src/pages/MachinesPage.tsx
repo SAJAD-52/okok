@@ -28,6 +28,9 @@ import {
   XCircle,
   Handshake,
   CalendarCheck,
+  HardHat,
+  Phone,
+  Users,
 } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -41,11 +44,19 @@ import { Machine, ListingMode, DispatchCampaign } from '../types/database';
 import { formatPriceMAD } from '../data/rentalTerms';
 import { MachineStepperModal } from '../components/machines/MachineStepperModal';
 import { SparePartDispatchModal } from '../components/machines/SparePartDispatchModal';
+import { DriverDispatchModal } from '../components/machines/DriverDispatchModal';
 import {
   closeDispatchCampaign,
   fetchContractorCampaigns,
   subscribeLocalDispatchEvents,
 } from '../lib/dispatchService';
+import {
+  closeDriverJobOffer,
+  fetchOwnerDriverOffers,
+  OwnerDriverOfferWithApps,
+} from '../lib/driverOfferService';
+import { getDriverExperienceOption } from '../data/driverMachines';
+import { chatStore } from '../lib/chatStore';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { mapDatabaseError } from '../lib/errorHelpers';
 import { machineStore } from '../lib/machineStore';
@@ -63,7 +74,9 @@ export const MachinesPage: React.FC = () => {
   const [selectedMachineToEdit, setSelectedMachineToEdit] = useState<Machine | null>(null);
   const [isStepperOpen, setIsStepperOpen] = useState(false);
   const [spareDispatchMachine, setSpareDispatchMachine] = useState<Machine | null>(null);
+  const [driverDispatchMachine, setDriverDispatchMachine] = useState<Machine | null>(null);
   const [spareCampaigns, setSpareCampaigns] = useState<DispatchCampaign[]>([]);
+  const [driverCampaigns, setDriverCampaigns] = useState<OwnerDriverOfferWithApps[]>([]);
 
   // Fetch live machines from Supabase
   const loadMachines = useCallback(async () => {
@@ -206,6 +219,50 @@ export const MachinesPage: React.FC = () => {
     return () => {
       cancelled = true;
       unsubLocal();
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, [user?.id, profile?.id]);
+
+  // Load & sync owner's Driver Search Campaigns & Applications
+  useEffect(() => {
+    const ownerUid = user?.id || profile?.id;
+    if (!ownerUid) return;
+
+    let cancelled = false;
+    const loadDriverCampaigns = async () => {
+      const list = await fetchOwnerDriverOffers(ownerUid);
+      if (!cancelled) setDriverCampaigns(list);
+    };
+
+    loadDriverCampaigns();
+    const onLocalUpdated = () => loadDriverCampaigns();
+    window.addEventListener('jadijcb_driver_offers_updated', onLocalUpdated);
+
+    let channel: any = null;
+    if (isSupabaseConfigured) {
+      channel = supabase
+        .channel(`owner_driver_campaigns_${ownerUid}`)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'driver_job_applications' },
+          () => loadDriverCampaigns()
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'driver_job_offers',
+            filter: `owner_id=eq.${ownerUid}`,
+          },
+          () => loadDriverCampaigns()
+        )
+        .subscribe();
+    }
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('jadijcb_driver_offers_updated', onLocalUpdated);
       if (channel) supabase.removeChannel(channel);
     };
   }, [user?.id, profile?.id]);
@@ -714,26 +771,37 @@ export const MachinesPage: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Direct Spare-Part Live Search Campaign Button (for machinery rows) */}
+                  {/* Direct Driver & Spare-Part Live Search Campaign Buttons (for machinery rows) */}
                   {!isSpare && (
-                    <div className="mt-3 pt-3 border-t border-steel-100 flex flex-wrap items-center justify-between gap-2">
+                    <div className="mt-3 pt-3 border-t border-steel-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                       <span className="text-[11px] text-steel-500 font-medium">
                         {lang === 'fr'
-                          ? 'Besoin d’une pièce détachée urgente pour cet engin ?'
-                          : 'تحتاج قطعة غيار مستعجلة لهذه الآلية؟'}
+                          ? 'Besoin urgent d’un conducteur ou d’une pièce pour cet engin ?'
+                          : 'تحتاج سائقاً أو قطعة غيار مستعجلة لهذه الآلية؟'}
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => setSpareDispatchMachine(machine)}
-                        className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-ink hover:bg-steel-800 text-primary font-black text-xs border border-ink transition-all shadow-xs cursor-pointer min-h-[40px]"
-                      >
-                        <Radio className="w-4 h-4 shrink-0" />
-                        <span>
-                          {lang === 'fr'
-                            ? 'Lancer une campagne directe de pièce détachée'
-                            : 'أطلق حملة مباشرة للبحث عن قطعة غيار'}
-                        </span>
-                      </button>
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setDriverDispatchMachine(machine)}
+                          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-primary hover:bg-primary-hover text-ink font-black text-xs border border-ink/20 transition-all shadow-xs cursor-pointer min-h-[42px]"
+                        >
+                          <HardHat className="w-4 h-4 shrink-0" />
+                          <span>
+                            {lang === 'fr' ? 'Rechercher un conducteur' : 'إبحث عن سائق'}
+                          </span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setSpareDispatchMachine(machine)}
+                          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-ink hover:bg-steel-800 text-primary font-black text-xs border border-ink transition-all shadow-xs cursor-pointer min-h-[42px]"
+                        >
+                          <Radio className="w-4 h-4 shrink-0" />
+                          <span>
+                            {lang === 'fr' ? 'Rechercher une pièce' : 'إبحث عن قطعة غيار'}
+                          </span>
+                        </button>
+                      </div>
                     </div>
                   )}
                 </Card>
@@ -958,6 +1026,210 @@ export const MachinesPage: React.FC = () => {
         </div>
       )}
 
+      {/* Owner's Launched Driver Search Campaigns Tracker */}
+      {driverCampaigns.length > 0 && (
+        <div className="space-y-3 pt-2">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-base sm:text-lg font-black text-ink flex items-center gap-2">
+              <HardHat className="w-5 h-5 text-primary-dark shrink-0" />
+              <span>
+                {lang === 'fr'
+                  ? 'Campagnes directes de recherche de conducteurs'
+                  : 'حملات البحث المباشر عن سائقين'}
+              </span>
+            </h2>
+            <span className="text-xs font-black px-2.5 py-1 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 tabular-nums">
+              {driverCampaigns.filter((c) => c.status === 'open').length}{' '}
+              {lang === 'fr' ? 'actives' : 'نشطة'}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {driverCampaigns.map((camp) => {
+              const isClosed = camp.status === 'closed';
+              return (
+                <Card
+                  key={camp.id}
+                  className={`p-4 rounded-2xl border space-y-3 ${
+                    camp.applications.length > 0
+                      ? 'bg-emerald-50/35 border-emerald-300 shadow-soft'
+                      : isClosed
+                      ? 'bg-steel-50/70 border-steel-200 opacity-90'
+                      : 'bg-white border-amber-300 shadow-soft'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span
+                          className={`px-2 py-0.5 rounded-lg text-[10px] font-black inline-flex items-center gap-1 ${
+                            isClosed
+                              ? 'bg-steel-200 text-steel-700'
+                              : 'bg-emerald-100 text-emerald-800'
+                          }`}
+                        >
+                          {isClosed
+                            ? lang === 'fr'
+                              ? 'Clôturée'
+                              : 'مغلقة'
+                            : lang === 'fr'
+                            ? 'En diffusion live'
+                            : 'نشطة الآن'}
+                        </span>
+
+                        {camp.offered_salary > 0 && (
+                          <span
+                            dir="ltr"
+                            className="px-2 py-0.5 rounded-lg bg-ink text-primary text-[10px] font-mono font-black tabular-nums"
+                          >
+                            {camp.offered_salary.toLocaleString('fr-FR')}{' '}
+                            {lang === 'fr' ? 'MAD' : 'د.م'}/
+                            {camp.salary_unit === 'month'
+                              ? lang === 'fr'
+                                ? 'mois'
+                                : 'شهر'
+                              : lang === 'fr'
+                              ? 'jour'
+                              : 'يوم'}
+                          </span>
+                        )}
+
+                        {camp.duration_label && (
+                          <span className="px-2 py-0.5 rounded-lg bg-steel-100 text-steel-700 text-[10px] font-bold">
+                            {camp.duration_label}
+                          </span>
+                        )}
+                      </div>
+
+                      <h3 className="text-sm font-black text-ink mt-1.5">
+                        {lang === 'fr' ? camp.machine_label_fr : camp.machine_label_ar}
+                      </h3>
+                      <p className="text-[11px] text-steel-500 font-bold flex items-center gap-1 mt-0.5">
+                        <Users className="w-3 h-3 shrink-0" />
+                        <span>
+                          {lang === 'fr'
+                            ? 'Diffusée à tous les conducteurs de cet engin'
+                            : 'معروضة لجميع السائقين المسجلين بهذه الآلية'}
+                        </span>
+                      </p>
+                    </div>
+
+                    <div className="text-end shrink-0">
+                      {camp.matched_drivers_count != null && (
+                        <span className="text-xs font-black text-primary-dark font-mono tabular-nums block">
+                          {camp.matched_drivers_count}{' '}
+                          {lang === 'fr' ? 'notifiés' : 'سائق'}
+                        </span>
+                      )}
+                      <span className="text-[10px] text-steel-400 font-mono" dir="ltr">
+                        {camp.created_at?.slice(0, 10)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {camp.applications.length > 0 ? (
+                    <div className="space-y-2 pt-2 border-t border-steel-100">
+                      <p className="text-[11px] font-black text-emerald-700 flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                        <span>
+                          {lang === 'fr'
+                            ? `${camp.applications.length} conducteur(s) intéressé(s) !`
+                            : `تقدم ${camp.applications.length} سائق(ين) لهذا العرض!`}
+                        </span>
+                      </p>
+
+                      {camp.applications.map((app) => {
+                        const exp = getDriverExperienceOption(app.driver_experience);
+                        return (
+                          <div
+                            key={app.id}
+                            className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 flex flex-wrap items-center justify-between gap-2"
+                          >
+                            <div className="min-w-0 text-xs">
+                              <p className="font-black text-ink truncate">{app.driver_name}</p>
+                              <p className="text-[11px] text-steel-600 font-bold">
+                                {app.driver_city || 'المغرب'} ·{' '}
+                                {lang === 'fr' ? exp.shortFr : exp.shortAr}
+                              </p>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <Button
+                                type="button"
+                                variant="primary"
+                                size="sm"
+                                onClick={async () => {
+                                  const ownerUid = user?.id || profile?.id || '';
+                                  if (!ownerUid || !app.driver_id) return;
+                                  const conv = await chatStore.getOrCreateConversation(
+                                    ownerUid,
+                                    app.driver_id,
+                                    null,
+                                    {
+                                      id: app.driver_id,
+                                      full_name: app.driver_name,
+                                      phone: app.driver_phone,
+                                      city: app.driver_city,
+                                      role: 'driver',
+                                    }
+                                  );
+                                  navigate(`/owner/messages?conv=${encodeURIComponent(conv.id)}`);
+                                }}
+                                leftIcon={<MessageSquare className="w-3.5 h-3.5" />}
+                                className="text-[11px] min-h-[36px]"
+                              >
+                                {lang === 'fr' ? 'Discuter' : 'محادثة'}
+                              </Button>
+
+                              {app.driver_phone && (
+                                <a
+                                  href={`tel:${app.driver_phone}`}
+                                  className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-xl bg-white border border-steel-300 text-ink font-bold text-[11px] min-h-[36px]"
+                                >
+                                  <Phone className="w-3.5 h-3.5 text-emerald-700" />
+                                  <span>{lang === 'fr' ? 'Appeler' : 'اتصال'}</span>
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-steel-500 pt-2 border-t border-steel-100">
+                      {lang === 'fr'
+                        ? 'Alerte envoyée aux conducteurs qualifiés. En attente de candidatures...'
+                        : 'تم بث العرض للسائقين المسجلين بهذه الآلية وفي انتظار تفاعلهم...'}
+                    </p>
+                  )}
+
+                  {!isClosed && (
+                    <div className="flex justify-end pt-1">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await closeDriverJobOffer(camp.id);
+                          setDriverCampaigns((prev) =>
+                            prev.map((c) => (c.id === camp.id ? { ...c, status: 'closed' } : c))
+                          );
+                          toast.info(
+                            lang === 'fr' ? 'Offre conducteur clôturée' : 'تم إغلاق عرض السائق'
+                          );
+                        }}
+                        className="inline-flex items-center gap-1 text-[11px] font-bold text-steel-500 hover:text-rose-600 transition-colors cursor-pointer py-1 px-2"
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                        <span>{lang === 'fr' ? 'Clôturer l’offre' : 'إغلاق العرض'}</span>
+                      </button>
+                    </div>
+                  )}
+                </Card>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Add / Edit Machine Stepper Modal */}
       <MachineStepperModal
         isOpen={isStepperOpen}
@@ -973,6 +1245,16 @@ export const MachinesPage: React.FC = () => {
         machine={spareDispatchMachine}
         onCampaignLaunched={(newCampaign) => {
           setSpareCampaigns((prev) => [newCampaign, ...prev]);
+        }}
+      />
+
+      {/* Urgent Driver Live Dispatch Modal ("إبحث عن سائق") */}
+      <DriverDispatchModal
+        isOpen={Boolean(driverDispatchMachine)}
+        onClose={() => setDriverDispatchMachine(null)}
+        machine={driverDispatchMachine}
+        onOfferLaunched={(newOffer) => {
+          setDriverCampaigns((prev) => [{ ...newOffer, applications: [] }, ...prev]);
         }}
       />
     </div>

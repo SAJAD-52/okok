@@ -453,10 +453,14 @@ export const DriverJobOffersPage: React.FC = () => {
                       <MapPin className="w-4 h-4 text-primary-dark shrink-0 mt-0.5" />
                       <div className="min-w-0">
                         <span className="text-steel-500 block text-[11px]">
-                          {lang === 'fr' ? 'Ville & Chantier' : 'المدينة وموقع العمل'}
+                          {lang === 'fr' ? 'Zone d’intervention' : 'منطقة العمل'}
                         </span>
                         <span className="font-bold text-ink block">
-                          {offer.city}
+                          {offer.city === 'المغرب (جميع المدن)' || !offer.city
+                            ? lang === 'fr'
+                              ? 'Tout le Maroc · À convenir'
+                              : 'جميع المدن المغربية · حسب الاتفاق'
+                            : offer.city}
                           {offer.work_location_note ? ` — ${offer.work_location_note}` : ''}
                         </span>
                       </div>

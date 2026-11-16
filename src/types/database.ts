@@ -3,6 +3,14 @@
 // ============================================================================
 
 export type UserRole = 'owner' | 'client' | 'admin' | 'contractor' | 'equipment_owner' | 'dealer';
+export type ClientSegment =
+  | 'company'
+  | 'farmer'
+  | 'artisan'
+  | 'individual'
+  | 'cooperative'
+  | 'developer'
+  | 'other';
 export type SubscriptionStatus = 'trial' | 'active' | 'expired' | 'suspended';
 export type ListingMode = 'rent' | 'sale';
 export type MachineCondition = 'new' | 'used' | 'excellent' | 'good' | 'fair';
@@ -20,6 +28,8 @@ export interface UserProfile {
   full_name: string;
   company_name?: string;
   role: UserRole;
+  client_segment?: ClientSegment;
+  client_activity_note?: string;
   city?: string;
   city_id?: string;
   address?: string;

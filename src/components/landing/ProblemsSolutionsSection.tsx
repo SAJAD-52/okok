@@ -20,20 +20,20 @@ export const ProblemsSolutionsSection: React.FC = () => {
 
   const pairs = [
     {
-      audienceAr: 'لأصحاب الأوراش والمقاولات',
-      audienceFr: 'Pour les chantiers & entreprises BTP',
+      audienceAr: 'للمقاولات، الفلاحين والأفراد',
+      audienceFr: 'Pour entreprises, agriculteurs & particuliers',
       problemTitleAr: 'تأخر الأشغال بسبب البحث عن آلية قريبة',
-      problemTitleFr: 'Chantiers bloqués faute d’engin disponible à proximité',
+      problemTitleFr: 'Travaux bloqués faute d’engin disponible à proximité',
       problemDescAr:
-        'إضاعة ساعات في الاتصالات للبحث عن جرافة أو حفارة قريبة من الورش دون معرفة السعر أو توفر السائق.',
+        'إضاعة ساعات في الاتصالات للبحث عن جرافة أو حفارة قريبة من ضيعتك أو بقعتك أو ورشك دون معرفة السعر أو توفر السائق.',
       problemDescFr:
-        'Des heures perdues au téléphone pour trouver une pelle ou tractopelle libre près du site sans tarif clair.',
+        'Des heures perdues au téléphone pour trouver une pelle ou tractopelle libre près de votre site, ferme ou terrain sans tarif clair.',
       problemIcon: SearchX,
 
-      solutionTitleAr: 'رادار الأوراش وطلب عاجل يصل لأقرب الملاك',
+      solutionTitleAr: 'رادار المواقع وطلب عاجل يصل لأقرب الملاك',
       solutionTitleFr: 'Radar GPS & diffusion d’alerte aux loueurs proches',
       solutionDescAr:
-        'شاهد أقرب الآليات لورشك بالكيلومتر على الخريطة أو أرسل طلباً فورياً يصل لكل الملاك في محيط 30 كلم.',
+        'شاهد أقرب الآليات لموقع عملك بالكيلومتر على الخريطة أو أرسل طلباً فورياً يصل لكل الملاك في محيط 30 كلم.',
       solutionDescFr:
         'Localisez les engins disponibles au kilomètre près ou envoyez une alerte immédiate aux propriétaires dans un rayon de 30 km.',
       solutionIcon: Radio,
@@ -103,17 +103,17 @@ export const ProblemsSolutionsSection: React.FC = () => {
         {/* Section Header */}
         <div className="text-center max-w-3xl mx-auto mb-12 sm:mb-16">
           <span className="text-xs sm:text-sm font-extrabold uppercase tracking-wider text-primary-dark">
-            {lang === 'fr' ? 'La réalité du terrain BTP' : 'من واقع أوراش البناء والأشغال العمومية بالمغرب'}
+            {lang === 'fr' ? 'La réalité du terrain au Maroc' : 'من واقع الميدان والأشغال بالمغرب'}
           </span>
           <h2 className="text-2xl sm:text-4xl font-black text-ink mt-2.5 leading-tight text-balance">
             {lang === 'fr'
-              ? 'Fini les chantiers bloqués, les engins à l’arrêt et les litiges'
-              : 'وداعاً لتوقف الأوراش، تعطل الآليات في المستودع، وفوضى المواعيد'}
+              ? 'Fini les travaux bloqués, les engins à l’arrêt et les litiges'
+              : 'وداعاً لتعطل الأشغال، توقف الآليات في المستودع، وفوضى المواعيد'}
           </h2>
           <p className="text-sm sm:text-base text-steel-600 mt-3 leading-relaxed">
             {lang === 'fr'
-              ? 'Voyez comment JADIJCB simplifie le quotidien des chefs de chantier et des propriétaires de parcs.'
-              : 'حلول عملية مصممة لمساعدة أصحاب الأوراش على إيجاد الآلية المناسبة بسرعة، ولملاك المعدات على مضاعفة مداخيلهم.'}
+              ? 'Que vous soyez entreprise, agriculteur, artisan ou particulier, JADIJCB simplifie votre quotidien et celui des propriétaires de parcs.'
+              : 'حلول عملية مصممة لكل زبون (مقاولة، فلاح، مهني أو فرد) لإيجاد الآلية المناسبة بسرعة، ولملاك المعدات لمضاعفة مداخيلهم.'}
           </p>
         </div>
 

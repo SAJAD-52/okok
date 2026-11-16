@@ -83,7 +83,7 @@ export const SiteRadarMapPage: React.FC = () => {
     lat: initialLat,
     lng: initialLng,
   });
-  const [siteName, setSiteName] = useState<string>(searchParams.get('site') || 'ورش العمل الرئيسي');
+  const [siteName, setSiteName] = useState<string>(searchParams.get('site') || 'موقع العمل الرئيسي');
   const [selectedCategory, setSelectedCategory] = useState<string>(initialCat);
   const [searchRadiusKm, setSearchRadiusKm] = useState<number>(35);
   const [withOperatorOnly, setWithOperatorOnly] = useState<boolean>(false);
@@ -376,14 +376,14 @@ export const SiteRadarMapPage: React.FC = () => {
     setSiteLocation({ lat: s.lat, lng: s.lng });
     setSiteName(s.name);
     setActiveSiteDropdown(false);
-    toast.success(lang === 'fr' ? `Chantier sélectionné : ${s.name}` : `تم اختيار ورش: ${s.name}`);
+    toast.success(lang === 'fr' ? `Site sélectionné : ${s.name}` : `تم اختيار موقع: ${s.name}`);
   };
 
   const handleCitySelect = (cityName: string) => {
     const city = MOROCCAN_CITIES.find((c: MoroccanCity) => c.name_ar === cityName || c.name_fr === cityName);
     if (city) {
       setSiteLocation({ lat: city.lat, lng: city.lng });
-      setSiteName(`ورش ${city.name_ar}`);
+      setSiteName(`موقع ${city.name_ar}`);
     }
   };
 
@@ -410,13 +410,13 @@ export const SiteRadarMapPage: React.FC = () => {
               className="text-white border-steel-700 hover:bg-steel-800"
               leftIcon={isRTL ? <ArrowRight className="w-4 h-4" /> : <ArrowLeft className="w-4 h-4" />}
             >
-              {lang === 'fr' ? 'Tableau de bord' : 'لوحة المقاولة'}
+              {lang === 'fr' ? 'Tableau de bord' : 'لوحة الزبون'}
             </Button>
             <div className="flex items-center gap-2">
               <span className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse" />
               <h1 className="text-sm sm:text-base font-black text-white flex items-center gap-1.5">
                 <HardHat className="w-4 h-4 text-primary" />
-                <span>{lang === 'fr' ? 'Radar InDrive des Chantiers' : 'رادار الآليات الميداني لأوراش البناء'}</span>
+                <span>{lang === 'fr' ? 'Radar Engins Proches' : 'رادار الآليات القريبة لموقع عملك'}</span>
               </h1>
             </div>
           </div>
@@ -437,7 +437,7 @@ export const SiteRadarMapPage: React.FC = () => {
               {activeSiteDropdown && (
                 <div className="absolute end-0 top-full mt-2 w-72 bg-white rounded-2xl shadow-2xl border border-steel-200 p-2 z-50 text-ink">
                   <span className="text-[10px] font-black text-steel-500 uppercase px-2 py-1 block">
-                    {lang === 'fr' ? 'Chantiers enregistrés' : 'أوراشك المحفوظة:'}
+                    {lang === 'fr' ? 'Sites enregistrés' : 'مواقعك المحفوظة:'}
                   </span>
                   {savedSites.map((s) => (
                     <button
@@ -459,7 +459,7 @@ export const SiteRadarMapPage: React.FC = () => {
                       }}
                       className="w-full text-center py-1.5 text-xs font-bold text-primary-dark hover:underline"
                     >
-                      + {lang === 'fr' ? 'Gérer les chantiers' : 'إضافة وتعديل أوراش المقاولة'}
+                      + {lang === 'fr' ? 'Gérer mes sites' : 'إضافة وتعديل مواقع العمل'}
                     </button>
                   </div>
                 </div>
@@ -572,7 +572,7 @@ export const SiteRadarMapPage: React.FC = () => {
           <div className="p-4 bg-surface border-b border-steel-200 flex items-center justify-between">
             <div>
               <span className="text-[11px] font-bold text-steel-500 block">
-                {lang === 'fr' ? 'Résultats du radar' : 'الآليات المتاحة حول ورشك:'}
+                {lang === 'fr' ? 'Résultats du radar' : 'الآليات المتاحة حول موقعك:'}
               </span>
               <h2 className="text-sm font-black text-ink">
                 {machinesWithDistance.length}{' '}
@@ -590,7 +590,7 @@ export const SiteRadarMapPage: React.FC = () => {
           <div className="flex-1 p-3 space-y-3">
             {isLoading ? (
               <div className="p-8 text-center text-xs text-steel-500">
-                {lang === 'fr' ? 'Recherche des engins à proximité...' : 'جاري فحص ورصد أقرب الآليات لورشك...'}
+                {lang === 'fr' ? 'Recherche des engins à proximité...' : 'جاري فحص ورصد أقرب الآليات لموقعك...'}
               </div>
             ) : machinesWithDistance.length === 0 ? (
               <div className="p-8 text-center space-y-3">
@@ -658,7 +658,7 @@ export const SiteRadarMapPage: React.FC = () => {
                           <div className="mt-2 flex items-center gap-1.5 flex-wrap">
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 text-[10px] font-black border border-emerald-200">
                               <MapPin className="w-3 h-3 text-emerald-600" />
-                              <span>{formatDistanceKm(m.distanceKm, lang)} {lang === 'fr' ? 'du chantier' : 'من الورش'}</span>
+                              <span>{formatDistanceKm(m.distanceKm, lang)} {lang === 'fr' ? 'du site' : 'من الموقع'}</span>
                             </span>
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50 text-blue-800 text-[10px] font-bold border border-blue-200">
                               <Clock className="w-3 h-3 text-blue-600" />
@@ -704,7 +704,7 @@ export const SiteRadarMapPage: React.FC = () => {
                           className="flex-1 justify-center text-xs font-black"
                           leftIcon={<CalendarCheck className="w-3.5 h-3.5" />}
                         >
-                          {lang === 'fr' ? 'Réserver pour ce chantier' : 'احجز فوراً لهذا الورش'}
+                          {lang === 'fr' ? 'Réserver pour ce site' : 'احجز فوراً لهذا الموقع'}
                         </Button>
 
                         <button
@@ -754,7 +754,7 @@ export const SiteRadarMapPage: React.FC = () => {
           {/* Map Tip Overlay */}
           <div className="absolute top-3 start-3 z-[1000] bg-ink/90 backdrop-blur text-white px-3 py-1.5 rounded-xl text-[11px] font-bold shadow-lg flex items-center gap-2 border border-steel-700 pointer-events-none">
             <span className="text-primary text-sm">📍</span>
-            <span>{lang === 'fr' ? 'Cliquez sur la carte pour déplacer votre chantier' : 'انقر على الخريطة لتحديد أو نقل موقع ورشك'}</span>
+            <span>{lang === 'fr' ? 'Cliquez sur la carte pour placer votre site de travail' : 'انقر على الخريطة لتحديد أو نقل موقع العمل'}</span>
           </div>
 
           <MapContainer
@@ -772,7 +772,7 @@ export const SiteRadarMapPage: React.FC = () => {
             <SiteMapClickListener
               onSiteSelected={(lat, lng) => {
                 setSiteLocation({ lat, lng });
-                toast.success(lang === 'fr' ? 'Position du chantier mise à jour' : 'تم تحديث موقع ورش العمل');
+                toast.success(lang === 'fr' ? 'Position du site mise à jour' : 'تم تحديث موقع العمل');
               }}
             />
 
@@ -825,7 +825,7 @@ export const SiteRadarMapPage: React.FC = () => {
                       {m.rate_daily?.toLocaleString('fr-FR')} MAD / {lang === 'fr' ? 'jour' : 'يوم'}
                     </p>
                     <p className="text-[10px] text-emerald-700 font-bold">
-                      📍 {formatDistanceKm(m.distanceKm, lang)} {lang === 'fr' ? 'du chantier' : 'من ورشك'}
+                      📍 {formatDistanceKm(m.distanceKm, lang)} {lang === 'fr' ? 'du site' : 'من موقعك'}
                     </p>
                     <Button
                       type="button"

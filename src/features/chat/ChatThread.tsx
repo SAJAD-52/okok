@@ -187,15 +187,15 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
     ? [
         '🚜 هل الآلية متوفرة هذا الأسبوع؟',
         '👷 هل تتوفر مع سائق معتمد؟',
-        '⛽ هل السعر يشمل الكازوال والنقل للورش؟',
+        '⛽ هل السعر يشمل الكازوال والنقل للموقع؟',
         '📍 كم تكلفة الديباناج وسطحة النقل (Porte-char)؟',
         '⏱️ هل يمكن بدء العمل بعد غد صباحاً؟',
       ]
     : [
         '✅ وعليكم السلام، نعم الآلية جاهزة ومتوفرة فوراً',
         '👷 السائق متوفر ومؤهل مع بطاقة السلامة المهنية',
-        '🚚 يمكننا توفير النقل عبر السطحة لموقع الورش',
-        '📍 يرجى تزويدنا بموقع الورش ومدة الكراء بالضبط',
+        '🚚 يمكننا توفير النقل عبر السطحة لموقع العمل',
+        '📍 يرجى تزويدنا بموقع العمل ومدة الكراء بالضبط',
         '🤝 تم تأكيد الحجز وجدولة الآلية لكم',
       ];
 
@@ -352,8 +352,8 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
                         ? "Propriétaire d'engins"
                         : 'مالك آليات ومعدات'
                       : lang === 'fr'
-                      ? 'Entreprise BTP / Client'
-                      : 'مقاولة بناء / زبون'}
+                      ? 'Client / Demandeur'
+                      : 'زبون / صاحب موقع عمل'}
                   </span>
                   <span>·</span>
                   <span>{other.city || 'المغرب'}</span>
@@ -486,7 +486,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
               <span>
                 {lang === 'fr'
                   ? 'Campagne terminée : cette opportunité a été conclue avec un autre propriétaire.'
-                  : 'تم إغلاق هذه المحادثة بعد اتفاق المقاولة مع مالك آخر — انتهت حملة البحث.'}
+                  : 'تم إغلاق هذه المحادثة بعد اتفاق الزبون مع مالك آخر — انتهت حملة البحث.'}
               </span>
             </div>
           ) : dispatchDeal.deal_status === 'accepted' ? (
@@ -499,8 +499,8 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
                       ? 'Accord confirmé ! Commande de pièce enregistrée.'
                       : 'تم قبول الصفقة من الطرفين! تم تأكيد طلب قطعة الغيار.'
                     : lang === 'fr'
-                    ? 'Accord confirmé ! Réservation créée & engin localisé sur le chantier.'
-                    : 'تم قبول الصفقة من الطرفين! الحجز مفعّل الآن وموقع الآلية تحوّل إلى الورش.'}
+                    ? 'Accord confirmé ! Réservation créée & engin localisé sur le site.'
+                    : 'تم قبول الصفقة من الطرفين! الحجز مفعّل الآن وموقع الآلية تحوّل إلى موقع العمل.'}
                 </span>
               </div>
               <button
@@ -644,7 +644,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
                     : 'اكتب استفسارك لمالك الآلية هنا...'
                   : lang === 'fr'
                   ? 'Répondez au client...'
-                  : 'اكتب ردك للزبون / المقاول هنا...'
+                  : 'اكتب ردك للزبون هنا...'
               }
               className="flex-1 px-4 py-2.5 text-xs sm:text-sm bg-surface border border-steel-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary min-h-[44px]"
             />

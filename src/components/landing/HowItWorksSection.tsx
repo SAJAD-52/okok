@@ -51,32 +51,32 @@ export const HowItWorksSection: React.FC = () => {
   const contractorSteps = [
     {
       num: '01',
-      titleAr: 'افتح حساب المقاولة مجاناً في 30 ثانية',
-      titleFr: 'Créez votre compte chantier gratuit en 30s',
+      titleAr: 'افتح حساب زبون مجاناً في 30 ثانية',
+      titleFr: 'Créez votre compte client gratuit en 30s',
       descAr:
-        'تسجيل سريع برقم الهاتف فقط، واستخدام مجاني بالكامل لأصحاب الأوراش والمقاولين في جميع مدن المغرب.',
+        'سواء كنت مقاولة، فلاحاً، مهنياً أو فرداً، التسجيل سريع برقم الهاتف ومجاني بالكامل في جميع مدن المغرب.',
       descFr:
-        'Inscription express par numéro de téléphone. L’accès est 100% gratuit pour les entreprises et chefs de chantier.',
+        'Entreprise, agriculteur, artisan ou particulier : inscription express par téléphone et accès 100% gratuit.',
       icon: MessageCircle,
     },
     {
       num: '02',
-      titleAr: 'حدد موقع ورشك أو ابحث في الرادار والسوق',
-      titleFr: 'Localisez votre chantier sur le Radar GPS',
+      titleAr: 'أضف موقع عملك أو ابحث في الرادار والسوق',
+      titleFr: 'Ajoutez votre site ou explorez le Radar GPS',
       descAr:
-        'اعثر على أقرب JCB، حفارة، رافعة أو قطع غيار حول ورشك، أو أرسل طلباً جماعياً للملاك في محيط 30 كلم.',
+        'حدد موقع ضيعتك، بقعتك الأرضية أو ورشك، واعثر على أقرب JCB أو حفارة أو أرسل طلباً جماعياً للملاك القريبين.',
       descFr:
-        'Repérez les engins et pièces les plus proches ou lancez une demande groupée aux propriétaires à moins de 30 km.',
+        'Repérez les engins et pièces les plus proches de votre ferme, terrain ou chantier et lancez une alerte directe.',
       icon: MapPin,
     },
     {
       num: '03',
-      titleAr: 'اتفق مباشرة مع المالك وتابع الآلية حتى الورش',
+      titleAr: 'اتفق مباشرة مع المالك وتابع الآلية حتى موقعك',
       titleFr: 'Confirmez en direct & suivez la mise à disposition',
       descAr:
-        'تواصل بدون وسطاء عبر الدردشة أو واتساب، وثّق الحجز بعقد واضح، وتابع المدة المتبقية مباشرة من هاتفك.',
+        'تواصل بدون وسطاء عبر الدردشة أو واتساب، وتابع المدة والحجوزات مباشرة من هاتفك.',
       descFr:
-        'Échangez sans intermédiaire, validez les conditions carburant/chauffeur et suivez le chantier depuis votre mobile.',
+        'Échangez sans intermédiaire, validez les conditions et suivez votre location directement depuis votre mobile.',
       icon: Radio,
     },
   ];
@@ -94,7 +94,7 @@ export const HowItWorksSection: React.FC = () => {
           <h2 className="text-2xl sm:text-4xl font-black text-ink mt-2.5 leading-tight text-balance">
             {lang === 'fr'
               ? 'Comment ça marche sur JADIJCB ?'
-              : 'كيف تبدأ سواء كنت مالك آليات أو صاحب ورش؟'}
+              : 'كيف تبدأ سواء كنت مالك آليات أو زبوناً؟'}
           </h2>
           <p className="text-sm sm:text-base text-steel-600 mt-3 leading-relaxed">
             {lang === 'fr'
@@ -127,7 +127,7 @@ export const HowItWorksSection: React.FC = () => {
                 }`}
               >
                 <MapPin className="w-4 h-4 shrink-0" />
-                <span>{lang === 'fr' ? 'Je cherche un engin pour mon chantier' : 'أنا صاحب ورش / مقاول'}</span>
+                <span>{lang === 'fr' ? 'Je cherche un engin (Client)' : 'أبحث عن آلية (مقاولة، فلاح، فرد...)'}</span>
               </button>
             </div>
           </div>

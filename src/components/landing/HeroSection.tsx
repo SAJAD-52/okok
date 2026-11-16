@@ -66,7 +66,7 @@ export const HeroSection: React.FC = () => {
                 <span className="inline-block">La 1ère plateforme marocaine qui réunit </span>
                 <span className="relative inline-block">
                   <span className="bg-gradient-to-r from-[#FFE082] via-[#FFB400] to-[#FFF3CD] bg-clip-text text-transparent animate-text-shimmer">
-                    chantiers, propriétaires d&apos;engins BTP
+                    clients, chantiers, fermes et loueurs d&apos;engins
                   </span>
                   <motion.span
                     initial={{ scaleX: 0 }}
@@ -79,10 +79,10 @@ export const HeroSection: React.FC = () => {
               </>
             ) : (
               <>
-                <span>أول منصة مغربية تجمع بين أصحاب الأوراش وملاك </span>
+                <span>أول منصة مغربية تجمع كل الزبناء مع ملاك </span>
                 <span className="relative inline-block">
                   <span className="bg-gradient-to-l from-[#FFE082] via-[#FFB400] to-[#FFF3CD] bg-clip-text text-transparent animate-text-shimmer">
-                    آليات الأشغال العمومية وقطع الغيار
+                    الآليات الثقيلة وقطع الغيار
                   </span>
                   <motion.span
                     initial={{ scaleX: 0 }}
@@ -103,19 +103,19 @@ export const HeroSection: React.FC = () => {
             className="text-sm sm:text-lg text-slate-200 max-w-3xl leading-[1.85] sm:leading-[1.8] font-normal mb-6 px-1"
           >
             {lang === 'fr' ? (
-              'Vous gérez un chantier à la recherche d’un engin immédiat ou vous possédez du matériel BTP et des pièces ? Inscrivez-vous par téléphone en 30 secondes, sans paperasse, et trouvez ou louez instantanément.'
+              'Entreprise, agriculteur, artisan ou particulier avec un terrain ? Trouvez l’engin idéal en 30 secondes par téléphone, sans paperasse, ou rentabilisez votre parc matériel et vos pièces.'
             ) : (
               <>
-                عندك ورش وبغيتي تكري ولا تشري آلية فالحين، ولا عندك ماتريال وقطع الغيار وبغيتي تخدمهم؟{' '}
+                سواء كنت مقاولة، فلاحاً، مهنياً أو صاحب بقعة أرضية وبغيتي تكري ولا تشري آلية فالحين، ولا عندك ماتريال وقطع الغيار؟{' '}
                 <motion.span
                   initial={{ opacity: 0.7 }}
                   animate={{ opacity: 1 }}
                   transition={{ duration: 0.5, delay: 0.5 }}
                   className="text-white font-semibold"
                 >
-                  تسجّل غير بنمرة التليفون والواتساب فـ 30 ثانية، بلا أوراق معقدة،
+                  تسجّل غير بنمرة التليفون فـ 30 ثانية، بلا أوراق معقدة،
                 </motion.span>{' '}
-                وخدم أسطولك ولا لقى أقرب آلية لورشك{' '}
+                ولقى أقرب آلية لموقع عملك{' '}
                 <span className="text-primary font-semibold">في البلاصة!</span>
               </>
             )}
@@ -144,7 +144,7 @@ export const HeroSection: React.FC = () => {
             </div>
             <div className="flex items-center gap-1.5">
               <CheckCircle2 className="w-4 h-4 text-primary shrink-0" />
-              <span>{lang === 'fr' ? 'Gratuit pour les chantiers' : 'مجاني 100% لأصحاب الأوراش'}</span>
+              <span>{lang === 'fr' ? 'Gratuit pour tous les clients' : 'مجاني 100% لجميع الزبناء'}</span>
             </div>
             <div className="flex items-center gap-1.5">
               <CheckCircle2 className="w-4 h-4 text-primary shrink-0" />
@@ -189,7 +189,7 @@ export const HeroSection: React.FC = () => {
                 }`}
               >
                 <Radio className="w-4 h-4 shrink-0" />
-                <span>{lang === 'fr' ? 'Espace Chantier & Radar GPS' : 'فضاء أصحاب الأوراش (رادار الأوراش)'}</span>
+                <span>{lang === 'fr' ? 'Espace Client & Radar GPS' : 'فضاء الزبون (مقاولة، فلاح، فرد...)'}</span>
               </button>
             </div>
           </div>

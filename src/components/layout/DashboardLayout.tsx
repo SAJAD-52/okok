@@ -58,6 +58,7 @@ import {
 } from '../../lib/opportunityAudio';
 import { registerOwnerPushNotifications } from '../../lib/pushService';
 import { formatDistanceKm } from '../../lib/geoUtils';
+import { getClientSegmentOption } from '../../data/clientSegments';
 
 export const DashboardLayout: React.FC = () => {
   const { t, isRTL, lang } = useLanguage();
@@ -411,13 +412,13 @@ export const DashboardLayout: React.FC = () => {
     {
       to: '/entreprise',
       exact: true,
-      label: lang === 'fr' ? 'Tableau de bord' : 'لوحة المقاولة',
+      label: lang === 'fr' ? 'Espace Client' : 'لوحة الزبون',
       mobileLabel: lang === 'fr' ? 'Accueil' : 'الرئيسية',
       icon: <Building2 className="w-5 h-5" />,
     },
     {
       to: '/entreprise/map',
-      label: lang === 'fr' ? 'Radar Chantiers' : 'رادار الآليات (الخريطة)',
+      label: lang === 'fr' ? 'Radar Engins Proches' : 'رادار الآليات القريبة',
       mobileLabel: lang === 'fr' ? 'Radar' : 'الرادار',
       icon: <MapPin className="w-5 h-5" />,
     },
@@ -429,8 +430,8 @@ export const DashboardLayout: React.FC = () => {
     },
     {
       to: '/entreprise/projects',
-      label: lang === 'fr' ? 'Mes Chantiers' : 'أوراش ومشاريع المقاولة',
-      mobileLabel: lang === 'fr' ? 'Chantiers' : 'الأوراش',
+      label: lang === 'fr' ? 'Sites & Projets' : 'مواقع العمل والمشاريع',
+      mobileLabel: lang === 'fr' ? 'Sites' : 'مواقعي',
       icon: <HardHat className="w-5 h-5" />,
     },
     {
@@ -495,13 +496,27 @@ export const DashboardLayout: React.FC = () => {
     navigate('/auth');
   };
 
-  const displayName = profile?.company_name || profile?.full_name || (isContractor ? 'مقاولة معتمدة' : 'مالك آليات معتمد');
+  const clientSegOpt = getClientSegmentOption(profile?.client_segment);
+  const displayName =
+    profile?.company_name ||
+    profile?.full_name ||
+    (isContractor
+      ? lang === 'fr'
+        ? 'Client JADIJCB'
+        : 'زبون JADIJCB'
+      : 'مالك آليات معتمد');
   const roleLabel =
     profile?.role === 'owner'
       ? t('auth.role_owner')
       : profile?.role === 'admin'
       ? 'Super Admin'
-      : (lang === 'fr' ? 'Entreprise / Client' : 'مقاولة بناء / زبون مستأجر');
+      : profile?.client_segment
+      ? lang === 'fr'
+        ? clientSegOpt.labelFr
+        : clientSegOpt.labelAr
+      : lang === 'fr'
+      ? 'Client / Locataire'
+      : 'زبون / طالب آليات';
 
   return (
     <div className="min-h-screen bg-surface flex flex-col md:flex-row relative overflow-x-hidden">
@@ -696,8 +711,8 @@ export const DashboardLayout: React.FC = () => {
                 className="text-[11px] sm:text-xs font-black text-ink px-2.5 sm:px-3 py-1.5 rounded-xl border border-primary/50 bg-primary hover:bg-primary-hover min-h-[40px] sm:min-h-[44px] flex items-center gap-1 sm:gap-1.5 shadow-sm whitespace-nowrap shrink-0"
               >
                 <MapPin className="w-3.5 h-3.5 shrink-0" />
-                <span className="sm:hidden">{lang === 'fr' ? 'Radar' : 'رادار الورش'}</span>
-                <span className="hidden sm:inline">{lang === 'fr' ? 'Radar Chantiers' : 'رادار الآليات للورش'}</span>
+                <span className="sm:hidden">{lang === 'fr' ? 'Radar' : 'الرادار'}</span>
+                <span className="hidden sm:inline">{lang === 'fr' ? 'Radar Engins' : 'رادار الآليات القريبة'}</span>
               </NavLink>
             ) : (
               <NavLink

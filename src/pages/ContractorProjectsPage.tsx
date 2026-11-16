@@ -4,7 +4,7 @@
 // ============================================================================
 
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   HardHat,
   MapPin,
@@ -46,11 +46,23 @@ export const ContractorProjectsPage: React.FC = () => {
   const { t, lang } = useLanguage();
   const { user, profile } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [sites, setSites] = useState<ContractorSite[]>([]);
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(
+    () => searchParams.get('addSite') === '1'
+  );
   const [dispatchSite, setDispatchSite] = useState<ContractorSite | null>(null);
   const [campaigns, setCampaigns] = useState<DispatchCampaign[]>([]);
+
+  useEffect(() => {
+    if (searchParams.get('addSite') === '1') {
+      setIsAddModalOpen(true);
+      const next = new URLSearchParams(searchParams);
+      next.delete('addSite');
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   // New Site Form
   const [siteName, setSiteName] = useState('');
@@ -199,7 +211,7 @@ export const ContractorProjectsPage: React.FC = () => {
   const handleCreateSite = (e: React.FormEvent) => {
     e.preventDefault();
     if (!siteName.trim()) {
-      toast.error(lang === 'fr' ? 'Veuillez saisir le nom du chantier' : 'يرجى إدخال اسم الورش');
+      toast.error(lang === 'fr' ? 'Veuillez saisir le nom du site' : 'يرجى إدخال اسم موقع العمل');
       return;
     }
 
@@ -221,7 +233,7 @@ export const ContractorProjectsPage: React.FC = () => {
     const updated = [newSite, ...sites];
     saveSitesToStorage(updated);
     setIsAddModalOpen(false);
-    toast.success(lang === 'fr' ? 'Chantier ajouté avec succès !' : 'تمت إضافة الورش بنجاح!');
+    toast.success(lang === 'fr' ? 'Site de travail ajouté avec succès !' : 'تمت إضافة موقع العمل بنجاح!');
 
     // Reset form
     setSiteName('');
@@ -232,7 +244,7 @@ export const ContractorProjectsPage: React.FC = () => {
   const handleDeleteSite = (siteId: string) => {
     const updated = sites.filter((s) => s.id !== siteId);
     saveSitesToStorage(updated);
-    toast.success(lang === 'fr' ? 'Chantier supprimé' : 'تم حذف الورش من القائمة');
+    toast.success(lang === 'fr' ? 'Site supprimé' : 'تم حذف الموقع من القائمة');
   };
 
   return (
@@ -243,13 +255,13 @@ export const ContractorProjectsPage: React.FC = () => {
           <h1 className="text-lg sm:text-2xl font-black text-ink flex items-center gap-2">
             <HardHat className="w-5 h-5 sm:w-6 sm:h-6 text-primary shrink-0" />
             <span className="text-balance">
-              {lang === 'fr' ? 'Mes Chantiers & Projets de Construction' : 'أوراش ومشاريع المقاولة'}
+              {lang === 'fr' ? 'Mes Sites de Travail & Projets' : 'مواقع العمل والمشاريع'}
             </span>
           </h1>
           <p className="text-xs text-steel-500 mt-1 leading-relaxed">
             {lang === 'fr'
-              ? 'Enregistrez vos chantiers sur la carte pour trouver en un clic les engins les plus proches grâce au radar.'
-              : 'احفظ مواقع أوراش البناء الخاصة بشركتك على الخريطة للبحث الفوري عن أقرب الآليات والشاحنات بضغطة زر واحدة.'}
+              ? 'Enregistrez vos sites (ferme, terrain privé, chantier...) sur la carte pour trouver en un clic les engins les plus proches.'
+              : 'احفظ مواقع عملك (ضيعة فلاحية، بقعة أرضية، ورش بناء...) على الخريطة للبحث الفوري عن أقرب الآليات والشاحنات بضغطة زر واحدة.'}
           </p>
         </div>
 
@@ -261,7 +273,7 @@ export const ContractorProjectsPage: React.FC = () => {
           leftIcon={<Plus className="w-4 h-4" />}
           className="w-full sm:w-auto justify-center shrink-0 min-h-[44px] font-black"
         >
-          {lang === 'fr' ? 'Ajouter un nouveau chantier' : 'إضافة ورش عمل جديد'}
+          {lang === 'fr' ? 'Ajouter un site de travail' : 'إضافة موقع للعمل'}
         </Button>
       </div>
 
@@ -270,12 +282,12 @@ export const ContractorProjectsPage: React.FC = () => {
         <Card className="p-8 sm:p-12 bg-white border border-steel-200 rounded-3xl text-center space-y-3">
           <MapPin className="w-12 h-12 text-steel-300 mx-auto" />
           <h2 className="text-base font-black text-ink">
-            {lang === 'fr' ? 'Aucun chantier enregistré' : 'لا توجد أوراش مسجلة حالياً'}
+            {lang === 'fr' ? 'Aucun site enregistré' : 'لا توجد مواقع عمل مسجلة حالياً'}
           </h2>
           <p className="text-xs text-steel-500 max-w-md mx-auto">
             {lang === 'fr'
-              ? 'Placez votre premier chantier sur la carte pour calculer automatiquement les distances des engins disponibles.'
-              : 'حدد موقع ورشك الأول على الخريطة لتسريع إيجاد أقرب الآليات وتوجيه السائقين بسهولة.'}
+              ? 'Placez votre terrain, ferme ou chantier sur la carte pour calculer automatiquement les distances des engins disponibles.'
+              : 'حدد موقع عملك الأول (ضيعة، بقعة أرضية أو ورش) على الخريطة لتسريع إيجاد أقرب الآليات.'}
           </p>
           <div className="pt-2">
             <Button
@@ -286,7 +298,7 @@ export const ContractorProjectsPage: React.FC = () => {
               leftIcon={<Plus className="w-4 h-4" />}
               className="min-h-[44px]"
             >
-              {lang === 'fr' ? 'Ajouter un chantier' : 'إضافة ورش جديد'}
+              {lang === 'fr' ? 'Ajouter un site de travail' : 'إضافة موقع للعمل'}
             </Button>
           </div>
         </Card>
@@ -342,7 +354,7 @@ export const ContractorProjectsPage: React.FC = () => {
                   <div className="pt-2 border-t border-steel-100 text-xs text-steel-600 flex flex-wrap items-center justify-between gap-2">
                     <span className="flex items-center gap-1.5 min-w-0">
                       <User className="w-3.5 h-3.5 text-steel-400 shrink-0" />
-                      <span className="truncate">{s.manager_name || (lang === 'fr' ? 'Chef de chantier' : 'رئيس الورش')}</span>
+                      <span className="truncate">{s.manager_name || (lang === 'fr' ? 'Responsable du site' : 'المسؤول عن الموقع')}</span>
                     </span>
                     {s.manager_phone && (
                       <a
@@ -616,7 +628,7 @@ export const ContractorProjectsPage: React.FC = () => {
                 <div className="flex items-center gap-2.5 min-w-0">
                   <HardHat className="w-5 h-5 text-primary shrink-0" />
                   <h3 className="text-sm sm:text-base font-black text-white truncate">
-                    {lang === 'fr' ? 'Nouveau Chantier' : 'إضافة ورش بناء جديد'}
+                    {lang === 'fr' ? 'Ajouter un site de travail' : 'إضافة موقع للعمل'}
                   </h3>
                 </div>
                 <button
@@ -634,16 +646,20 @@ export const ContractorProjectsPage: React.FC = () => {
             <form onSubmit={handleCreateSite} className="flex flex-col flex-1 min-h-0">
               <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
                 <Input
-                  label={lang === 'fr' ? 'Nom du chantier / projet' : 'اسم الورش أو المشروع'}
+                  label={lang === 'fr' ? 'Nom du site ou projet' : 'اسم موقع العمل أو المشروع'}
                   value={siteName}
                   onChange={(e) => setSiteName(e.target.value)}
-                  placeholder={lang === 'fr' ? 'Ex: Chantier Bouskoura Résidences' : 'مثال: ورش تهيئة مركب بوسكورة'}
+                  placeholder={
+                    lang === 'fr'
+                      ? 'Ex: Ferme Sidi Slimane, Terrain Casablanca, Chantier...'
+                      : 'مثال: ضيعة فلاحية بسيدي سليمان، بقعة أرضية بالدار البيضاء، أو ورش بناء...'
+                  }
                   required
                 />
 
                 <div>
                   <label className="text-xs font-bold text-steel-700 block mb-1.5">
-                    {lang === 'fr' ? 'Ville du chantier' : 'المدينة'}
+                    {lang === 'fr' ? 'Ville / Région' : 'المدينة أو المنطقة'}
                   </label>
                   <select
                     value={cityId}
@@ -664,8 +680,8 @@ export const ContractorProjectsPage: React.FC = () => {
                     <MapPin className="w-3.5 h-3.5 text-primary-dark shrink-0" />
                     <span>
                       {lang === 'fr'
-                        ? 'Localiser le chantier sur la carte'
-                        : 'تحديد مكان الورش على الخريطة'}
+                        ? 'Localiser le site de travail sur la carte'
+                        : 'تحديد موقع العمل على الخريطة'}
                     </span>
                   </label>
                   <MapLocationPicker
@@ -677,8 +693,8 @@ export const ContractorProjectsPage: React.FC = () => {
                     mapHeightClass="h-48 sm:h-56"
                     instructionText={
                       lang === 'fr'
-                        ? 'Appuyez sur la carte ou déplacez le marqueur sur le chantier'
-                        : 'انقر على الخريطة أو اسحب العلامة لتحديد مكان الورش'
+                        ? 'Appuyez sur la carte ou déplacez le marqueur sur votre site'
+                        : 'انقر على الخريطة أو اسحب العلامة لتحديد مكان العمل'
                     }
                     onLocationChange={handleMapLocationChange}
                   />
@@ -686,7 +702,7 @@ export const ContractorProjectsPage: React.FC = () => {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <Input
-                    label={lang === 'fr' ? 'Chef de chantier' : 'رئيس الورش'}
+                    label={lang === 'fr' ? 'Contact sur place (optionnel)' : 'اسم المسؤول / صاحب الموقع (اختياري)'}
                     value={managerName}
                     onChange={(e) => setManagerName(e.target.value)}
                     placeholder="هشام العلمي"
@@ -721,7 +737,7 @@ export const ContractorProjectsPage: React.FC = () => {
                   leftIcon={<CheckCircle className="w-4 h-4" />}
                   className="w-full sm:w-auto justify-center min-h-[44px] font-black"
                 >
-                  {lang === 'fr' ? 'Enregistrer le chantier' : 'حفظ بيانات الورش'}
+                  {lang === 'fr' ? 'Enregistrer le site' : 'حفظ موقع العمل'}
                 </Button>
               </div>
             </form>

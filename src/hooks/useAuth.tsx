@@ -7,7 +7,7 @@ import { supabase } from '../lib/supabase';
 import { normalizeMoroccanPhone, phoneToSyntheticEmail } from '../lib/authHelpers';
 import { isLifetimeFreePhone } from '../lib/constants';
 import { mapDatabaseError } from '../lib/errorHelpers';
-import { UserProfile, UserRole } from '../types/database';
+import { UserProfile, UserRole, ClientSegment } from '../types/database';
 import { generateUniqueStorefrontSlug } from '../lib/storefrontSlug';
 import { saveStorefrontData } from '../lib/storefrontService';
 
@@ -28,7 +28,13 @@ interface AuthContextType {
     phone: string,
     pass: string,
     role: UserRole,
-    meta?: { fullName?: string; companyName?: string; city?: string }
+    meta?: {
+      fullName?: string;
+      companyName?: string;
+      city?: string;
+      clientSegment?: ClientSegment;
+      clientActivityNote?: string;
+    }
   ) => Promise<{ success: boolean; error?: string; isNewUser?: boolean }>;
   logout: () => Promise<void>;
   updateProfile: (updates: Partial<UserProfile>) => Promise<{ success: boolean; error?: string }>;
@@ -194,6 +200,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         company_name: (data as any)?.company_name || meta.company_name || meta.companyName || localCached.company_name || '',
         city: (data as any)?.city || meta.city || localCached.city || 'Casablanca',
         role: (data as any)?.role || meta.role || localCached.role || 'client',
+        client_segment: (data as any)?.client_segment || meta.client_segment || meta.clientSegment || localCached.client_segment || undefined,
+        client_activity_note: (data as any)?.client_activity_note || meta.client_activity_note || meta.clientActivityNote || localCached.client_activity_note || '',
         ice_number: (data as any)?.ice_number || meta.ice_number || meta.iceNumber || localCached.ice_number || '',
         onboarding_completed: (data as any)?.onboarding_completed ?? meta.onboarding_completed ?? localCached.onboarding_completed ?? true,
         whatsapp_verified: Boolean((data as any)?.whatsapp_verified ?? meta.whatsapp_verified ?? localCached.whatsapp_verified ?? true),
@@ -460,7 +468,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     rawPhone: string,
     pass: string,
     role: UserRole,
-    meta?: { fullName?: string; companyName?: string; city?: string }
+    meta?: {
+      fullName?: string;
+      companyName?: string;
+      city?: string;
+      clientSegment?: ClientSegment;
+      clientActivityNote?: string;
+    }
   ): Promise<{ success: boolean; error?: string; isNewUser?: boolean }> => {
     setIsLoading(true);
 
@@ -484,6 +498,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             full_name: meta?.fullName || '',
             company_name: meta?.companyName || '',
             city: meta?.city || 'Casablanca',
+            client_segment: role === 'owner' ? undefined : meta?.clientSegment || 'individual',
+            client_activity_note: role === 'owner' ? undefined : meta?.clientActivityNote || '',
             preferred_lang: 'ar',
           },
         },
@@ -621,6 +637,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           full_name: meta?.fullName || '',
           company_name: meta?.companyName || '',
           role: role === 'owner' ? 'owner' : 'client',
+          client_segment: meta?.clientSegment,
+          client_activity_note: meta?.clientActivityNote || '',
           city: meta?.city || 'Casablanca',
           whatsapp_verified: false,
           subscription_status: 'trial',
@@ -628,6 +646,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           trial_ends_at: new Date(Date.now() + 72 * 3600 * 1000).toISOString(),
           preferred_lang: 'ar',
           created_at: new Date().toISOString(),
+        };
+      } else {
+        loadedProfile = {
+          ...loadedProfile,
+          client_segment: loadedProfile.client_segment || meta?.clientSegment,
+          client_activity_note: loadedProfile.client_activity_note || meta?.clientActivityNote || '',
         };
       }
 
@@ -766,6 +790,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         full_name: updates.full_name !== undefined ? updates.full_name : (profile?.full_name || ''),
         company_name: updates.company_name !== undefined ? updates.company_name : (profile?.company_name || ''),
         city: updates.city !== undefined ? updates.city : (profile?.city || 'Casablanca'),
+        client_segment: updates.client_segment !== undefined ? updates.client_segment : profile?.client_segment,
+        client_activity_note: updates.client_activity_note !== undefined ? updates.client_activity_note : (profile?.client_activity_note || ''),
         ice_number: updates.ice_number !== undefined ? updates.ice_number : (profile?.ice_number || ''),
         onboarding_completed: updates.onboarding_completed !== undefined ? updates.onboarding_completed : (profile?.onboarding_completed ?? true),
       };

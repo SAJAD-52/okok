@@ -24,9 +24,9 @@ export const PublicHeader: React.FC = () => {
     : isContractor
     ? [
         { to: '/marketplace', label: t('nav.marketplace'), icon: <Compass className="w-4 h-4" /> },
-        { to: '/entreprise/map', label: lang === 'fr' ? 'Radar Chantiers' : 'رادار الأوراش 📍', icon: <MapPin className="w-4 h-4" /> },
+        { to: '/entreprise/map', label: lang === 'fr' ? 'Radar Engins' : 'رادار الآليات 📍', icon: <MapPin className="w-4 h-4" /> },
         { to: '/entreprise/bookings', label: lang === 'fr' ? 'Mes Locations' : 'حجوزاتي', icon: <Building2 className="w-4 h-4" /> },
-        { to: '/entreprise', label: lang === 'fr' ? 'Espace Entreprise' : 'بوابة المقاولة' },
+        { to: '/entreprise', label: lang === 'fr' ? 'Espace Client' : 'بوابة الزبون' },
       ]
     : [
         { to: '/marketplace', label: t('nav.marketplace'), icon: <Compass className="w-4 h-4" /> },
@@ -89,7 +89,7 @@ export const PublicHeader: React.FC = () => {
               {isSuperAdmin
                 ? '👑 Super Admin'
                 : isContractor
-                ? (profile?.company_name || (lang === 'fr' ? 'Mon Entreprise' : 'حساب المقاولة'))
+                ? (profile?.company_name || profile?.full_name || (lang === 'fr' ? 'Mon Espace' : 'حساب الزبون'))
                 : (profile?.company_name || profile?.full_name || t('nav.dashboard'))}
             </Button>
           ) : (
@@ -122,7 +122,7 @@ export const PublicHeader: React.FC = () => {
               className="hidden sm:inline-flex font-black text-xs"
               leftIcon={<MapPin className="w-4 h-4" />}
             >
-              {lang === 'fr' ? 'Radar Chantiers' : 'رادار أقرب الآليات 📍'}
+              {lang === 'fr' ? 'Radar Engins' : 'رادار أقرب الآليات 📍'}
             </Button>
           ) : (
             <Button
@@ -191,7 +191,7 @@ export const PublicHeader: React.FC = () => {
                 }}
                 leftIcon={<MapPin className="w-4 h-4" />}
               >
-                {lang === 'fr' ? 'Radar InDrive Chantiers' : 'رادار أقرب الآليات للورش 📍'}
+                {lang === 'fr' ? 'Radar Engins Proches' : 'رادار أقرب الآليات القريبة 📍'}
               </Button>
             ) : (
               <Button
@@ -219,7 +219,7 @@ export const PublicHeader: React.FC = () => {
               leftIcon={isSuperAdmin ? <ShieldCheck className="w-4 h-4 text-amber-500" /> : <User className="w-4 h-4" />}
             >
               {user
-                ? (isSuperAdmin ? '👑 Super Admin' : isContractor ? (lang === 'fr' ? 'Mon Entreprise' : 'بوابة المقاولة') : t('nav.dashboard'))
+                ? (isSuperAdmin ? '👑 Super Admin' : isContractor ? (lang === 'fr' ? 'Mon Espace Client' : 'بوابة الزبون') : t('nav.dashboard'))
                 : t('nav.login')}
             </Button>
 

@@ -21,8 +21,10 @@ import {
   MessageSquare,
   ShieldCheck,
   AlertCircle,
+  Compass,
 } from 'lucide-react';
 import { Booking, ContractorSite } from '../types/database';
+import { getClientSegmentOption } from '../data/clientSegments';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
@@ -113,7 +115,19 @@ export const ContractorDashboardPage: React.FC = () => {
     loadData();
   }, [user, profile]);
 
-  const companyTitle = profile?.company_name || profile?.full_name || (lang === 'fr' ? 'Entreprise BTP' : 'مقاولة البناء');
+  const segmentOpt = getClientSegmentOption(profile?.client_segment);
+  const clientSegmentBadge = profile?.client_segment
+    ? lang === 'fr'
+      ? segmentOpt.labelFr
+      : segmentOpt.labelAr
+    : lang === 'fr'
+    ? 'Espace Client & Projets'
+    : 'بوابة الزبون ومواقع العمل';
+
+  const companyTitle =
+    profile?.company_name ||
+    profile?.full_name ||
+    (lang === 'fr' ? 'Cher client' : 'عزيزي الزبون');
 
   return (
     <div className="space-y-5 sm:space-y-6 text-start max-w-full overflow-x-hidden">
@@ -122,9 +136,7 @@ export const ContractorDashboardPage: React.FC = () => {
         <div className="relative z-10 max-w-2xl space-y-2.5 sm:space-y-3">
           <div className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 rounded-full bg-primary/20 text-primary border border-primary/30 text-[11px] sm:text-xs font-black max-w-full">
             <HardHat className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">
-              {lang === 'fr' ? 'Espace Professionnel Entreprise' : 'بوابة مقاولات البناء والأشغال الكبرى'}
-            </span>
+            <span className="truncate">{clientSegmentBadge}</span>
           </div>
 
           <h1 className="text-lg sm:text-3xl font-black text-white leading-snug break-words">
@@ -133,8 +145,8 @@ export const ContractorDashboardPage: React.FC = () => {
 
           <p className="text-xs sm:text-sm text-steel-300 leading-relaxed">
             {lang === 'fr'
-              ? 'Localisez les engins de chantier les plus proches de vos projets en temps réel, réservez en direct et prolongez vos locations sans intermédiaire.'
-              : 'حدد موقع ورش العمل على الخريطة لرصد أقرب الآليات المتاحة فوراً بنظام الرادار، مع إمكانية الحجز المباشر وطلب تمديد الكراء.'}
+              ? 'Que ce soit pour un chantier BTP, une ferme agricole ou un terrain privé, localisez les engins les plus proches, réservez en direct et suivez vos locations sans intermédiaire.'
+              : 'سواء لورش بناء، ضيعة فلاحية أو بقعة أرضية، حدد موقع عملك على الخريطة لرصد أقرب الآليات المتاحة فوراً، تصفح السوق، واحجز مباشرة مع الملاك.'}
           </p>
 
           <div className="pt-2 sm:pt-3 flex flex-col sm:flex-row sm:items-center gap-2.5 sm:gap-3 sm:flex-wrap">
@@ -142,22 +154,33 @@ export const ContractorDashboardPage: React.FC = () => {
               type="button"
               variant="primary"
               size="md"
-              onClick={() => navigate('/entreprise/map')}
-              leftIcon={<MapPin className="w-4 h-4" />}
+              onClick={() => navigate('/entreprise/projects?addSite=1')}
+              leftIcon={<PlusCircle className="w-4 h-4" />}
               className="w-full sm:w-auto justify-center font-black text-xs sm:text-sm shadow-md"
             >
-              {lang === 'fr' ? 'Ouvrir le Radar InDrive Chantiers' : 'فتح رادار أقرب الآليات للورش'}
+              {lang === 'fr' ? 'Ajouter un site de travail' : 'إضافة موقع للعمل'}
             </Button>
 
             <Button
               type="button"
               variant="dark-outline"
               size="md"
-              onClick={() => navigate('/entreprise/bookings')}
-              leftIcon={<CalendarCheck className="w-4 h-4 text-primary" />}
+              onClick={() => navigate('/marketplace')}
+              leftIcon={<Compass className="w-4 h-4 text-primary" />}
               className="w-full sm:w-auto justify-center text-xs font-bold"
             >
-              {lang === 'fr' ? 'Mes locations actives' : 'متابعة حجوزاتي النشطة'}
+              {lang === 'fr' ? 'Marché des engins' : 'الدخول لسوق الآليات'}
+            </Button>
+
+            <Button
+              type="button"
+              variant="dark-outline"
+              size="md"
+              onClick={() => navigate('/entreprise/map')}
+              leftIcon={<MapPin className="w-4 h-4 text-primary" />}
+              className="w-full sm:w-auto justify-center text-xs font-bold"
+            >
+              {lang === 'fr' ? 'Radar engins proches' : 'رادار أقرب الآليات'}
             </Button>
 
             <Button
@@ -168,7 +191,7 @@ export const ContractorDashboardPage: React.FC = () => {
               leftIcon={<Building2 className="w-4 h-4 text-primary" />}
               className="w-full sm:w-auto justify-center text-xs font-bold"
             >
-              {lang === 'fr' ? 'Modifier mes informations' : 'تعديل معلومات المقاولة'}
+              {lang === 'fr' ? 'Modifier mes informations' : 'تعديل معلوماتي'}
             </Button>
           </div>
         </div>
@@ -188,7 +211,7 @@ export const ContractorDashboardPage: React.FC = () => {
           </div>
           <div className="min-w-0 flex-1">
             <span className="text-[10px] sm:text-[11px] font-bold text-steel-500 block leading-tight line-clamp-2">
-              {lang === 'fr' ? 'Engins sur chantier' : 'آليات تعمل بالورش حالياً'}
+              {lang === 'fr' ? 'Engins en service' : 'آليات تعمل بمواقعك حالياً'}
             </span>
             <span className="text-base sm:text-xl font-black text-ink tabular-nums mt-0.5 block">
               {activeBookings.length}
@@ -218,7 +241,7 @@ export const ContractorDashboardPage: React.FC = () => {
           </div>
           <div className="min-w-0 flex-1">
             <span className="text-[10px] sm:text-[11px] font-bold text-steel-500 block leading-tight line-clamp-2">
-              {lang === 'fr' ? 'Chantiers enregistrés' : 'أوراش ومشاريع نشطة'}
+              {lang === 'fr' ? 'Sites enregistrés' : 'مواقع عمل مسجلة'}
             </span>
             <span className="text-base sm:text-xl font-black text-ink tabular-nums mt-0.5 block">
               {savedSites.length}
@@ -250,12 +273,12 @@ export const ContractorDashboardPage: React.FC = () => {
           </div>
           <div className="min-w-0 flex-1">
             <h3 className="text-sm sm:text-base font-black text-ink leading-snug">
-              {lang === 'fr' ? 'Besoin d\'un engin urgent sur votre chantier ?' : 'هل تحتاج آلية أو شاحنة عاجلة لورشك الآن؟'}
+              {lang === 'fr' ? 'Besoin d\'un engin urgent pour vos travaux ?' : 'هل تحتاج آلية أو شاحنة عاجلة لموقع عملك الآن؟'}
             </h3>
             <p className="text-xs text-steel-600 mt-1 leading-relaxed">
               {lang === 'fr'
-                ? 'Pointez votre chantier sur la carte et voyez immédiatement les engins disponibles avec la distance exacte et l\'estimation d\'arrivée.'
-                : 'حدد موقع الورش على الخريطة، وسيرصد لك الرادار أقرب الآليات المتاحة مع المسافة بالكيلومتر ووقت الوصول التقديري.'}
+                ? 'Pointez votre terrain, ferme ou chantier sur la carte et voyez immédiatement les engins disponibles avec la distance exacte et l\'estimation d\'arrivée.'
+                : 'حدد موقع أرضك، ضيعتك أو ورشك على الخريطة، وسيرصد لك الرادار أقرب الآليات المتاحة مع المسافة بالكيلومتر ووقت الوصول التقديري.'}
             </p>
           </div>
         </div>
@@ -278,7 +301,7 @@ export const ContractorDashboardPage: React.FC = () => {
           <h2 className="text-base sm:text-lg font-black text-ink flex items-center gap-2 min-w-0">
             <Truck className="w-5 h-5 text-primary shrink-0" />
             <span className="leading-snug">
-              {lang === 'fr' ? 'Engins actuellement actifs sur vos chantiers' : 'الآليات العاملة في أوراشك حالياً'}
+              {lang === 'fr' ? 'Engins actuellement actifs sur vos sites' : 'الآليات العاملة في مواقعك حالياً'}
             </span>
           </h2>
 
@@ -298,8 +321,8 @@ export const ContractorDashboardPage: React.FC = () => {
             <Truck className="w-10 h-10 text-steel-300 mx-auto" />
             <p className="text-xs text-steel-500 leading-relaxed">
               {lang === 'fr'
-                ? 'Aucune machine n\'est actuellement en cours de location sur vos chantiers.'
-                : 'لا توجد آليات تعمل في أوراشك حالياً. يمكنك تصفح السوق أو استخدام الرادار لكراء آلية فوراً.'}
+                ? 'Aucune machine n\'est actuellement en cours de location sur vos sites.'
+                : 'لا توجد آليات تعمل في مواقعك حالياً. يمكنك تصفح السوق أو إضافة موقع للعمل والبحث عبر الرادار.'}
             </p>
             <Button
               type="button"
@@ -334,7 +357,7 @@ export const ContractorDashboardPage: React.FC = () => {
                     <div className="min-w-0 flex-1 space-y-1">
                       <div className="flex items-center justify-between gap-2 flex-wrap">
                         <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black shrink-0">
-                          {lang === 'fr' ? 'En activité' : 'قيد العمل بالورش'}
+                          {lang === 'fr' ? 'En activité' : 'قيد العمل بالموقع'}
                         </span>
                         <span className="text-xs font-black text-primary-dark tabular-nums shrink-0">
                           {b.total_price.toLocaleString('fr-FR')} MAD

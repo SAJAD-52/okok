@@ -193,7 +193,7 @@ export const ContractorBookingsPage: React.FC = () => {
       case 'active':
         return (
           <Badge variant="success" className="text-[11px] font-black">
-            {lang === 'fr' ? 'En cours sur chantier' : 'قيد التشغيل في الورش'}
+            {lang === 'fr' ? 'En cours sur site' : 'قيد التشغيل في الموقع'}
           </Badge>
         );
       case 'pending':
@@ -205,7 +205,7 @@ export const ContractorBookingsPage: React.FC = () => {
       case 'completed':
         return (
           <Badge variant="neutral" className="text-[11px] font-bold">
-            {lang === 'fr' ? 'Chantier terminé' : 'مكتمل ومسترجع'}
+            {lang === 'fr' ? 'Mission terminée' : 'مكتمل ومسترجع'}
           </Badge>
         );
       case 'cancelled':
@@ -229,8 +229,8 @@ export const ContractorBookingsPage: React.FC = () => {
           </h1>
           <p className="text-xs text-steel-500 mt-1">
             {lang === 'fr'
-              ? 'Gérez les engins affectés à vos chantiers, demandez des prolongations et communiquez avec les propriétaires.'
-              : 'تابع الآليات العاملة في أوراشك حالياً، اطلب تمديد فترة العمل، وتواصل مباشرة مع أرباب الآليات.'}
+              ? 'Gérez les engins affectés à vos sites de travail, demandez des prolongations et communiquez avec les propriétaires.'
+              : 'تابع الآليات العاملة في مواقعك حالياً، اطلب تمديد فترة العمل، وتواصل مباشرة مع أرباب الآليات.'}
           </p>
         </div>
 
@@ -242,7 +242,7 @@ export const ContractorBookingsPage: React.FC = () => {
           leftIcon={<Search className="w-4 h-4" />}
           className="shrink-0"
         >
-          {lang === 'fr' ? 'Chercher un engin proche' : 'ابحث عن أقرب آلية لورشك (الرادار)'}
+          {lang === 'fr' ? 'Chercher un engin proche' : 'ابحث عن أقرب آلية لموقعك (الرادار)'}
         </Button>
       </div>
 
@@ -250,7 +250,7 @@ export const ContractorBookingsPage: React.FC = () => {
       <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1 text-xs">
         {[
           { key: 'all', label: lang === 'fr' ? 'Toutes les locations' : 'جميع العمليات' },
-          { key: 'active', label: lang === 'fr' ? 'En cours sur chantier' : 'نشطة بالورش حالياً' },
+          { key: 'active', label: lang === 'fr' ? 'En cours sur site' : 'نشطة بالموقع حالياً' },
           { key: 'pending', label: lang === 'fr' ? 'En attente' : 'قيد التأكيد' },
           { key: 'completed', label: lang === 'fr' ? 'Terminées' : 'مكتملة' },
         ].map((f) => (
@@ -292,12 +292,12 @@ export const ContractorBookingsPage: React.FC = () => {
           </div>
           <div className="max-w-md mx-auto">
             <h3 className="text-base font-black text-ink">
-              {lang === 'fr' ? 'Aucune machine louée pour le moment' : 'لا توجد آليات مؤجرة حالياً لأوراشك'}
+              {lang === 'fr' ? 'Aucune machine louée pour le moment' : 'لا توجد آليات مؤجرة حالياً لمواقعك'}
             </h3>
             <p className="text-xs text-steel-500 mt-1">
               {lang === 'fr'
-                ? 'Utilisez le radar interactif pour localiser les engins les plus proches de votre chantier.'
-                : 'استخدم رادار الخريطة لتحديد موقع ورشك واكتشاف أقرب الآليات المتاحة مع أسعار التوصيل الفوري.'}
+                ? 'Utilisez le radar interactif pour localiser les engins les plus proches de votre site de travail.'
+                : 'استخدم رادار الخريطة لتحديد موقع عملك واكتشاف أقرب الآليات المتاحة مع أسعار التوصيل الفوري.'}
             </p>
           </div>
           <Button
@@ -307,7 +307,7 @@ export const ContractorBookingsPage: React.FC = () => {
             onClick={() => navigate('/entreprise/map')}
             leftIcon={<Sparkles className="w-4 h-4 text-ink" />}
           >
-            {lang === 'fr' ? 'Ouvrir le Radar Chantiers InDrive' : 'فتح رادار الأوراش وخريطة الآليات'}
+            {lang === 'fr' ? 'Ouvrir le Radar des Engins' : 'فتح رادار المواقع وخريطة الآليات'}
           </Button>
         </Card>
       ) : (
@@ -428,7 +428,7 @@ export const ContractorBookingsPage: React.FC = () => {
                 {b.notes && (
                   <div className="mt-4 pt-3 border-t border-steel-100 text-[11px] text-steel-600 bg-steel-50/80 p-2.5 rounded-xl">
                     <span className="font-bold text-ink block mb-0.5">
-                      {lang === 'fr' ? 'Notes du chantier & Suivi :' : 'ملاحظات وتفاصيل التمديد:'}
+                      {lang === 'fr' ? 'Notes du site & Suivi :' : 'ملاحظات الموقع وتفاصيل التمديد:'}
                     </span>
                     <p className="whitespace-pre-line">{b.notes}</p>
                   </div>

@@ -101,9 +101,9 @@ export const AdminPage: React.FC = () => {
     try {
       const updated = await platformSettingsStore.updateSettings(settingsForm);
       setSettingsForm(updated);
-      toast.success('✅ تم حفظ وتحديث بيانات الدفع بنجاح! ستظهر فوراً للملاك عند انتهاء المدة التجريبية.');
-    } catch {
-      toast.error('حدث خطأ أثناء حفظ الإعدادات');
+      toast.success('✅ تم حفظ ومزامنة إعدادات الدفع في قاعدة البيانات بنجاح! ستظهر فوراً لجميع الملاك.');
+    } catch (err: any) {
+      toast.error(err?.message || 'حدث خطأ أثناء حفظ الإعدادات في قاعدة البيانات');
     } finally {
       setIsSavingSettings(false);
     }
@@ -1026,6 +1026,15 @@ export const AdminPage: React.FC = () => {
               {/* Settings Form */}
               <Card className="lg:col-span-7 p-6 bg-white border border-steel-200 shadow-soft">
                 <form onSubmit={handleSaveSettings} className="space-y-4">
+                  {(!settingsForm.rib_number?.trim() || !settingsForm.whatsapp_number?.trim()) && (
+                    <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-300 text-xs text-amber-950 font-bold flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <span>
+                        تنبيه قبل الإطلاق: لم يتم بعد إدخال رقم الـ RIB الحقيقي أو رقم واتساب الدعم. أدخل بياناتك الفعلية واضغط حفظ لتظهر لجميع الملاك في المنصة.
+                      </span>
+                    </div>
+                  )}
+
                   <h3 className="text-sm font-extrabold text-ink border-b border-steel-100 pb-2 flex items-center gap-2">
                     <CreditCard className="w-4 h-4 text-primary-dark" />
                     <span>بيانات الحساب البنكي والهوية الوطنية (الظاهرة للملاك)</span>
@@ -1099,8 +1108,7 @@ export const AdminPage: React.FC = () => {
                       type="text"
                       value={settingsForm.rib_number}
                       onChange={(e) => setSettingsForm({ ...settingsForm, rib_number: e.target.value })}
-                      placeholder="007 780 0001234567890123 45"
-                      required
+                      placeholder="أدخل رقم الـ RIB البنكي الحقيقي (24 رقماً)"
                       dir="ltr"
                       className="w-full px-3.5 py-2.5 rounded-xl border border-steel-300 font-mono text-xs font-bold tracking-wider focus:outline-none focus:ring-2 focus:ring-primary bg-surface"
                     />
@@ -1134,8 +1142,7 @@ export const AdminPage: React.FC = () => {
                         type="text"
                         value={settingsForm.cin_number}
                         onChange={(e) => setSettingsForm({ ...settingsForm, cin_number: e.target.value.toUpperCase() })}
-                        placeholder="مثال: AB 123456"
-                        required
+                        placeholder="رقم البطاقة الوطنية (اختياري لوكالات الكاش)"
                         dir="ltr"
                         className="w-full px-3.5 py-2.5 rounded-xl border border-steel-300 font-mono text-xs font-bold uppercase focus:outline-none focus:ring-2 focus:ring-primary bg-surface"
                       />
@@ -1152,7 +1159,7 @@ export const AdminPage: React.FC = () => {
                         type="text"
                         value={settingsForm.whatsapp_number}
                         onChange={(e) => setSettingsForm({ ...settingsForm, whatsapp_number: e.target.value })}
-                        placeholder="+212661234567"
+                        placeholder="+2126XXXXXXXX"
                         required
                         dir="ltr"
                         className="w-full px-3.5 py-2.5 rounded-xl border border-steel-300 font-mono text-xs font-bold focus:outline-none focus:ring-2 focus:ring-primary bg-surface"

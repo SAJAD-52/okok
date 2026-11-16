@@ -465,25 +465,39 @@ export const AuthPage: React.FC = () => {
                 </div>
               )}
 
-              {/* Forgot Password Support via WhatsApp */}
-              {mode === 'login' && (
-                <div className="mt-2 flex justify-end">
-                  <a
-                    href={`https://wa.me/${(platformSettingsStore.getSettings().whatsapp_number || '+212661234567').replace(/\D/g, '')}?text=${encodeURIComponent(
-                      lang === 'fr'
-                        ? `Bonjour, j'ai oublié mon mot de passe JADIJCB pour le numéro: ${phone || '...'}`
-                        : `السلام عليكم، نسيت كلمة المرور لحسابي في منصة JADIJCB المرتبط بالرقم: ${phone || '...'}`
-                    )}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-[11px] font-bold text-primary-dark hover:underline"
-                  >
-                    {lang === 'fr'
-                      ? 'Mot de passe oublié ? Contacter le support'
-                      : 'نسيت كلمة المرور؟ تواصل مع الدعم لإعادة التعيين'}
-                  </a>
-                </div>
-              )}
+              {/* Forgot Password Support via WhatsApp or Email */}
+              {mode === 'login' && (() => {
+                const supportWa = (platformSettingsStore.getSettings().whatsapp_number || '').replace(/\D/g, '');
+                const forgotText =
+                  lang === 'fr'
+                    ? `Bonjour, j'ai oublié mon mot de passe JADIJCB pour le numéro: ${phone || '...'}`
+                    : `السلام عليكم، نسيت كلمة المرور لحسابي في منصة JADIJCB المرتبط بالرقم: ${phone || '...'}`;
+                return (
+                  <div className="mt-2 flex justify-end">
+                    {supportWa.length >= 9 ? (
+                      <a
+                        href={`https://wa.me/${supportWa}?text=${encodeURIComponent(forgotText)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[11px] font-bold text-primary-dark hover:underline"
+                      >
+                        {lang === 'fr'
+                          ? 'Mot de passe oublié ? Contacter le support'
+                          : 'نسيت كلمة المرور؟ تواصل مع الدعم لإعادة التعيين'}
+                      </a>
+                    ) : (
+                      <a
+                        href={`mailto:said.cpge24@gmail.com?subject=${encodeURIComponent('JADIJCB Password Reset')}&body=${encodeURIComponent(forgotText)}`}
+                        className="text-[11px] font-bold text-primary-dark hover:underline"
+                      >
+                        {lang === 'fr'
+                          ? 'Mot de passe oublié ? Contacter le support'
+                          : 'نسيت كلمة المرور؟ تواصل مع الدعم لإعادة التعيين'}
+                      </a>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Submit Button */}

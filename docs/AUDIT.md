@@ -5,9 +5,10 @@
 | AUD-001 | src/components/dashboard/SoftLockModal.tsx | Payment proof upload ignored errors, used fake Unsplash fallback image, and reported fake success on DB insert failure. | P0 | FIXED |
 | AUD-002 | src/pages/AdminPage.tsx | Payment approval called RPC without checking errors and gave fake success; receipt preview failed with 404 on private bucket paths. | P0 | FIXED |
 | AUD-003 | src/pages/MachineDetailPage.tsx | Relationship ambiguity on profiles join failed to load real owner phone, falling back to dummy phone and breaking WhatsApp leads. | P0 | FIXED |
-| AUD-004 | src/pages/MarketplacePage.tsx | loadSupabaseMachines did not flag error state when query failed on slow/dropped networks. | P1 | OPEN |
-| AUD-005 | src/pages/AuthPage.tsx | Password minimum length validation lacked inline status indicator on mobile. | P2 | OPEN |
+| AUD-004 | src/pages/MarketplacePage.tsx | loadSupabaseMachines did not flag error state when query failed on slow/dropped networks, and city/sort filters mismatched DB formats. | P1 | FIXED |
+| AUD-005 | src/pages/AuthPage.tsx | Password minimum length validation lacked inline status indicator on mobile. | P2 | FIXED |
 | AUD-006 | src/components/machines/MachineStepperModal.tsx | Ephemeral blob: URLs stored in machine.images instead of uploading compressed photos to Supabase Storage bucket machine-images. | P0 | FIXED |
 | AUD-007 | src/pages/DashboardOverviewPage.tsx, src/pages/BookingsPage.tsx | Booking status transitions updated state without checking Supabase { error }, showing fake success on failure. | P1 | FIXED |
 | AUD-008 | src/components/dashboard/SoftLockModal.tsx, src/components/dashboard/PaymentProofModal.tsx | Receipts > 5MB taken on phone cameras were hard-blocked instead of client-side compressed via compressImage. | P2 | FIXED |
 | AUD-009 | src/components/bookings/CreateBookingModal.tsx, src/pages/BookingsPage.tsx, src/lib/bookingStore.ts | Contractor booking requests did not reach owner dashboard due to strict UUID owner validation, fragile PostgREST joins, and missing machine-level RLS policy. | P0 | FIXED |
+| AUD-010 | supabase/migrations/20261115010000_platform_settings.sql, src/lib/platformSettings.ts | Missing platform_settings DB table/RLS and hardcoded fake RIB/CIN/WhatsApp placeholders across payment modals. | P0 | FIXED |

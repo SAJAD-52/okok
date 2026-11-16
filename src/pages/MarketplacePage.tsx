@@ -27,6 +27,8 @@ import { CreateBookingModal } from '../components/bookings/CreateBookingModal';
 import { useLanguage } from '../hooks/useLanguage';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { machineStore } from '../lib/machineStore';
+import { MOROCCAN_CITIES, getCityById } from '../data/cities';
+import { calculateDistanceKm } from '../lib/geoUtils';
 import { Machine } from '../types/database';
 
 const PAGE_SIZE = 12;
@@ -38,6 +40,8 @@ export const MarketplacePage: React.FC = () => {
 
   const [viewMode, setViewMode] = useState<'grid' | 'map'>('grid');
   const [machines, setMachines] = useState<Machine[]>([]);
+  const [totalRemoteCount, setTotalRemoteCount] = useState<number>(0);
+  const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isError, setIsError] = useState(false);
   const [page, setPage] = useState(1);
@@ -61,93 +65,164 @@ export const MarketplacePage: React.FC = () => {
 
   const isSparePartsSection = sectionParam === 'spare_parts' || categoryParam === 'spare-parts';
 
+  // Reset pagination when primary remote query filters change
+  useEffect(() => {
+    setPage(1);
+  }, [sectionParam, modeParam, categoryParam, cityParam, sortParam]);
+
+  // Request user geolocation lazily only when sorting by nearest
+  useEffect(() => {
+    if (sortParam !== 'nearest' || userCoords) return;
+    if (typeof navigator !== 'undefined' && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => setUserCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        () => {
+          const fallbackCity = getCityById(cityParam) || getCityById('casablanca');
+          if (fallbackCity) setUserCoords({ lat: fallbackCity.lat, lng: fallbackCity.lng });
+        },
+        { timeout: 4000, maximumAge: 300000 }
+      );
+    }
+  }, [sortParam, userCoords, cityParam]);
+
+  const mapSupabaseMachine = useCallback((m: any): Machine => {
+    const rawCity = String(m.city || '').trim();
+    const matchedCity = MOROCCAN_CITIES.find(
+      (c) =>
+        c.id.toLowerCase() === rawCity.toLowerCase() ||
+        c.name_ar === rawCity ||
+        c.name_fr.toLowerCase() === rawCity.toLowerCase()
+    );
+    return {
+      id: m.id,
+      owner_id: m.owner_id,
+      owner: m.profiles || undefined,
+      title_ar: m.title_ar,
+      title_fr: m.title_fr,
+      description_ar: m.description_ar,
+      description_fr: m.description_fr,
+      category: m.category,
+      category_id: m.category,
+      brand: m.brand,
+      model: m.model,
+      year: m.year,
+      listing_mode: m.listing_mode,
+      condition: m.condition || 'good',
+      city: m.city,
+      city_id: matchedCity?.id || m.city,
+      lat: m.lat ?? matchedCity?.lat,
+      lng: m.lng ?? matchedCity?.lng,
+      location_lat: m.lat ?? matchedCity?.lat,
+      location_lng: m.lng ?? matchedCity?.lng,
+      rate_hourly: Number(m.hourly_rate) || 0,
+      rate_daily: Number(m.daily_rate) || 0,
+      rate_weekly: Number(m.weekly_rate) || 0,
+      sale_price: Number(m.sale_price) || 0,
+      currency: 'MAD',
+      with_operator: Boolean(m.with_operator),
+      fuel_included: Boolean(m.fuel_included),
+      delivery_available: Boolean(m.delivery_available),
+      status: 'available',
+      images: m.images || [],
+      specs: m.specs || {},
+      views_count: m.views_count || 0,
+      rating_avg: m.rating_avg || 0,
+      reviews_count: m.reviews_count || 0,
+      created_at: m.created_at,
+      updated_at: m.created_at,
+    };
+  }, []);
+
   // Load from Supabase with range queries & merge machineStore
   const loadSupabaseMachines = useCallback(async () => {
     setIsLoading(true);
     setIsError(false);
 
     let mapped: Machine[] = [];
+    let remoteCount = 0;
 
     if (isSupabaseConfigured) {
-      try {
+      const buildQuery = (withOwnerJoin: boolean) => {
+        const selectStr = withOwnerJoin
+          ? '*, profiles:owner_id(full_name, company_name, phone, city)'
+          : '*';
         let query = supabase
           .from('machines')
-          .select('*', { count: 'exact' })
+          .select(selectStr, { count: 'exact' })
           .eq('is_published', true);
 
-        if (modeParam && modeParam !== 'all' && !isSparePartsSection) {
-          query = query.eq('listing_mode', modeParam);
-        }
-        if (categoryParam) {
-          query = query.eq('category', categoryParam);
-        }
-        if (cityParam) {
-          query = query.ilike('city', `%${cityParam}%`);
+        if (isSparePartsSection) {
+          query = query.eq('category', 'spare-parts');
+        } else {
+          if (modeParam && modeParam !== 'all') {
+            query = query.eq('listing_mode', modeParam);
+          }
+          if (categoryParam) {
+            query = query.eq('category', categoryParam);
+          }
         }
 
-        // Ordering
+        if (cityParam) {
+          const cityObj = getCityById(cityParam);
+          if (cityObj) {
+            query = query.or(
+              `city.ilike.%${cityObj.id}%,city.ilike.%${cityObj.name_ar}%,city.ilike.%${cityObj.name_fr}%`
+            );
+          } else {
+            query = query.ilike('city', `%${cityParam}%`);
+          }
+        }
+
         if (sortParam === 'price_asc') {
-          query = query.order('daily_rate', { ascending: true, nullsFirst: false });
+          const orderCol = isSparePartsSection || modeParam === 'sale' ? 'sale_price' : 'daily_rate';
+          query = query.order(orderCol, { ascending: true, nullsFirst: false });
         } else if (sortParam === 'price_desc') {
-          query = query.order('daily_rate', { ascending: false, nullsFirst: false });
+          const orderCol = isSparePartsSection || modeParam === 'sale' ? 'sale_price' : 'daily_rate';
+          query = query.order(orderCol, { ascending: false, nullsFirst: false });
         } else {
           query = query.order('created_at', { ascending: false });
         }
 
         const from = 0;
         const to = page * PAGE_SIZE - 1;
-        query = query.range(from, to);
+        return query.range(from, to);
+      };
 
-        const { data, error } = await query;
-        if (!error && data) {
-          mapped = data.map((m: any) => ({
-            id: m.id,
-            owner_id: m.owner_id,
-            title_ar: m.title_ar,
-            title_fr: m.title_fr,
-            description_ar: m.description_ar,
-            description_fr: m.description_fr,
-            category: m.category,
-            category_id: m.category,
-            brand: m.brand,
-            model: m.model,
-            year: m.year,
-            listing_mode: m.listing_mode,
-            condition: m.condition || 'good',
-            city: m.city,
-            city_id: m.city,
-            lat: m.lat,
-            lng: m.lng,
-            location_lat: m.lat,
-            location_lng: m.lng,
-            rate_hourly: Number(m.hourly_rate) || 0,
-            rate_daily: Number(m.daily_rate) || 0,
-            rate_weekly: Number(m.weekly_rate) || 0,
-            sale_price: Number(m.sale_price) || 0,
-            currency: 'MAD',
-            with_operator: Boolean(m.with_operator),
-            fuel_included: Boolean(m.fuel_included),
-            delivery_available: Boolean(m.delivery_available),
-            status: 'available',
-            images: m.images || [],
-            specs: m.specs || {},
-            views_count: m.views_count || 0,
-            rating_avg: m.rating_avg || 0,
-            reviews_count: m.reviews_count || 0,
-            created_at: m.created_at,
-            updated_at: m.created_at,
-          }));
+      try {
+        let { data, count, error } = await buildQuery(true);
+        if (error) {
+          // Retry without foreign-key alias in case relationship name differs
+          const fallback = await buildQuery(false);
+          data = fallback.data;
+          count = fallback.count;
+          error = fallback.error;
+        }
+
+        if (error) {
+          console.warn('Marketplace query failed:', error.message);
+          setIsError(true);
+          setIsLoading(false);
+          return;
+        }
+
+        if (data) {
+          mapped = data.map(mapSupabaseMachine);
+          remoteCount = typeof count === 'number' ? count : data.length;
         }
       } catch (err) {
-        console.warn('Marketplace load notice:', err);
+        console.warn('Marketplace load error:', err);
+        setIsError(true);
+        setIsLoading(false);
+        return;
       }
     }
 
-    // Always merge real machines created by owners
+    // Merge real locally saved machines when Supabase doesn't already include them
     const finalMachines = machineStore.mergeMachines(mapped);
     setMachines(finalMachines);
+    setTotalRemoteCount(Math.max(remoteCount, finalMachines.length));
     setIsLoading(false);
-  }, [modeParam, categoryParam, cityParam, sortParam, page, isSparePartsSection]);
+  }, [modeParam, categoryParam, cityParam, sortParam, page, isSparePartsSection, mapSupabaseMachine]);
 
   useEffect(() => {
     loadSupabaseMachines();
@@ -278,9 +353,21 @@ export const MarketplacePage: React.FC = () => {
         }
       }
 
-      // 7. City filter
-      if (cityParam && !item.city?.toLowerCase().includes(cityParam.toLowerCase()) && item.city_id !== cityParam) {
-        return false;
+      // 7. City filter (matches slug ID, Arabic name, and French name)
+      if (cityParam) {
+        const cityObj = getCityById(cityParam);
+        const itemCityLower = (item.city || '').toLowerCase();
+        const itemCityIdLower = (item.city_id || '').toLowerCase();
+        const paramLower = cityParam.toLowerCase();
+        const matchesCity = cityObj
+          ? itemCityIdLower === cityObj.id ||
+            itemCityLower.includes(cityObj.id) ||
+            itemCityLower.includes(cityObj.name_ar.toLowerCase()) ||
+            itemCityLower.includes(cityObj.name_fr.toLowerCase())
+          : itemCityLower.includes(paramLower) || itemCityIdLower === paramLower;
+        if (!matchesCity) {
+          return false;
+        }
       }
 
       // 8. Max price
@@ -300,6 +387,29 @@ export const MarketplacePage: React.FC = () => {
       }
 
       return true;
+    }).sort((a, b) => {
+      const priceOf = (item: Machine) => {
+        const isPart = item.category === 'spare-parts' || item.category_id === 'spare-parts';
+        return item.listing_mode === 'sale' || isPart
+          ? Number(item.sale_price) || 0
+          : Number(item.rate_daily) || 0;
+      };
+
+      if (sortParam === 'price_asc') {
+        const pa = priceOf(a) || Number.MAX_SAFE_INTEGER;
+        const pb = priceOf(b) || Number.MAX_SAFE_INTEGER;
+        return pa - pb;
+      }
+      if (sortParam === 'price_desc') {
+        return priceOf(b) - priceOf(a);
+      }
+      if (sortParam === 'nearest') {
+        const origin = userCoords || { lat: 33.5731, lng: -7.5898 };
+        const da = calculateDistanceKm(origin.lat, origin.lng, a.lat || a.location_lat || 33.5731, a.lng || a.location_lng || -7.5898);
+        const db = calculateDistanceKm(origin.lat, origin.lng, b.lat || b.location_lat || 33.5731, b.lng || b.location_lng || -7.5898);
+        return da - db;
+      }
+      return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
     });
   }, [
     machines,
@@ -314,10 +424,13 @@ export const MarketplacePage: React.FC = () => {
     maxPriceParam,
     operatorParam,
     deliveryParam,
+    sortParam,
+    userCoords,
   ]);
 
   const visibleMachines = filteredMachines;
-  const hasMore = machines.length === page * PAGE_SIZE;
+  const remainingRemote = Math.max(0, totalRemoteCount - page * PAGE_SIZE);
+  const hasMore = remainingRemote > 0;
 
   return (
     <div className="min-h-screen bg-surface flex flex-col justify-between text-start">
@@ -587,8 +700,8 @@ export const MarketplacePage: React.FC = () => {
                           rightIcon={<ChevronDown className="w-4 h-4" />}
                         >
                           {lang === 'fr'
-                            ? `Charger plus d'annonces (${filteredMachines.length - visibleMachines.length} restantes)`
-                            : `تحميل المزيد من العروض (${filteredMachines.length - visibleMachines.length} متبقية)`}
+                            ? `Charger plus d'annonces (${remainingRemote} restantes)`
+                            : `تحميل المزيد من العروض (${remainingRemote} متبقية)`}
                         </Button>
                       </div>
                     )}

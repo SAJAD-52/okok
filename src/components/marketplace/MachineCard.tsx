@@ -79,12 +79,16 @@ export const MachineCard: React.FC<MachineCardProps> = ({ machine, onBookClick }
     (machine.owner_id === currentUserId || (profile && machine.owner_id === profile.id))
   );
 
-  // WhatsApp prefilled message & link
-  const ownerPhone = (
+  // WhatsApp prefilled message & link (only when real owner phone exists)
+  const rawOwnerPhone = (
     machine.owner?.phone ||
     (machine as any).phone ||
-    '212661234567'
+    ''
   ).replace(/\D/g, '');
+  const ownerPhone = rawOwnerPhone.startsWith('0') && rawOwnerPhone.length === 10
+    ? `212${rawOwnerPhone.slice(1)}`
+    : rawOwnerPhone;
+  const hasOwnerWhatsapp = ownerPhone.length >= 9;
 
   const machineTitle = (lang === 'fr' ? machine.title_fr : machine.title_ar) || `${machine.brand} ${machine.model}`;
   const whatsappMsg = encodeURIComponent(
@@ -96,7 +100,7 @@ export const MachineCard: React.FC<MachineCardProps> = ({ machine, onBookClick }
           ? `السلام عليكم، أرغب في شراء قطعة الغيار "${machineTitle}" (${machine.city || 'المغرب'}) المعروضة بسعر ${machine.sale_price?.toLocaleString('fr-FR')} د.م على منصة JADIJCB.\nالرابط: ${typeof window !== 'undefined' ? window.location.origin : ''}/marketplace/${machine.id}`
           : `السلام عليكم، أرغب في حجز الآلية "${machineTitle}" (${machine.city || 'المغرب'}) المعروضة بسعر ${machine.rate_daily?.toLocaleString('fr-FR')} د.م/يوم على منصة JADIJCB.\nالرابط: ${typeof window !== 'undefined' ? window.location.origin : ''}/marketplace/${machine.id}`)
   );
-  const whatsappLink = `https://wa.me/${ownerPhone}?text=${whatsappMsg}`;
+  const whatsappLink = hasOwnerWhatsapp ? `https://wa.me/${ownerPhone}?text=${whatsappMsg}` : '';
 
   const handleBookingClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -315,17 +319,19 @@ export const MachineCard: React.FC<MachineCardProps> = ({ machine, onBookClick }
               <span className="hidden sm:inline font-bold">{lang === 'fr' ? 'Chat' : 'محادثة'}</span>
             </button>
 
-            <a
-              href={whatsappLink}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              title={lang === 'fr' ? 'Contacter sur WhatsApp' : 'تواصل عبر واتساب'}
-              className="py-2 px-2.5 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] active:scale-[0.99] text-white text-xs font-bold shadow-xs transition-all flex items-center justify-center gap-1 cursor-pointer shrink-0"
-            >
-              <MessageCircle className="w-3.5 h-3.5 fill-current shrink-0" />
-              <span className="hidden sm:inline font-bold">{lang === 'fr' ? 'WhatsApp' : 'واتساب'}</span>
-            </a>
+            {hasOwnerWhatsapp && (
+              <a
+                href={whatsappLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                title={lang === 'fr' ? 'Contacter sur WhatsApp' : 'تواصل عبر واتساب'}
+                className="py-2 px-2.5 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] active:scale-[0.99] text-white text-xs font-bold shadow-xs transition-all flex items-center justify-center gap-1 cursor-pointer shrink-0"
+              >
+                <MessageCircle className="w-3.5 h-3.5 fill-current shrink-0" />
+                <span className="hidden sm:inline font-bold">{lang === 'fr' ? 'WhatsApp' : 'واتساب'}</span>
+              </a>
+            )}
           </div>
         ) : (
           <div className="flex items-center gap-1.5">
@@ -358,17 +364,19 @@ export const MachineCard: React.FC<MachineCardProps> = ({ machine, onBookClick }
               <span className="hidden sm:inline font-bold">{lang === 'fr' ? 'Chat' : 'محادثة'}</span>
             </button>
 
-            <a
-              href={whatsappLink}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              title={lang === 'fr' ? 'Contacter sur WhatsApp' : 'تواصل عبر واتساب'}
-              className="py-2 px-2.5 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] text-white text-xs font-bold shadow-xs transition-all flex items-center justify-center gap-1 cursor-pointer shrink-0"
-            >
-              <MessageCircle className="w-3.5 h-3.5 fill-current shrink-0" />
-              <span className="hidden sm:inline font-bold">{lang === 'fr' ? 'WhatsApp' : 'واتساب'}</span>
-            </a>
+            {hasOwnerWhatsapp && (
+              <a
+                href={whatsappLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                title={lang === 'fr' ? 'Contacter sur WhatsApp' : 'تواصل عبر واتساب'}
+                className="py-2 px-2.5 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] text-white text-xs font-bold shadow-xs transition-all flex items-center justify-center gap-1 cursor-pointer shrink-0"
+              >
+                <MessageCircle className="w-3.5 h-3.5 fill-current shrink-0" />
+                <span className="hidden sm:inline font-bold">{lang === 'fr' ? 'WhatsApp' : 'واتساب'}</span>
+              </a>
+            )}
           </div>
         )}
       </div>

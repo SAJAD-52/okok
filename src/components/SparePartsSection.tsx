@@ -2,6 +2,7 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { Wrench, ShieldCheck, Truck, Package, Clock, Phone, MessageSquare } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
+import { platformSettingsStore } from '../lib/platformSettings';
 
 export const SparePartsSection: React.FC = () => {
   const { t } = useTranslation();
@@ -47,10 +48,15 @@ export const SparePartsSection: React.FC = () => {
   ];
 
   const handleOrderParts = (partName: string) => {
-    const text = language === 'ar'
-      ? `السلام عليكم، أود الاستفسار وطلب عرض سعر لقطع الغيار: ${partName} عبر منصة JADIJCB`
-      : `Bonjour, je souhaite un devis pour les pièces détachées : ${partName} via JADIJCB`;
-    window.open(`https://wa.me/212661889900?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
+    const cleanWa = (platformSettingsStore.getSettings().whatsapp_number || '').replace(/\D/g, '');
+    if (cleanWa.length >= 9) {
+      const text = language === 'ar'
+        ? `السلام عليكم، أود الاستفسار وطلب عرض سعر لقطع الغيار: ${partName} عبر منصة JADIJCB`
+        : `Bonjour, je souhaite un devis pour les pièces détachées : ${partName} via JADIJCB`;
+      window.open(`https://wa.me/${cleanWa}?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
+    } else {
+      window.location.href = `/marketplace?section=spare_parts&category=spare-parts&q=${encodeURIComponent(partName)}`;
+    }
   };
 
   return (

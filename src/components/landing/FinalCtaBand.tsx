@@ -1,11 +1,22 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { MessageCircle, Phone } from 'lucide-react';
+import { MessageCircle } from 'lucide-react';
 import { DualCtaRow } from './DualCtaRow';
 import { useLanguage } from '../../hooks/useLanguage';
+import { platformSettingsStore } from '../../lib/platformSettings';
 
 export const FinalCtaBand: React.FC = () => {
   const { lang } = useLanguage();
+  const [waNumber, setWaNumber] = useState<string>(() => platformSettingsStore.getSettings().whatsapp_number || '');
+
+  useEffect(() => {
+    const sync = () => setWaNumber(platformSettingsStore.getSettings().whatsapp_number || '');
+    window.addEventListener('jadijcb_settings_updated', sync);
+    platformSettingsStore.pullFromRemote().then((s) => setWaNumber(s.whatsapp_number || ''));
+    return () => window.removeEventListener('jadijcb_settings_updated', sync);
+  }, []);
+
+  const cleanWa = waNumber.replace(/\D/g, '');
 
   return (
     <section className="relative bg-ink text-white py-14 sm:py-20 lg:py-24 border-b border-slate-800 overflow-hidden">
@@ -47,29 +58,22 @@ export const FinalCtaBand: React.FC = () => {
             <DualCtaRow centered={true} />
           </div>
 
-          {/* Direct WhatsApp Assistance Line */}
-          <div className="mt-8 pt-8 border-t border-slate-800 flex flex-wrap items-center justify-center gap-4 sm:gap-6 text-xs text-slate-300">
-            <a
-              href="https://wa.me/212661889900"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 hover:text-emerald-400 transition-colors"
-            >
-              <MessageCircle className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>
-                {lang === 'fr'
-                  ? 'WhatsApp Direct : +212 6 61 88 99 00'
-                  : 'واتساب الدعم الفني: 00 99 88 661 (212+)'}
-              </span>
-            </a>
-            <span className="hidden sm:inline text-slate-600" aria-hidden="true">·</span>
-            <div className="inline-flex items-center gap-2">
-              <Phone className="w-4 h-4 text-primary shrink-0" />
-              <span dir="ltr" className="font-mono latin-nums">
-                +212 (0) 522 98 44 20
-              </span>
+          {/* Direct WhatsApp Assistance Line (only rendered when configured by admin) */}
+          {cleanWa.length >= 9 && (
+            <div className="mt-8 pt-8 border-t border-slate-800 flex flex-wrap items-center justify-center gap-4 sm:gap-6 text-xs text-slate-300">
+              <a
+                href={`https://wa.me/${cleanWa}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 hover:text-emerald-400 transition-colors"
+              >
+                <MessageCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span dir="ltr" className="font-mono latin-nums">
+                  WhatsApp : {waNumber}
+                </span>
+              </a>
             </div>
-          </div>
+          )}
         </motion.div>
       </div>
     </section>

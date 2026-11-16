@@ -539,14 +539,18 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
     bookingStore.saveBooking(newBooking);
     setIsSubmitting(false);
 
-    // If WhatsApp requested, open chat with owner
+    // If WhatsApp requested, open chat with owner when real phone exists
     if (openWhatsApp) {
-      const rawOwnerPhone = (targetMachine?.owner?.phone || (targetMachine as any)?.phone || '+212661234567').replace(/\D/g, '');
-      const startStr = new Date(startDate).toLocaleDateString('fr-FR');
-      const endStr = new Date(endDate).toLocaleDateString('fr-FR');
-      const machineTitle = targetMachine?.title_ar || targetMachine?.title_fr || `${targetMachine?.brand} ${targetMachine?.model}`;
+      const digitsOnly = (targetMachine?.owner?.phone || (targetMachine as any)?.phone || '').replace(/\D/g, '');
+      const rawOwnerPhone = digitsOnly.startsWith('0') && digitsOnly.length === 10
+        ? `212${digitsOnly.slice(1)}`
+        : digitsOnly;
+      if (rawOwnerPhone.length >= 9) {
+        const startStr = new Date(startDate).toLocaleDateString('fr-FR');
+        const endStr = new Date(endDate).toLocaleDateString('fr-FR');
+        const machineTitle = targetMachine?.title_ar || targetMachine?.title_fr || `${targetMachine?.brand} ${targetMachine?.model}`;
 
-      const waMsg = `السلام عليكم ورحمة الله،
+        const waMsg = `السلام عليكم ورحمة الله،
 أود تأكيد طلب كراء الآلية عبر منصة JADIJCB:
 
 🚜 الآلية: ${machineTitle} (${targetMachine?.city || ''})
@@ -561,7 +565,8 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
 ${notes.trim() ? `📝 ملاحظات: ${notes.trim()}\n` : ''}
 🔗 الرابط: ${window.location.origin}/marketplace/${targetMachine?.id}`;
 
-      window.open(`https://wa.me/${rawOwnerPhone}?text=${encodeURIComponent(waMsg)}`, '_blank');
+        window.open(`https://wa.me/${rawOwnerPhone}?text=${encodeURIComponent(waMsg)}`, '_blank', 'noopener,noreferrer');
+      }
     }
 
     toast.success(

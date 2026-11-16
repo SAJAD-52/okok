@@ -52,6 +52,9 @@ export const MarketplaceFilterBar: React.FC<MarketplaceFilterBarProps> = ({
     } else {
       next.set(key, value);
     }
+    if (key === 'mode') {
+      next.delete('max_price');
+    }
     setSearchParams(next);
   };
 

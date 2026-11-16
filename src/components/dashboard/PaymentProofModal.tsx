@@ -177,10 +177,15 @@ export const PaymentProofModal: React.FC<PaymentProofModalProps> = ({
   };
 
   const userPhone = profile?.phone || '+2126XXXXXXXX';
-  const cleanPhone = (settings.whatsapp_number || '+212661234567').replace(/[^0-9]/g, '');
-  const whatsappUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(
-    `السلام عليكم، لقد أرسلت وصل أداء اشتراك JADIJCB (${settings.monthly_price_mad} د.م) لحساب ${userPhone}. رقم المرجع: ${reference || 'مرفق'}. شكراً.`
-  )}`;
+  const cleanPhone = (settings.whatsapp_number || '').replace(/[^0-9]/g, '');
+  const hasRib = Boolean(settings.rib_number && settings.rib_number.trim());
+  const hasCin = Boolean(settings.cin_number && settings.cin_number.trim());
+  const hasWhatsapp = cleanPhone.length >= 9;
+  const whatsappUrl = hasWhatsapp
+    ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(
+        `السلام عليكم، لقد أرسلت وصل أداء اشتراك JADIJCB (${settings.monthly_price_mad} د.م) لحساب ${userPhone}. رقم المرجع: ${reference || 'مرفق'}. شكراً.`
+      )}`
+    : '';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/80 backdrop-blur-md overflow-y-auto">
@@ -230,17 +235,19 @@ export const PaymentProofModal: React.FC<PaymentProofModalProps> = ({
                   ? 'Notre équipe vérifie les virements et transferts bancaires 7j/7. Votre compte sera mis à jour automatiquement.'
                   : 'فريق العمل يتحقق من الحوالات والتحويلات البنكية على مدار الساعة. يمكنك مراسلتنا فوراً عبر الواتساب لتسريع التفعيل.'}
               </p>
-              <div className="pt-4">
-                <a
-                  href={whatsappUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-colors shadow-md min-h-[44px]"
-                >
-                  <MessageCircle className="w-4 h-4" />
-                  <span>تأكيد التفعيل عبر واتساب ({settings.whatsapp_number})</span>
-                </a>
-              </div>
+              {hasWhatsapp && (
+                <div className="pt-4">
+                  <a
+                    href={whatsappUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-colors shadow-md min-h-[44px]"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    <span>تأكيد التفعيل عبر واتساب ({settings.whatsapp_number})</span>
+                  </a>
+                </div>
+              )}
             </div>
           ) : (
             <>
@@ -261,56 +268,71 @@ export const PaymentProofModal: React.FC<PaymentProofModalProps> = ({
                   طرق الأداء المعتمدة (تحويل بنكي أو وكالات كاش):
                 </label>
 
-                {/* Option 1: Bank RIB */}
-                <Card className="p-4 mb-3 border-steel-200 bg-surface">
-                  <div className="flex items-start justify-between gap-3 mb-2">
-                    <div className="flex items-center gap-2">
-                      <Building2 className="w-4 h-4 text-primary-dark" />
-                      <span className="text-xs font-extrabold text-ink">
-                        التحويل البنكي المباشر (Virement Bancaire)
-                      </span>
-                    </div>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-steel-200 text-steel-700 font-bold">
-                      {settings.bank_name}
+                {!hasRib && !hasCin && (
+                  <div className="p-4 mb-3 rounded-2xl bg-amber-50 border border-amber-300 text-xs text-amber-950 font-bold flex items-start gap-2.5">
+                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <span>
+                      {lang === 'fr'
+                        ? 'Les coordonnées bancaires sont en cours de mise à jour par l’administration. Veuillez contacter le support avant tout virement.'
+                        : 'بيانات الحساب البنكي قيد التحديث من طرف إدارة المنصة حالياً. يرجى التواصل مع الإدارة عبر واتساب أو البريد قبل إجراء التحويل.'}
                     </span>
                   </div>
+                )}
 
-                  <p className="text-[11px] text-steel-600 mb-2">
-                    اسم صاحب الحساب: <strong>{settings.account_holder_name}</strong>
-                  </p>
+                {/* Option 1: Bank RIB */}
+                {hasRib && (
+                  <Card className="p-4 mb-3 border-steel-200 bg-surface">
+                    <div className="flex items-start justify-between gap-3 mb-2">
+                      <div className="flex items-center gap-2">
+                        <Building2 className="w-4 h-4 text-primary-dark" />
+                        <span className="text-xs font-extrabold text-ink">
+                          التحويل البنكي المباشر (Virement Bancaire)
+                        </span>
+                      </div>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-steel-200 text-steel-700 font-bold">
+                        {settings.bank_name}
+                      </span>
+                    </div>
 
-                  <div className="flex items-center justify-between p-2.5 rounded-xl bg-white border border-steel-300 font-mono text-xs font-bold tracking-wide">
-                    <span className="truncate text-ink select-all">{settings.rib_number}</span>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={handleCopyRib}
-                      className="ms-2 shrink-0 text-xs py-1 px-2.5 min-h-[32px] font-bold"
-                      leftIcon={isCopied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                    >
-                      {isCopied ? 'تم النسخ ✓' : 'نسخ رقم الـ RIB'}
-                    </Button>
-                  </div>
-                </Card>
+                    <p className="text-[11px] text-steel-600 mb-2">
+                      اسم صاحب الحساب: <strong>{settings.account_holder_name}</strong>
+                    </p>
+
+                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-white border border-steel-300 font-mono text-xs font-bold tracking-wide">
+                      <span className="truncate text-ink select-all">{settings.rib_number}</span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleCopyRib}
+                        className="ms-2 shrink-0 text-xs py-1 px-2.5 min-h-[32px] font-bold"
+                        leftIcon={isCopied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                      >
+                        {isCopied ? 'تم النسخ ✓' : 'نسخ رقم الـ RIB'}
+                      </Button>
+                    </div>
+                  </Card>
+                )}
 
                 {/* Option 2: Cash Plus / Wafacash */}
-                <Card className="p-4 border-steel-200 bg-surface">
-                  <span className="text-xs font-extrabold text-ink block mb-1">
-                    أو التحويل عبر وكالات تحويل الأموال (Wafacash / Cash Plus):
-                  </span>
-                  <div className="p-2.5 rounded-xl bg-white border border-steel-300 text-xs text-steel-700 space-y-1">
-                    <p>
-                      المستفيد: <strong>{settings.account_holder_name}</strong>
-                    </p>
-                    <p>
-                      رقم البطاقة الوطنية (CIN): <strong className="font-mono">{settings.cin_number}</strong>
-                    </p>
-                    <p>
-                      المدينة: <strong>{settings.city}</strong>
-                    </p>
-                  </div>
-                </Card>
+                {hasCin && (
+                  <Card className="p-4 border-steel-200 bg-surface">
+                    <span className="text-xs font-extrabold text-ink block mb-1">
+                      أو التحويل عبر وكالات تحويل الأموال (Wafacash / Cash Plus):
+                    </span>
+                    <div className="p-2.5 rounded-xl bg-white border border-steel-300 text-xs text-steel-700 space-y-1">
+                      <p>
+                        المستفيد: <strong>{settings.account_holder_name}</strong>
+                      </p>
+                      <p>
+                        رقم البطاقة الوطنية (CIN): <strong className="font-mono">{settings.cin_number}</strong>
+                      </p>
+                      <p>
+                        المدينة: <strong>{settings.city}</strong>
+                      </p>
+                    </div>
+                  </Card>
+                )}
               </div>
 
               {/* Upload Proof Form */}
@@ -421,15 +443,17 @@ export const PaymentProofModal: React.FC<PaymentProofModalProps> = ({
                     {t('lock.submit_btn')}
                   </Button>
 
-                  <a
-                    href={whatsappUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-colors min-h-[48px] shrink-0"
-                  >
-                    <MessageCircle className="w-4 h-4" />
-                    <span>{t('lock.whatsapp_btn')}</span>
-                  </a>
+                  {hasWhatsapp && (
+                    <a
+                      href={whatsappUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-colors min-h-[48px] shrink-0"
+                    >
+                      <MessageCircle className="w-4 h-4" />
+                      <span>{t('lock.whatsapp_btn')}</span>
+                    </a>
+                  )}
                 </div>
               </form>
             </>

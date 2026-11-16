@@ -342,10 +342,15 @@ export interface Lead {
   machine?: Partial<Machine>;
 }
 
+export type DispatchCampaignType = 'machine' | 'spare_part';
+
 export interface DispatchCampaign {
   id: string;
   contractor_id: string;
   company_name: string;
+  campaign_type?: DispatchCampaignType;
+  part_reference?: string;
+  part_category?: string;
   site_id?: string | null;
   site_name: string;
   site_city?: string;
@@ -381,6 +386,9 @@ export interface DispatchNotification {
   owner_id: string;
   contractor_id: string;
   machine_id?: string;
+  campaign_type?: DispatchCampaignType;
+  part_reference?: string;
+  part_category?: string;
   company_name: string;
   machine_name: string;
   matched_machine_title?: string;
@@ -408,6 +416,9 @@ export interface DispatchDealContext {
   contractor_id: string;
   owner_id: string;
   machine_id?: string;
+  campaign_type?: DispatchCampaignType;
+  part_reference?: string;
+  part_category?: string;
   company_name: string;
   machine_name: string;
   matched_machine_title?: string;

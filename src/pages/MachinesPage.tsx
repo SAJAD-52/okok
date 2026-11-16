@@ -3,7 +3,7 @@
 // ============================================================================
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Plus,
   Search,
@@ -22,6 +22,12 @@ import {
   Clock,
   Layers,
   RotateCcw,
+  Radio,
+  Globe,
+  MessageSquare,
+  XCircle,
+  Handshake,
+  CalendarCheck,
 } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -31,16 +37,23 @@ import { Skeleton } from '../components/ui/Skeleton';
 import { toast } from '../components/ui/Toast';
 import { useLanguage } from '../hooks/useLanguage';
 import { useAuth } from '../hooks/useAuth';
-import { Machine, ListingMode } from '../types/database';
+import { Machine, ListingMode, DispatchCampaign } from '../types/database';
 import { formatPriceMAD } from '../data/rentalTerms';
 import { MachineStepperModal } from '../components/machines/MachineStepperModal';
+import { SparePartDispatchModal } from '../components/machines/SparePartDispatchModal';
+import {
+  closeDispatchCampaign,
+  fetchContractorCampaigns,
+  subscribeLocalDispatchEvents,
+} from '../lib/dispatchService';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { mapDatabaseError } from '../lib/errorHelpers';
 import { machineStore } from '../lib/machineStore';
 
 export const MachinesPage: React.FC = () => {
   const { t, lang } = useLanguage();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  const navigate = useNavigate();
 
   const [machines, setMachines] = useState<Machine[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -49,6 +62,8 @@ export const MachinesPage: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedMachineToEdit, setSelectedMachineToEdit] = useState<Machine | null>(null);
   const [isStepperOpen, setIsStepperOpen] = useState(false);
+  const [spareDispatchMachine, setSpareDispatchMachine] = useState<Machine | null>(null);
+  const [spareCampaigns, setSpareCampaigns] = useState<DispatchCampaign[]>([]);
 
   // Fetch live machines from Supabase
   const loadMachines = useCallback(async () => {
@@ -138,6 +153,62 @@ export const MachinesPage: React.FC = () => {
       window.removeEventListener('jadijcb_machines_updated', handleUpdate);
     };
   }, [loadMachines]);
+
+  // Load & sync spare-part dispatch campaigns launched by this owner
+  useEffect(() => {
+    const ownerUid = user?.id || profile?.id;
+    if (!ownerUid) return;
+
+    let cancelled = false;
+    const loadSpareCampaigns = async () => {
+      const list = await fetchContractorCampaigns(ownerUid);
+      const filtered = list.filter(
+        (c) =>
+          c.campaign_type === 'spare_part' ||
+          Boolean(c.part_reference) ||
+          c.machine_category === 'spare-parts'
+      );
+      if (!cancelled) setSpareCampaigns(filtered);
+    };
+
+    loadSpareCampaigns();
+    const unsubLocal = subscribeLocalDispatchEvents(() => {
+      loadSpareCampaigns();
+    });
+
+    let channel: any = null;
+    if (isSupabaseConfigured && user?.id) {
+      channel = supabase
+        .channel(`owner_spare_campaigns_${user.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'dispatch_notifications',
+            filter: `contractor_id=eq.${user.id}`,
+          },
+          () => loadSpareCampaigns()
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'dispatch_campaigns',
+            filter: `contractor_id=eq.${user.id}`,
+          },
+          () => loadSpareCampaigns()
+        )
+        .subscribe();
+    }
+
+    return () => {
+      cancelled = true;
+      unsubLocal();
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, [user?.id, profile?.id]);
 
   // Auto-open edit modal if ?edit=machineId query parameter exists
   useEffect(() => {
@@ -642,10 +713,248 @@ export const MachinesPage: React.FC = () => {
                       </div>
                     </div>
                   </div>
+
+                  {/* Direct Spare-Part Live Search Campaign Button (for machinery rows) */}
+                  {!isSpare && (
+                    <div className="mt-3 pt-3 border-t border-steel-100 flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-[11px] text-steel-500 font-medium">
+                        {lang === 'fr'
+                          ? 'Besoin d’une pièce détachée urgente pour cet engin ?'
+                          : 'تحتاج قطعة غيار مستعجلة لهذه الآلية؟'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setSpareDispatchMachine(machine)}
+                        className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-ink hover:bg-steel-800 text-primary font-black text-xs border border-ink transition-all shadow-xs cursor-pointer min-h-[40px]"
+                      >
+                        <Radio className="w-4 h-4 shrink-0" />
+                        <span>
+                          {lang === 'fr'
+                            ? 'Lancer une campagne directe de pièce détachée'
+                            : 'أطلق حملة مباشرة للبحث عن قطعة غيار'}
+                        </span>
+                      </button>
+                    </div>
+                  )}
                 </Card>
               );
             })
           )}
+        </div>
+      )}
+
+      {/* Owner's Launched Spare-Part Live Dispatch Campaigns Tracker */}
+      {spareCampaigns.length > 0 && (
+        <div className="space-y-3 pt-2">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-base sm:text-lg font-black text-ink flex items-center gap-2">
+              <Wrench className="w-5 h-5 text-primary-dark shrink-0" />
+              <span>
+                {lang === 'fr'
+                  ? 'Campagnes directes de recherche de pièces lancées'
+                  : 'حملات البحث المباشر عن قطع الغيار'}
+              </span>
+            </h2>
+            <span className="text-xs font-black px-2.5 py-1 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 tabular-nums">
+              {spareCampaigns.filter((c) => c.status === 'active').length}{' '}
+              {lang === 'fr' ? 'actives' : 'نشطة'}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {spareCampaigns.map((camp) => {
+              const acceptedNotifs = (camp.notifications || []).filter((n) => n.status === 'accepted');
+              const isClosed = camp.status === 'closed';
+              const hasDealWon = Boolean(camp.won_owner_id);
+
+              return (
+                <Card
+                  key={camp.id}
+                  className={`p-4 rounded-2xl border space-y-3 ${
+                    hasDealWon
+                      ? 'bg-emerald-50/40 border-emerald-300 shadow-soft'
+                      : isClosed
+                      ? 'bg-steel-50/70 border-steel-200 opacity-90'
+                      : 'bg-white border-amber-300 shadow-soft'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span
+                          className={`px-2 py-0.5 rounded-lg text-[10px] font-black inline-flex items-center gap-1 ${
+                            hasDealWon
+                              ? 'bg-emerald-600 text-white'
+                              : isClosed
+                              ? 'bg-steel-200 text-steel-700'
+                              : 'bg-emerald-100 text-emerald-800'
+                          }`}
+                        >
+                          {hasDealWon ? (
+                            <>
+                              <Handshake className="w-3 h-3" />
+                              <span>{lang === 'fr' ? 'Accord conclu' : 'تم الاتفاق'}</span>
+                            </>
+                          ) : isClosed ? (
+                            lang === 'fr' ? 'Clôturée' : 'مغلقة'
+                          ) : lang === 'fr' ? (
+                            'En diffusion live'
+                          ) : (
+                            'نشطة الآن'
+                          )}
+                        </span>
+
+                        {camp.part_reference && (
+                          <span
+                            dir="ltr"
+                            className="px-2 py-0.5 rounded-lg bg-ink text-primary text-[10px] font-mono font-black"
+                          >
+                            Réf: {camp.part_reference}
+                          </span>
+                        )}
+
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-steel-100 text-steel-700 text-[10px] font-bold tabular-nums">
+                          {camp.is_nationwide ? (
+                            <>
+                              <Globe className="w-3 h-3 text-primary-dark" />
+                              <span>{lang === 'fr' ? 'Tout le Maroc' : 'المغرب كاملاً'}</span>
+                            </>
+                          ) : (
+                            <span>
+                              {lang === 'fr' ? `Rayon ${camp.radius_km} km` : `نطاق ${camp.radius_km} كم`}
+                            </span>
+                          )}
+                        </span>
+                      </div>
+
+                      <h3 className="text-sm font-black text-ink mt-1.5">{camp.machine_name}</h3>
+                      <p className="text-[11px] text-steel-500 font-bold flex items-center gap-1 mt-0.5">
+                        <MapPin className="w-3 h-3 shrink-0" />
+                        <span className="truncate">{camp.site_name}</span>
+                      </p>
+                    </div>
+
+                    <div className="text-end shrink-0">
+                      <span className="text-xs font-black text-primary-dark font-mono tabular-nums block">
+                        {camp.matched_owners_count}{' '}
+                        {lang === 'fr' ? 'fournisseurs' : 'مورد'}
+                      </span>
+                      <span className="text-[10px] text-steel-400 font-mono" dir="ltr">
+                        {camp.created_at?.slice(0, 10)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {hasDealWon ? (
+                    <div className="p-3 rounded-xl bg-white border border-emerald-200 flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-xs font-black text-emerald-800 flex items-center gap-1.5">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>{camp.won_machine_title || camp.machine_name}</span>
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          onClick={() => navigate('/owner/bookings')}
+                          leftIcon={<CalendarCheck className="w-3.5 h-3.5" />}
+                          className="text-[11px] min-h-[38px]"
+                        >
+                          {lang === 'fr' ? 'Voir commande' : 'عرض الطلب'}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            navigate(
+                              `/owner/messages?target=${camp.won_owner_id}&machine=${camp.won_machine_id || ''}&campaign=${camp.id}`
+                            )
+                          }
+                          leftIcon={<MessageSquare className="w-3.5 h-3.5" />}
+                          className="text-[11px] min-h-[38px]"
+                        >
+                          {lang === 'fr' ? 'Chat fournisseur' : 'محادثة المورد'}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : acceptedNotifs.length > 0 ? (
+                    <div className="space-y-2 pt-2 border-t border-steel-100">
+                      <p className="text-[11px] font-black text-emerald-700 flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                        <span>
+                          {lang === 'fr'
+                            ? `${acceptedNotifs.length} fournisseur(s) intéressé(s) !`
+                            : `استجاب ${acceptedNotifs.length} مورد(ين) لطلب القطعة!`}
+                        </span>
+                      </p>
+                      {acceptedNotifs.map((n) => (
+                        <div
+                          key={n.id}
+                          className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between gap-2"
+                        >
+                          <div className="min-w-0 text-xs">
+                            <p className="font-black text-ink truncate">
+                              {n.matched_machine_title || camp.machine_name}
+                            </p>
+                            {n.distance_km != null && (
+                              <span className="text-[10px] text-emerald-800 font-bold tabular-nums">
+                                {lang === 'fr' ? 'À' : 'على بعد'} {Math.round(n.distance_km)}{' '}
+                                {lang === 'fr' ? 'km' : 'كم'}
+                              </span>
+                            )}
+                          </div>
+                          <Button
+                            type="button"
+                            variant="primary"
+                            size="sm"
+                            onClick={() =>
+                              navigate(
+                                `/owner/messages?target=${n.owner_id}&machine=${n.machine_id || ''}&campaign=${camp.id}`
+                              )
+                            }
+                            leftIcon={<MessageSquare className="w-3.5 h-3.5" />}
+                            className="shrink-0 text-[11px] min-h-[38px]"
+                          >
+                            {lang === 'fr' ? 'Discuter' : 'محادثة المورد'}
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-steel-500 pt-2 border-t border-steel-100">
+                      {camp.matched_owners_count > 0
+                        ? lang === 'fr'
+                          ? 'Alerte envoyée aux fournisseurs de pièces. En attente de réponse...'
+                          : 'تم إرسال التنبيه لموردي قطع الغيار في النطاق وفي انتظار تفاعلهم...'
+                        : lang === 'fr'
+                        ? 'Aucun fournisseur trouvé dans ce périmètre.'
+                        : 'لم يتم رصد موردي قطع غيار داخل هذا النطاق وقت الإرسال.'}
+                    </p>
+                  )}
+
+                  {!isClosed && (
+                    <div className="flex justify-end pt-1">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await closeDispatchCampaign(camp.id);
+                          setSpareCampaigns((prev) =>
+                            prev.map((c) => (c.id === camp.id ? { ...c, status: 'closed' } : c))
+                          );
+                          toast.info(lang === 'fr' ? 'Campagne clôturée' : 'تم إغلاق حملة البحث');
+                        }}
+                        className="inline-flex items-center gap-1 text-[11px] font-bold text-steel-500 hover:text-rose-600 transition-colors cursor-pointer py-1 px-2"
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                        <span>{lang === 'fr' ? 'Clôturer la campagne' : 'إغلاق الحملة'}</span>
+                      </button>
+                    </div>
+                  )}
+                </Card>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -655,6 +964,16 @@ export const MachinesPage: React.FC = () => {
         onClose={() => setIsStepperOpen(false)}
         machineToEdit={selectedMachineToEdit}
         onSave={handleSaved}
+      />
+
+      {/* Spare Parts Live Dispatch Modal */}
+      <SparePartDispatchModal
+        isOpen={Boolean(spareDispatchMachine)}
+        onClose={() => setSpareDispatchMachine(null)}
+        machine={spareDispatchMachine}
+        onCampaignLaunched={(newCampaign) => {
+          setSpareCampaigns((prev) => [newCampaign, ...prev]);
+        }}
       />
     </div>
   );

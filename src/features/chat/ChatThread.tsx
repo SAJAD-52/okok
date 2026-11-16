@@ -69,7 +69,17 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
   } = useChatRealtime(conversation);
 
   const isContractor = profile?.role === 'client' || profile?.role === 'contractor';
-  const partyRole: 'contractor' | 'owner' = isContractor ? 'contractor' : 'owner';
+  const isSpareDeal = Boolean(
+    dispatchDeal && (dispatchDeal.campaign_type === 'spare_part' || dispatchDeal.part_reference)
+  );
+  const partyRole: 'contractor' | 'owner' = dispatchDeal
+    ? dispatchDeal.contractor_id === currentUserId
+      ? 'contractor'
+      : 'owner'
+    : isContractor
+    ? 'contractor'
+    : 'owner';
+  const isRequesterParty = partyRole === 'contractor';
 
   // Read optional campaign hint from URL query params
   const campaignHint = (() => {
@@ -96,9 +106,11 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
 
       if (!cancelled) {
         setDispatchDeal(ctx);
-        // When owner sees finalized deal & contractor clicked 2nd, ensure machine location updates under owner's RLS session
+        const ctxIsSpare = ctx?.campaign_type === 'spare_part' || Boolean(ctx?.part_reference);
+        // When owner sees finalized machinery deal & contractor clicked 2nd, update machine location (never for spare parts!)
         if (
           ctx &&
+          !ctxIsSpare &&
           ctx.deal_status === 'accepted' &&
           ctx.owner_id === currentUserId &&
           relocatedCampaignRef.current !== ctx.campaign_id
@@ -157,7 +169,21 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
   ]);
 
   // Quick Moroccan Construction Phrases
-  const quickChips = isContractor
+  const quickChips = isSpareDeal
+    ? isRequesterParty
+      ? [
+          '🔧 هل القطعة مطابقة تماماً للمرجع Réf؟',
+          '📦 هل القطعة جديدة أصلية أم مستعملة؟',
+          '💰 ما هو السعر النهائي للقطعة؟',
+          '🚚 هل يمكن إرسالها عبر الإرسالية اليوم؟',
+        ]
+      : [
+          '✅ نعم، القطعة متوفرة لدينا ومطابقة للمرجع',
+          '📦 القطعة جديدة أصلية وجاهزة للتسليم',
+          '🚚 يمكننا شحنها فوراً عبر الإرسالية السريعة',
+          '📍 يمكنكم استلامها مباشرة من متجرنا',
+        ]
+    : isContractor
     ? [
         '🚜 هل الآلية متوفرة هذا الأسبوع؟',
         '👷 هل تتوفر مع سائق معتمد؟',
@@ -272,7 +298,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
   const other = conversation.other_participant;
   const hasCurrentPartyAccepted = Boolean(
     dispatchDeal &&
-      (isContractor ? dispatchDeal.contractor_accepted : dispatchDeal.owner_accepted)
+      (isRequesterParty ? dispatchDeal.contractor_accepted : dispatchDeal.owner_accepted)
   );
 
   return (
@@ -468,7 +494,11 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
               <div className="flex items-center gap-2 min-w-0 text-emerald-900 font-black">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                 <span className="truncate">
-                  {lang === 'fr'
+                  {isSpareDeal
+                    ? lang === 'fr'
+                      ? 'Accord confirmé ! Commande de pièce enregistrée.'
+                      : 'تم قبول الصفقة من الطرفين! تم تأكيد طلب قطعة الغيار.'
+                    : lang === 'fr'
                     ? 'Accord confirmé ! Réservation créée & engin localisé sur le chantier.'
                     : 'تم قبول الصفقة من الطرفين! الحجز مفعّل الآن وموقع الآلية تحوّل إلى الورش.'}
                 </span>
@@ -479,7 +509,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
                 className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] flex items-center gap-1.5 cursor-pointer shrink-0 transition-colors"
               >
                 <CalendarCheck className="w-3.5 h-3.5" />
-                <span>{lang === 'fr' ? 'Voir la réservation' : 'عرض الحجز والطلب'}</span>
+                <span>{lang === 'fr' ? 'Voir la commande' : 'عرض الطلب في الحجوزات'}</span>
               </button>
             </div>
           ) : (
@@ -488,6 +518,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
                 <div className="flex items-center gap-1.5 text-[11px] font-black text-primary truncate">
                   <MapPin className="w-3.5 h-3.5 shrink-0" />
                   <span className="truncate">
+                    {dispatchDeal.part_reference ? `Réf: ${dispatchDeal.part_reference} · ` : ''}
                     {dispatchDeal.site_name}
                     {dispatchDeal.site_city ? ` · ${dispatchDeal.site_city}` : ''}
                   </span>
@@ -505,7 +536,15 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
                     ) : (
                       <Clock className="w-3 h-3" />
                     )}
-                    <span>{lang === 'fr' ? 'Entreprise' : 'موافقة الزبون'}</span>
+                    <span>
+                      {isSpareDeal
+                        ? lang === 'fr'
+                          ? 'Demandeur'
+                          : 'موافقة الطالب'
+                        : lang === 'fr'
+                        ? 'Entreprise'
+                        : 'موافقة الزبون'}
+                    </span>
                   </span>
                   <span
                     className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg ${
@@ -519,7 +558,15 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
                     ) : (
                       <Clock className="w-3 h-3" />
                     )}
-                    <span>{lang === 'fr' ? 'Propriétaire' : 'موافقة المالك'}</span>
+                    <span>
+                      {isSpareDeal
+                        ? lang === 'fr'
+                          ? 'Fournisseur'
+                          : 'موافقة المورد'
+                        : lang === 'fr'
+                        ? 'Propriétaire'
+                        : 'موافقة المالك'}
+                    </span>
                   </span>
                 </div>
               </div>

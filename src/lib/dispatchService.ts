@@ -14,6 +14,7 @@ import { MOROCCAN_CITIES } from '../data/cities';
 import {
   Booking,
   DispatchCampaign,
+  DispatchCampaignType,
   DispatchDealContext,
   DispatchDealStatus,
   DispatchNotification,
@@ -69,6 +70,7 @@ export interface MatchedOwnerTarget {
   matched_machine_title: string;
   machine_city: string;
   distance_km: number;
+  exact_reference_match?: boolean;
 }
 
 const CATEGORY_ALIASES: Record<string, string[]> = {
@@ -119,13 +121,13 @@ function matchesRequestedMachine(
   return false;
 }
 
-function resolveMachineCoords(machine: any): { lat: number; lng: number } | null {
-  const rawLat = Number(machine.lat ?? machine.location_lat);
-  const rawLng = Number(machine.lng ?? machine.location_lng);
+export function resolveMachineCoordinates(machine: any): { lat: number; lng: number } | null {
+  const rawLat = Number(machine?.lat ?? machine?.location_lat);
+  const rawLng = Number(machine?.lng ?? machine?.location_lng);
   if (Number.isFinite(rawLat) && Number.isFinite(rawLng) && rawLat !== 0 && rawLng !== 0) {
     return { lat: rawLat, lng: rawLng };
   }
-  const cityText = String(machine.city || machine.city_id || '').toLowerCase();
+  const cityText = String(machine?.city || machine?.city_id || '').toLowerCase();
   const city = MOROCCAN_CITIES.find(
     (c) =>
       c.id.toLowerCase() === cityText ||
@@ -134,6 +136,13 @@ function resolveMachineCoords(machine: any): { lat: number; lng: number } | null
   );
   if (city) return { lat: city.lat, lng: city.lng };
   return null;
+}
+
+export function normalizePartReference(raw?: string | null): string {
+  return String(raw || '')
+    .toUpperCase()
+    .replace(/[\s\-_/\\.]+/g, '')
+    .trim();
 }
 
 export async function findMatchingOwnersForCampaign(params: {
@@ -172,7 +181,7 @@ export async function findMatchingOwnersForCampaign(params: {
     if (!m.owner_id || m.owner_id === params.excludeOwnerId) continue;
     if (!matchesRequestedMachine(m, params.machineCategory, params.machineName)) continue;
 
-    const coords = resolveMachineCoords(m);
+    const coords = resolveMachineCoordinates(m);
     if (!coords && !params.isNationwide) continue;
 
     const distKm = coords
@@ -197,6 +206,112 @@ export async function findMatchingOwnersForCampaign(params: {
   }
 
   return Array.from(closestByOwner.values()).sort((a, b) => a.distance_km - b.distance_km);
+}
+
+export async function findMatchingSparePartSuppliersForCampaign(params: {
+  originLat: number;
+  originLng: number;
+  partReference: string;
+  partCategory?: string;
+  machineBrand?: string;
+  machineModel?: string;
+  radiusKm: number | null;
+  isNationwide: boolean;
+  excludeOwnerId?: string;
+}): Promise<MatchedOwnerTarget[]> {
+  let rawMachines: any[] = [];
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('machines')
+        .select('*')
+        .neq('is_published', false);
+
+      if (!error && data) {
+        rawMachines = data;
+      }
+    } catch (err) {
+      console.warn('Error querying spare-parts suppliers:', err);
+    }
+  }
+
+  if (rawMachines.length === 0) {
+    rawMachines = machineStore.getCachedMachines().filter((m) => m.is_published !== false);
+  }
+
+  const normQueryRef = normalizePartReference(params.partReference);
+  const queryBrand = String(params.machineBrand || '').trim().toLowerCase();
+  const queryModel = String(params.machineModel || '').trim().toLowerCase();
+  const requestedPartCat = String(params.partCategory || 'all').toLowerCase();
+
+  const bestBySupplier = new Map<string, MatchedOwnerTarget & { priorityScore: number }>();
+
+  for (const m of rawMachines) {
+    if (!m.owner_id || m.owner_id === params.excludeOwnerId) continue;
+    const cat = String(m.category || m.category_id || '').toLowerCase();
+    if (cat !== 'spare-parts') continue;
+
+    const coords = resolveMachineCoordinates(m);
+    if (!coords && !params.isNationwide) continue;
+
+    const distKm = coords
+      ? calculateDistanceKm(params.originLat, params.originLng, coords.lat, coords.lng)
+      : 0;
+
+    if (!params.isNationwide && params.radiusKm !== null && distKm > params.radiusKm) {
+      continue;
+    }
+
+    const specs = (m.specs || {}) as Record<string, any>;
+    const listingRefNorm = normalizePartReference(specs.part_number || m.model);
+    const fullText = `${m.title_ar || ''} ${m.title_fr || ''} ${m.description_ar || ''} ${m.description_fr || ''} ${m.brand || ''} ${m.model || ''} ${specs.part_number || ''} ${specs.compatible_models || ''}`;
+    const fullTextNorm = normalizePartReference(fullText);
+    const fullTextLower = fullText.toLowerCase();
+
+    const isExactRefMatch =
+      normQueryRef.length >= 2 &&
+      ((listingRefNorm && (listingRefNorm === normQueryRef || listingRefNorm.includes(normQueryRef) || normQueryRef.includes(listingRefNorm))) ||
+        fullTextNorm.includes(normQueryRef));
+
+    const listingPartType = String(specs.part_type || '').toLowerCase();
+    const isCatMatch = requestedPartCat === 'all' || !listingPartType || listingPartType === requestedPartCat;
+    const isBrandMatch =
+      (queryBrand.length >= 2 && fullTextLower.includes(queryBrand)) ||
+      (queryModel.length >= 2 && fullTextLower.includes(queryModel));
+
+    // If a specific part category is selected, require either exact ref match, matching part category, or matching brand/model
+    if (requestedPartCat !== 'all' && !isExactRefMatch && listingPartType && listingPartType !== requestedPartCat && !isBrandMatch) {
+      continue;
+    }
+
+    const priorityScore = (isExactRefMatch ? 100 : 0) + (isBrandMatch ? 20 : 0) + (isCatMatch ? 5 : 0);
+    const title = m.title_ar || m.title_fr || `${m.brand || ''} ${m.model || ''}`.trim() || 'قطعة غيار';
+
+    const existing = bestBySupplier.get(m.owner_id);
+    if (
+      !existing ||
+      priorityScore > existing.priorityScore ||
+      (priorityScore === existing.priorityScore && distKm < existing.distance_km)
+    ) {
+      bestBySupplier.set(m.owner_id, {
+        owner_id: m.owner_id,
+        machine_id: m.id,
+        matched_machine_title: title,
+        machine_city: m.city || '',
+        distance_km: distKm,
+        exact_reference_match: Boolean(isExactRefMatch),
+        priorityScore,
+      });
+    }
+  }
+
+  return Array.from(bestBySupplier.values())
+    .sort((a, b) => {
+      if (b.priorityScore !== a.priorityScore) return b.priorityScore - a.priorityScore;
+      return a.distance_km - b.distance_km;
+    })
+    .map(({ priorityScore: _score, ...rest }) => rest);
 }
 
 function broadcastDispatchEvent(payload: {
@@ -408,9 +523,20 @@ async function sendFallbackDispatchMessage(params: {
       ? `${Math.round(params.notification.distance_km)} كم`
       : '';
 
-    const readableHeader = `🎉 فرصة جديدة — «${params.notification.company_name}» محتاجة «${params.notification.machine_name}» ديالك${
-      distText ? ` (${distText})` : ''
-    }\n📍 ${params.notification.site_name}${params.notification.site_city ? ` · ${params.notification.site_city}` : ''}`;
+    const isSpare =
+      params.notification.campaign_type === 'spare_part' || Boolean(params.notification.part_reference);
+
+    const readableHeader = isSpare
+      ? `🔧 طلب قطعة غيار عاجل — «${params.notification.company_name}» يبحث عن Réf: ${
+          params.notification.part_reference || params.notification.machine_name
+        }${distText ? ` (${distText})` : ''}\n📍 ${params.notification.site_name}${
+          params.notification.site_city ? ` · ${params.notification.site_city}` : ''
+        }`
+      : `🎉 فرصة جديدة — «${params.notification.company_name}» محتاجة «${params.notification.machine_name}» ديالك${
+          distText ? ` (${distText})` : ''
+        }\n📍 ${params.notification.site_name}${
+          params.notification.site_city ? ` · ${params.notification.site_city}` : ''
+        }`;
 
     const encodedPayload = JSON.stringify({
       id: params.notification.id,
@@ -418,6 +544,9 @@ async function sendFallbackDispatchMessage(params: {
       owner_id: params.ownerId,
       contractor_id: params.contractorId,
       machine_id: params.machineId || null,
+      campaign_type: params.notification.campaign_type || (isSpare ? 'spare_part' : 'machine'),
+      part_reference: params.notification.part_reference || '',
+      part_category: params.notification.part_category || '',
       company_name: params.notification.company_name,
       machine_name: params.notification.machine_name,
       matched_machine_title: params.notification.matched_machine_title,
@@ -470,6 +599,9 @@ export async function ensureDispatchConversationLinked(params: {
 export async function launchDispatchCampaign(params: {
   contractorId: string;
   companyName: string;
+  campaignType?: DispatchCampaignType;
+  partReference?: string;
+  partCategory?: string;
   siteId?: string;
   siteName: string;
   siteCity?: string;
@@ -485,6 +617,8 @@ export async function launchDispatchCampaign(params: {
 }): Promise<{ campaign: DispatchCampaign; notifications: DispatchNotification[]; persistedToSupabase: boolean }> {
   const now = new Date().toISOString();
   const resolvedCampaignId = makeUuid();
+  const campaignType: DispatchCampaignType = params.campaignType || 'machine';
+  const isSpare = campaignType === 'spare_part';
 
   let authUid: string | null = isUuid(params.contractorId) ? params.contractorId : null;
   if (isSupabaseConfigured) {
@@ -503,10 +637,13 @@ export async function launchDispatchCampaign(params: {
   let genericNotifsSent = false;
   let chatFallbackSent = false;
 
-  const campaignPayload = {
+  const campaignPayload: any = {
     id: resolvedCampaignId,
     contractor_id: effectiveContractorId,
     company_name: params.companyName,
+    campaign_type: campaignType,
+    part_reference: params.partReference || '',
+    part_category: params.partCategory || '',
     site_id: params.siteId || null,
     site_name: params.siteName,
     site_city: params.siteCity || '',
@@ -528,6 +665,9 @@ export async function launchDispatchCampaign(params: {
     owner_id: t.owner_id,
     contractor_id: effectiveContractorId,
     machine_id: t.machine_id,
+    campaign_type: campaignType,
+    part_reference: params.partReference || '',
+    part_category: params.partCategory || '',
     company_name: params.companyName,
     machine_name: params.machineName,
     matched_machine_title: t.matched_machine_title,
@@ -548,22 +688,35 @@ export async function launchDispatchCampaign(params: {
     created_at: now,
   }));
 
-  // Channel 1: Dedicated dispatch_campaigns + dispatch_notifications tables
+  // Channel 1: Dedicated dispatch_campaigns + dispatch_notifications tables (adaptive for optional new columns)
   if (isSupabaseConfigured && isUuid(effectiveContractorId)) {
     try {
-      const { error: campErr } = await supabase
-        .from('dispatch_campaigns')
-        .insert(campaignPayload);
+      const insertCampPayload = { ...campaignPayload };
+      let campErr: any = null;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const res = await supabase.from('dispatch_campaigns').insert(insertCampPayload);
+        campErr = res.error;
+        if (!campErr) break;
+        const missingColMatch = campErr.message?.match(/Could not find the '([^']+)' column/i);
+        if (missingColMatch && missingColMatch[1]) {
+          delete insertCampPayload[missingColMatch[1]];
+          continue;
+        }
+        break;
+      }
 
       if (!campErr) {
         const validNotifs = preparedNotifs.filter((n) => isUuid(n.owner_id));
         if (validNotifs.length > 0) {
-          const notifRows = validNotifs.map((n) => ({
+          let notifRows: Record<string, any>[] = validNotifs.map((n) => ({
             id: n.id,
             campaign_id: resolvedCampaignId,
             owner_id: n.owner_id,
             contractor_id: effectiveContractorId,
             machine_id: isUuid(n.machine_id) ? n.machine_id : null,
+            campaign_type: campaignType,
+            part_reference: params.partReference || '',
+            part_category: params.partCategory || '',
             company_name: n.company_name,
             machine_name: n.machine_name,
             matched_machine_title: n.matched_machine_title || '',
@@ -580,9 +733,23 @@ export async function launchDispatchCampaign(params: {
             is_read: false,
           }));
 
-          const { error: notifErr } = await supabase
-            .from('dispatch_notifications')
-            .insert(notifRows);
+          let notifErr: any = null;
+          for (let attempt = 0; attempt < 4; attempt++) {
+            const res = await supabase.from('dispatch_notifications').insert(notifRows);
+            notifErr = res.error;
+            if (!notifErr) break;
+            const missingColMatch = notifErr.message?.match(/Could not find the '([^']+)' column/i);
+            if (missingColMatch && missingColMatch[1]) {
+              const col = missingColMatch[1];
+              notifRows = notifRows.map((row) => {
+                const clone = { ...row };
+                delete clone[col];
+                return clone;
+              });
+              continue;
+            }
+            break;
+          }
 
           if (!notifErr) {
             dispatchNotifsSent = true;
@@ -616,10 +783,14 @@ export async function launchDispatchCampaign(params: {
           return {
             id: n.id,
             user_id: n.owner_id,
-            title_ar: 'فرصة جديدة 🎉',
-            title_fr: 'Nouvelle opportunité 🎉',
-            body_ar: `«${n.company_name}» محتاجة «${n.machine_name}» ديالك · ${distTextAr}`,
-            body_fr: `«${n.company_name}» recherche «${n.machine_name}» · ${distTextFr}`,
+            title_ar: isSpare ? 'طلب قطعة غيار عاجل 🔧' : 'فرصة جديدة 🎉',
+            title_fr: isSpare ? 'Recherche pièce détachée 🔧' : 'Nouvelle opportunité 🎉',
+            body_ar: isSpare
+              ? `«${n.company_name}» يبحث عن قطعة الغيار Réf: ${params.partReference || n.machine_name} · ${distTextAr}`
+              : `«${n.company_name}» محتاجة «${n.machine_name}» ديالك · ${distTextAr}`,
+            body_fr: isSpare
+              ? `«${n.company_name}» recherche la pièce Réf: ${params.partReference || n.machine_name} · ${distTextFr}`
+              : `«${n.company_name}» recherche «${n.machine_name}» · ${distTextFr}`,
             type: 'dispatch_opportunity',
             data: {
               id: n.id,
@@ -627,6 +798,9 @@ export async function launchDispatchCampaign(params: {
               owner_id: n.owner_id,
               contractor_id: n.contractor_id,
               machine_id: n.machine_id || null,
+              campaign_type: campaignType,
+              part_reference: params.partReference || '',
+              part_category: params.partCategory || '',
               company_name: n.company_name,
               machine_name: n.machine_name,
               matched_machine_title: n.matched_machine_title,
@@ -681,10 +855,14 @@ export async function launchDispatchCampaign(params: {
       preparedNotifs.map((n) =>
         serverApi.createNotification({
           user_id: n.owner_id,
-          title_ar: 'فرصة جديدة 🎉',
-          title_fr: 'Nouvelle opportunité 🎉',
-          body_ar: `«${n.company_name}» محتاجة «${n.machine_name}» ديالك`,
-          body_fr: `«${n.company_name}» recherche «${n.machine_name}»`,
+          title_ar: isSpare ? 'طلب قطعة غيار عاجل 🔧' : 'فرصة جديدة 🎉',
+          title_fr: isSpare ? 'Recherche pièce détachée 🔧' : 'Nouvelle opportunité 🎉',
+          body_ar: isSpare
+            ? `«${n.company_name}» يبحث عن قطعة الغيار Réf: ${params.partReference || n.machine_name}`
+            : `«${n.company_name}» محتاجة «${n.machine_name}» ديالك`,
+          body_fr: isSpare
+            ? `«${n.company_name}» recherche la pièce Réf: ${params.partReference || n.machine_name}`
+            : `«${n.company_name}» recherche «${n.machine_name}»`,
           type: 'dispatch_opportunity',
           data: {
             id: n.id,
@@ -692,6 +870,9 @@ export async function launchDispatchCampaign(params: {
             owner_id: n.owner_id,
             contractor_id: n.contractor_id,
             machine_id: n.machine_id,
+            campaign_type: campaignType,
+            part_reference: params.partReference || '',
+            part_category: params.partCategory || '',
             company_name: n.company_name,
             machine_name: n.machine_name,
             matched_machine_title: n.matched_machine_title,
@@ -715,8 +896,10 @@ export async function launchDispatchCampaign(params: {
   if (preparedNotifs.length > 0) {
     sendWebPushForDispatch({
       ownerIds: Array.from(new Set(preparedNotifs.map((n) => n.owner_id))),
-      title: 'فرصة جديدة 🎉',
-      body: `«${params.companyName}» محتاجة «${params.machineName}» ديالك`,
+      title: isSpare ? 'طلب قطعة غيار عاجل 🔧' : 'فرصة جديدة 🎉',
+      body: isSpare
+        ? `«${params.companyName}» يبحث عن Réf: ${params.partReference || params.machineName}`
+        : `«${params.companyName}» محتاجة «${params.machineName}» ديالك`,
       tag: resolvedCampaignId,
       url: '/owner/messages',
     }).catch(() => {});
@@ -752,6 +935,10 @@ function mapGenericNotificationToDispatch(row: any): DispatchNotification | null
     owner_id: data.owner_id || row.user_id,
     contractor_id: data.contractor_id || '',
     machine_id: data.machine_id || undefined,
+    campaign_type:
+      data.campaign_type || (data.part_reference ? 'spare_part' : 'machine'),
+    part_reference: data.part_reference || undefined,
+    part_category: data.part_category || undefined,
     company_name: data.company_name || 'مقاولة أشغال',
     machine_name: data.machine_name || 'آلية بناء',
     matched_machine_title: data.matched_machine_title || undefined,
@@ -792,6 +979,10 @@ export function parseDispatchMessageRow(msg: any, ownerId: string): DispatchNoti
       owner_id: ownerId,
       contractor_id: data.contractor_id || msg.sender_id || '',
       machine_id: data.machine_id || undefined,
+      campaign_type:
+        data.campaign_type || (data.part_reference ? 'spare_part' : 'machine'),
+      part_reference: data.part_reference || undefined,
+      part_category: data.part_category || undefined,
       company_name: data.company_name || 'مقاولة أشغال',
       machine_name: data.machine_name || 'آلية بناء',
       matched_machine_title: data.matched_machine_title || undefined,
@@ -1387,6 +1578,32 @@ export async function fetchDispatchContextForConversation(params: {
       localNotif?.machine_id ||
       machineId ||
       undefined,
+    campaign_type:
+      dbNotif?.campaign_type ||
+      dbCampaign?.campaign_type ||
+      latestDealMsg?.campaign_type ||
+      baseData?.campaign_type ||
+      localNotif?.campaign_type ||
+      localCamp?.campaign_type ||
+      (dbCampaign?.machine_category === 'spare-parts' || localCamp?.machine_category === 'spare-parts'
+        ? 'spare_part'
+        : 'machine'),
+    part_reference:
+      dbNotif?.part_reference ||
+      dbCampaign?.part_reference ||
+      latestDealMsg?.part_reference ||
+      baseData?.part_reference ||
+      localNotif?.part_reference ||
+      localCamp?.part_reference ||
+      undefined,
+    part_category:
+      dbNotif?.part_category ||
+      dbCampaign?.part_category ||
+      latestDealMsg?.part_category ||
+      baseData?.part_category ||
+      localNotif?.part_category ||
+      localCamp?.part_category ||
+      undefined,
     company_name:
       dbNotif?.company_name ||
       latestDealMsg?.company_name ||
@@ -1515,10 +1732,16 @@ export async function acceptDispatchDealParty(params: {
       );
     }
 
-    const partyPrompt =
-      partyRole === 'contractor'
-        ? `🤝 وافقت المقاولة على الصفقة! في انتظار ضغط المالك على زر «قبول الصفقة» لتثبيت الحجز ونقل موقع الآلية إلى الورش.`
-        : `🤝 وافق مالك الآلية على الصفقة! في انتظار ضغط المقاولة على زر «قبول الصفقة» لتثبيت الحجز ونقل موقع الآلية إلى الورش.`;
+    const isSpareDealMsg =
+      latest.campaign_type === 'spare_part' || Boolean(latest.part_reference);
+
+    const partyPrompt = isSpareDealMsg
+      ? partyRole === 'contractor'
+        ? `🤝 وافق طالب قطعة الغيار على العرض! في انتظار ضغط مورد القطعة على زر «قبول الصفقة» لتأكيد الطلب.`
+        : `🤝 وافق مورد قطعة الغيار على الصفقة! في انتظار ضغط مالك الآلية على زر «قبول الصفقة» لتأكيد الطلب.`
+      : partyRole === 'contractor'
+      ? `🤝 وافقت المقاولة على الصفقة! في انتظار ضغط المالك على زر «قبول الصفقة» لتثبيت الحجز ونقل موقع الآلية إلى الورش.`
+      : `🤝 وافق مالك الآلية على الصفقة! في انتظار ضغط المقاولة على زر «قبول الصفقة» لتثبيت الحجز ونقل موقع الآلية إلى الورش.`;
 
     const serializedDeal = JSON.stringify(updatedDeal);
     const fullText = `${partyPrompt}${DISPATCH_DEAL_MARKER}${serializedDeal}`;
@@ -1559,13 +1782,20 @@ export async function acceptDispatchDealParty(params: {
     }
   }
 
+  const isSpareDeal =
+    latest.campaign_type === 'spare_part' ||
+    Boolean(latest.part_reference) ||
+    String(machineObj?.category || '').toLowerCase() === 'spare-parts';
+
   const dailyRate = Number(machineObj?.rate_daily || machineObj?.daily_rate || 2000);
-  const totalPrice = dailyRate * 7;
+  const totalPrice = isSpareDeal
+    ? Number(machineObj?.sale_price || 0)
+    : dailyRate * 7;
 
   let rpcSucceeded = false;
   if (isSupabaseConfigured && isUuid(latest.campaign_id)) {
     try {
-      const { data: rpcRes, error: rpcErr } = await supabase.rpc('accept_dispatch_deal', {
+      const rpcParams: Record<string, any> = {
         p_campaign_id: latest.campaign_id,
         p_notification_id: isUuid(latest.notification_id) ? latest.notification_id : null,
         p_contractor_id: isUuid(latest.contractor_id) ? latest.contractor_id : currentUserId,
@@ -1579,7 +1809,16 @@ export async function acceptDispatchDealParty(params: {
         p_site_phone: latest.site_phone || '+212600000000',
         p_total_price: totalPrice,
         p_notes: latest.notes || '',
-      });
+        p_campaign_type: isSpareDeal ? 'spare_part' : 'machine',
+      };
+
+      let { data: rpcRes, error: rpcErr } = await supabase.rpc('accept_dispatch_deal', rpcParams);
+      if (rpcErr && rpcErr.message?.includes('p_campaign_type')) {
+        delete rpcParams.p_campaign_type;
+        const retryRes = await supabase.rpc('accept_dispatch_deal', rpcParams);
+        rpcRes = retryRes.data;
+        rpcErr = retryRes.error;
+      }
 
       if (!rpcErr && rpcRes?.success) {
         rpcSucceeded = true;
@@ -1593,6 +1832,9 @@ export async function acceptDispatchDealParty(params: {
   const nowIso = new Date().toISOString();
   const endDateIso = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
   const resolvedBookingId = createdBookingId || makeUuid();
+  const dealNotePrefix = isSpareDeal
+    ? `طلب قطعة غيار عبر البحث المباشر (${latest.part_reference || latest.machine_name}) — ${latest.site_name}`
+    : `صفقة حملة بحث مباشر — الورش: ${latest.site_name}`;
 
   // Direct booking fallback if RPC didn't create it yet
   if (!rpcSucceeded && isSupabaseConfigured && isUuid(latest.machine_id)) {
@@ -1608,7 +1850,7 @@ export async function acceptDispatchDealParty(params: {
       total_price: totalPrice,
       status: 'active',
       site_address: `${latest.site_name}${latest.site_city ? ` · ${latest.site_city}` : ''}`,
-      notes: `صفقة حملة بحث مباشر — الورش: ${latest.site_name}${latest.notes ? `\n${latest.notes}` : ''}`,
+      notes: `${dealNotePrefix}${latest.notes ? `\n${latest.notes}` : ''}`,
     };
 
     for (let attempt = 0; attempt < 5; attempt++) {
@@ -1644,24 +1886,26 @@ export async function acceptDispatchDealParty(params: {
     start_date: nowIso,
     end_date: endDateIso,
     total_price: totalPrice,
-    with_operator: true,
+    with_operator: !isSpareDeal,
     site_address: `${latest.site_name}${latest.site_city ? ` · ${latest.site_city}` : ''}`,
     status: 'active',
-    notes: `صفقة حملة بحث مباشر — الورش: ${latest.site_name}${latest.notes ? `\n${latest.notes}` : ''}`,
+    notes: `${dealNotePrefix}${latest.notes ? `\n${latest.notes}` : ''}`,
     machine: machineObj,
     created_at: nowIso,
   };
   bookingStore.saveBooking(localBookingRecord);
 
-  // Move machine to contractor's site in DB + local store
-  await relocateMachineToSite({
-    machineId: latest.machine_id,
-    siteLat: latest.site_lat,
-    siteLng: latest.site_lng,
-    siteCity: latest.site_city || '',
-  });
+  // Move machine to contractor's site in DB + local store (ONLY for machinery rentals, NEVER for spare parts)
+  if (!isSpareDeal) {
+    await relocateMachineToSite({
+      machineId: latest.machine_id,
+      siteLat: latest.site_lat,
+      siteLng: latest.site_lng,
+      siteCity: latest.site_city || '',
+    });
+  }
 
-  // Close winning campaign (keeps visible in contractor dashboard)
+  // Close winning campaign (keeps visible in dashboard)
   await closeDispatchCampaign(latest.campaign_id, {
     won_owner_id: latest.owner_id,
     won_machine_id: latest.machine_id,
@@ -1794,9 +2038,11 @@ export async function acceptDispatchDealParty(params: {
     booking_id: createdBookingId || resolvedBookingId,
   };
 
-  const confirmText = `✅🤝 تم قبول الصفقة من الطرفين! تم تأكيد الحجز في حجوزات الزبون وطلبات المالك، وتم تحديث موقع الآلية إلى ورش «${
-    latest.site_name
-  }».${DISPATCH_DEAL_MARKER}${JSON.stringify(finalizedDeal)}`;
+  const confirmText = isSpareDeal
+    ? `✅🤝 تم قبول الصفقة من الطرفين! تم تأكيد طلب قطعة الغيار (${latest.part_reference || latest.machine_name}).${DISPATCH_DEAL_MARKER}${JSON.stringify(finalizedDeal)}`
+    : `✅🤝 تم قبول الصفقة من الطرفين! تم تأكيد الحجز في حجوزات الزبون وطلبات المالك، وتم تحديث موقع الآلية إلى ورش «${
+        latest.site_name
+      }».${DISPATCH_DEAL_MARKER}${JSON.stringify(finalizedDeal)}`;
 
   await chatStore.sendMessage(
     conversationId,

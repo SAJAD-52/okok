@@ -103,11 +103,16 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
       ? `${Math.round(notif.distance_km)} كم من موقعك`
       : '';
 
+    const isSpare = notif.campaign_type === 'spare_part' || Boolean(notif.part_reference);
     showBrowserOpportunityNotification({
-      title: 'فرصة جديدة 🎉',
-      body: `«${notif.company_name}» محتاجة «${notif.machine_name}» ديالك${
-        distLabel ? ` · ${distLabel}` : ''
-      }`,
+      title: isSpare ? 'طلب قطعة غيار عاجل 🔧' : 'فرصة جديدة 🎉',
+      body: isSpare
+        ? `«${notif.company_name}» يبحث عن Réf: ${notif.part_reference || notif.machine_name}${
+            distLabel ? ` · ${distLabel}` : ''
+          }`
+        : `«${notif.company_name}» محتاجة «${notif.machine_name}» ديالك${
+            distLabel ? ` · ${distLabel}` : ''
+          }`,
       tag: alertKey,
       url: `/owner/messages?target=${notif.contractor_id}&machine=${notif.machine_id || ''}&campaign=${notif.campaign_id}`,
     });
@@ -338,6 +343,9 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
 
   if (!activeAlert) return null;
 
+  const isSpareAlert =
+    activeAlert.campaign_type === 'spare_part' || Boolean(activeAlert.part_reference);
+
   return (
     <div
       role="alert"
@@ -350,7 +358,13 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
           <div className="flex items-center gap-2 min-w-0">
             <Volume2 className="w-4 h-4 shrink-0 animate-pulse" />
             <span className="text-xs font-black tracking-tight">
-              {lang === 'fr' ? 'Opportunité Directe JADIJCB' : 'طلب مباشر قريب من آلياتك'}
+              {isSpareAlert
+                ? lang === 'fr'
+                  ? 'Demande urgente de pièce détachée'
+                  : 'طلب مباشر لقطعة غيار قريب منك'
+                : lang === 'fr'
+                ? 'Opportunité Directe JADIJCB'
+                : 'طلب مباشر قريب من آلياتك'}
             </span>
           </div>
           <button
@@ -368,12 +382,26 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
           <div className="flex items-start gap-3">
             <img
               src="/assets/aistudio/image_010e3368.png"
-              alt="فرصة جديدة"
+              alt={isSpareAlert ? 'طلب قطعة غيار' : 'فرصة جديدة'}
               className="w-12 h-12 object-contain shrink-0 bg-white/10 rounded-2xl p-1.5 border border-primary/40"
             />
             <div className="min-w-0 flex-1 space-y-1">
               <div className="flex items-center gap-2 flex-wrap">
-                <h4 className="text-base font-black text-primary leading-none">فرصة جديدة</h4>
+                <h4 className="text-base font-black text-primary leading-none">
+                  {isSpareAlert
+                    ? lang === 'fr'
+                      ? 'Pièce recherchée 🔧'
+                      : 'طلب قطعة غيار 🔧'
+                    : 'فرصة جديدة'}
+                </h4>
+                {activeAlert.part_reference && (
+                  <span
+                    dir="ltr"
+                    className="inline-flex items-center px-2 py-0.5 rounded-lg bg-primary text-ink text-[10px] font-mono font-black"
+                  >
+                    Réf: {activeAlert.part_reference}
+                  </span>
+                )}
                 {activeAlert.is_nationwide ? (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white/15 text-[10px] font-bold text-white">
                     <Globe className="w-3 h-3 text-primary" />
@@ -391,7 +419,9 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
               </div>
 
               <p className="text-sm font-black text-white leading-snug break-words">
-                «{activeAlert.company_name}» محتاجة «{activeAlert.machine_name}» ديالك
+                {isSpareAlert
+                  ? `«${activeAlert.company_name}» يبحث عن «${activeAlert.machine_name}»`
+                  : `«${activeAlert.company_name}» محتاجة «${activeAlert.machine_name}» ديالك`}
               </p>
             </div>
           </div>
@@ -407,7 +437,13 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
             </div>
             {activeAlert.matched_machine_title && (
               <p className="text-[11px] text-steel-300">
-                {lang === 'fr' ? 'Votre engin correspondant :' : 'آليتك المطابقة للطلب:'}{' '}
+                {isSpareAlert
+                  ? lang === 'fr'
+                    ? 'Votre pièce correspondante :'
+                    : 'القطعة المطابقة في متجرك:'
+                  : lang === 'fr'
+                  ? 'Votre engin correspondant :'
+                  : 'آليتك المطابقة للطلب:'}{' '}
                 <span className="text-white font-bold">{activeAlert.matched_machine_title}</span>
               </p>
             )}
@@ -428,7 +464,13 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
               leftIcon={<MessageSquare className="w-4 h-4" />}
               className="flex-1 justify-center font-black text-xs min-h-[44px]"
             >
-              {lang === 'fr' ? 'Accepter & Discuter' : 'أوافق على الكراء — محادثة الآن'}
+              {isSpareAlert
+                ? lang === 'fr'
+                  ? 'Disponible — Discuter & Devis'
+                  : 'متوفرة عندي — محادثة وتقديم السعر'
+                : lang === 'fr'
+                ? 'Accepter & Discuter'
+                : 'أوافق على الكراء — محادثة الآن'}
             </Button>
 
             {activeAlert.site_phone && (

@@ -2,7 +2,7 @@
 // JADIJCB: Machine & Spare Part Stepper Wizard Modal
 // ============================================================================
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   ChevronRight,
@@ -98,7 +98,10 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
     (machineToEdit?.specs as any)?.part_type || 'filters'
   );
   const [partNumber, setPartNumber] = useState<string>(
-    (machineToEdit?.specs as any)?.part_number || 'JCB-320/08560'
+    (machineToEdit?.specs as any)?.part_number ||
+      (machineToEdit?.category_id === 'spare-parts' || machineToEdit?.category === 'spare-parts'
+        ? machineToEdit?.model || ''
+        : '')
   );
   const [compatibleBrands, setCompatibleBrands] = useState<string>(
     (machineToEdit?.specs as any)?.compatible_models || 'JCB 3CX, 4CX'
@@ -127,6 +130,55 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
   const [isPublished, setIsPublished] = useState<boolean>(
     machineToEdit?.is_published ?? true
   );
+
+  // Re-sync form state every time modal opens or target machine changes
+  useEffect(() => {
+    if (!isOpen) return;
+    const editIsSpare =
+      machineToEdit?.category_id === 'spare-parts' || machineToEdit?.category === 'spare-parts';
+    setStep(1);
+    setLangTab('ar');
+    setTitleAr(machineToEdit?.title_ar || '');
+    setTitleFr(machineToEdit?.title_fr || '');
+    setDescAr(machineToEdit?.description_ar || '');
+    setDescFr(machineToEdit?.description_fr || '');
+    setCategoryId(
+      machineToEdit?.category_id && machineToEdit.category_id !== 'backhoe-loaders'
+        ? machineToEdit.category_id
+        : 'loader'
+    );
+    setBrand(machineToEdit?.brand || 'JCB');
+    setModel(machineToEdit?.model || '3CX Eco');
+    setYear(machineToEdit?.year || 2022);
+    setListingMode(machineToEdit?.listing_mode || 'rent');
+    setCondition(machineToEdit?.condition || 'good');
+    setHourlyRate(machineToEdit?.rate_hourly || 350);
+    setDailyRate(machineToEdit?.rate_daily || 2200);
+    setWeeklyRate(machineToEdit?.rate_weekly || 12000);
+    setSalePrice(machineToEdit?.sale_price || 480000);
+    setWithOperator(machineToEdit?.with_operator ?? true);
+    setFuelIncluded(machineToEdit?.fuel_included ?? false);
+    setDeliveryAvailable(machineToEdit?.delivery_available ?? true);
+    setIsSparePart(Boolean(editIsSpare));
+    setSparePartCategory((machineToEdit?.specs as any)?.part_type || 'filters');
+    setPartNumber(
+      (machineToEdit?.specs as any)?.part_number || (editIsSpare ? machineToEdit?.model || '' : '')
+    );
+    setCompatibleBrands((machineToEdit?.specs as any)?.compatible_models || 'JCB 3CX, 4CX');
+    setCityId(machineToEdit?.city_id || 'casablanca');
+    setLat(machineToEdit?.location_lat || machineToEdit?.lat || 33.5731);
+    setLng(machineToEdit?.location_lng || machineToEdit?.lng || -7.5898);
+    setHasConfirmedMapLocation(
+      Boolean(
+        machineToEdit &&
+          ((machineToEdit.location_lat && machineToEdit.location_lng) ||
+            (machineToEdit.lat && machineToEdit.lng))
+      )
+    );
+    setImages(machineToEdit?.images?.length ? machineToEdit.images : []);
+    setPendingFiles([]);
+    setIsPublished(machineToEdit?.is_published ?? true);
+  }, [isOpen, machineToEdit]);
 
   if (!isOpen) return null;
 
@@ -195,6 +247,16 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
         lang === 'fr'
           ? 'Veuillez saisir un titre en arabe ou français'
           : 'يرجى إدخال عنوان الإعلان'
+      );
+      setStep(1);
+      return;
+    }
+
+    if (isSparePart && !partNumber.trim()) {
+      toast.error(
+        lang === 'fr'
+          ? 'Veuillez saisir la référence unique de la pièce (Réf / Part Number)'
+          : 'يرجى إدخال رقم المرجع الفريد لقطعة الغيار (Réf / Part Number)'
       );
       setStep(1);
       return;
@@ -337,6 +399,7 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
           fuel_included: machineData.fuel_included,
           delivery_available: machineData.delivery_available,
           images: machineData.images,
+          specs: machineData.specs,
           is_published: machineData.is_published,
         };
 
@@ -1001,13 +1064,23 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
                 <div>
                   <h4 className="text-xs font-extrabold text-ink flex items-center gap-1.5">
                     <MapPin className="w-4 h-4 text-primary-dark shrink-0" />
-                    <span>{t('machines.map_picker_title')}</span>
+                    <span>
+                      {isSparePart
+                        ? lang === 'fr'
+                          ? 'Localisation du magasin / dépôt de la pièce'
+                          : 'تحديد موقع قطعة الغيار / المتجر على الخريطة'
+                        : t('machines.map_picker_title')}
+                    </span>
                     <span className="px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 text-[10px] font-black">
                       {lang === 'fr' ? 'Obligatoire' : 'إلزامي'}
                     </span>
                   </h4>
                   <p className="text-[11px] text-steel-500 mt-0.5">
-                    {lang === 'fr'
+                    {isSparePart
+                      ? lang === 'fr'
+                        ? 'Obligatoire pour recevoir les demandes directes de pièces des propriétaires d’engins à proximité.'
+                        : 'إلزامي ليتمكن ملاك الآليات من إيجاد قطعة الغيار عبر حملات البحث المباشر القريبة من مواقعهم.'
+                      : lang === 'fr'
                       ? 'Nécessaire pour recevoir les alertes directes des chantiers à proximité.'
                       : 'ضروري لتحديد المسافة وتلقي إشعارات البحث المباشر من الأوراش القريبة منك.'}
                   </p>
@@ -1213,6 +1286,14 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
               variant="primary"
               size="md"
               onClick={() => {
+                if (step === 1 && isSparePart && !partNumber.trim()) {
+                  toast.error(
+                    lang === 'fr'
+                      ? 'Veuillez saisir la référence unique de la pièce (Réf / Part Number)'
+                      : 'يرجى إدخال رقم المرجع الفريد لقطعة الغيار (Réf / Part Number) قبل المتابعة'
+                  );
+                  return;
+                }
                 if (step === 3 && !hasConfirmedMapLocation) {
                   toast.error(requireMapLocationMessage);
                   return;

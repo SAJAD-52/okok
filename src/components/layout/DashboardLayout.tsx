@@ -908,7 +908,10 @@ export const DashboardLayout: React.FC = () => {
                           ) : (
                             <>
                               {/* 0. Live InDrive Dispatch Opportunities */}
-                              {opportunityNotifications.map((opp) => (
+                              {opportunityNotifications.map((opp) => {
+                                const isSpareOpp =
+                                  opp.campaign_type === 'spare_part' || Boolean(opp.part_reference);
+                                return (
                                 <div
                                   key={opp.id}
                                   className={`p-3 rounded-xl border space-y-2 text-xs shadow-xs ${
@@ -920,7 +923,7 @@ export const DashboardLayout: React.FC = () => {
                                   <div className="flex items-start gap-2.5">
                                     <img
                                       src="/assets/aistudio/image_010e3368.png"
-                                      alt="فرصة جديدة"
+                                      alt={isSpareOpp ? 'طلب قطعة غيار' : 'فرصة جديدة'}
                                       className="w-9 h-9 object-contain shrink-0 rounded-lg bg-white/10 p-0.5"
                                     />
                                     <div className="min-w-0 flex-1">
@@ -932,7 +935,7 @@ export const DashboardLayout: React.FC = () => {
                                               : 'text-primary-dark'
                                           }`}
                                         >
-                                          فرصة جديدة
+                                          {isSpareOpp ? 'طلب قطعة غيار 🔧' : 'فرصة جديدة'}
                                         </span>
                                         {opp.is_nationwide ? (
                                           <span className="inline-flex items-center gap-1 text-[10px] font-bold opacity-85">
@@ -947,7 +950,9 @@ export const DashboardLayout: React.FC = () => {
                                         ) : null}
                                       </div>
                                       <p className="font-black leading-snug mt-0.5 break-words">
-                                        «{opp.company_name}» محتاجة «{opp.machine_name}» ديالك
+                                        {isSpareOpp
+                                          ? `«${opp.company_name}» يبحث عن Réf: ${opp.part_reference || opp.machine_name}`
+                                          : `«${opp.company_name}» محتاجة «${opp.machine_name}» ديالك`}
                                       </p>
                                       <p className="text-[10px] opacity-75 truncate mt-0.5">
                                         {opp.site_name}
@@ -990,7 +995,13 @@ export const DashboardLayout: React.FC = () => {
                                       }}
                                       className="px-2.5 py-1.5 rounded-lg bg-primary text-ink font-black text-[11px] hover:bg-primary-hover transition-colors cursor-pointer"
                                     >
-                                      {lang === 'fr' ? 'Accepter & Discuter' : 'موافقة ومحادثة المقاولة'}
+                                      {isSpareOpp
+                                        ? lang === 'fr'
+                                          ? 'Disponible & Discuter'
+                                          : 'متوفرة عندي — محادثة'
+                                        : lang === 'fr'
+                                        ? 'Accepter & Discuter'
+                                        : 'موافقة ومحادثة المقاولة'}
                                     </button>
                                     {opp.site_phone && (
                                       <a
@@ -1003,7 +1014,8 @@ export const DashboardLayout: React.FC = () => {
                                     )}
                                   </div>
                                 </div>
-                              ))}
+                                );
+                              })}
 
                               {/* 1. Pending Bookings requiring action */}
                               {pendingBookingsList.map((pb) => (

@@ -3,7 +3,7 @@
 // Cost, Category, Hours/Km, Next Due Date, Receipt, and DB Sync
 // ============================================================================
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   PlusCircle,
@@ -59,6 +59,25 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
   const [nextDueDate, setNextDueDate] = useState<string>('');
   const [downtimeHours, setDowntimeHours] = useState<number | ''>(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (defaultMachineId && defaultMachineId !== 'all') {
+      setMachineId(defaultMachineId);
+    } else if (machines.length > 0) {
+      setMachineId(machines[0].id);
+    } else {
+      setMachineId('general');
+    }
+    setDate(new Date().toISOString().slice(0, 10));
+    setTitle('');
+    setDescription('');
+    setVendorName('');
+    setReceiptNumber('');
+    setHoursOrKm('');
+    setNextDueDate('');
+    setDowntimeHours(0);
+  }, [isOpen, defaultMachineId, machines]);
 
   if (!isOpen) return null;
 

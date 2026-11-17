@@ -22,9 +22,11 @@ import {
   CheckCircle2,
   CalendarCheck,
   Loader2,
+  HardHat,
+  Briefcase,
 } from 'lucide-react';
 import { ChatConversationItem } from '../../types/chat';
-import { DispatchDealContext } from '../../types/database';
+import { DispatchDealContext, DriverDealContext } from '../../types/database';
 import { useLanguage } from '../../hooks/useLanguage';
 import { useAuth } from '../../hooks/useAuth';
 import { useChatRealtime } from './useChatRealtime';
@@ -38,6 +40,11 @@ import {
   stripDispatchMarker,
   subscribeLocalDispatchEvents,
 } from '../../lib/dispatchService';
+import {
+  acceptAndCloseDriverDealParty,
+  fetchDriverDealContextForConversation,
+  markOfferAcceptedAndClosed,
+} from '../../lib/driverOfferService';
 import { unlockAudioContextNow } from '../../lib/opportunityAudio';
 
 interface ChatThreadProps {
@@ -56,9 +63,12 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
 
   const [inputMessage, setInputMessage] = useState('');
   const [dispatchDeal, setDispatchDeal] = useState<DispatchDealContext | null>(null);
+  const [driverDeal, setDriverDeal] = useState<DriverDealContext | null>(null);
   const [isAcceptingDeal, setIsAcceptingDeal] = useState(false);
+  const [isClosingDriverDeal, setIsClosingDriverDeal] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const relocatedCampaignRef = useRef<string | null>(null);
+  const syncedClosedOfferRef = useRef<string | null>(null);
 
   const {
     messages,
@@ -69,6 +79,8 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
   } = useChatRealtime(conversation);
 
   const isContractor = profile?.role === 'client' || profile?.role === 'contractor';
+  const isDriverChat =
+    profile?.role === 'driver' || conversation.other_participant?.role === 'driver';
   const isSpareDeal = Boolean(
     dispatchDeal && (dispatchDeal.campaign_type === 'spare_part' || dispatchDeal.part_reference)
   );
@@ -80,11 +92,25 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
     ? 'contractor'
     : 'owner';
   const isRequesterParty = partyRole === 'contractor';
+  const driverPartyRole: 'owner' | 'driver' = driverDeal
+    ? driverDeal.driver_id === currentUserId
+      ? 'driver'
+      : 'owner'
+    : profile?.role === 'driver'
+    ? 'driver'
+    : 'owner';
 
-  // Read optional campaign hint from URL query params
+  // Read optional campaign / driver offer hint from URL query params
   const campaignHint = (() => {
     try {
       return new URLSearchParams(window.location.search).get('campaign');
+    } catch {
+      return null;
+    }
+  })();
+  const offerHint = (() => {
+    try {
+      return new URLSearchParams(window.location.search).get('offer');
     } catch {
       return null;
     }
@@ -168,8 +194,113 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
     messages,
   ]);
 
+  // Sync mutual driver job offer deal context ("إغلاق الصفقة")
+  useEffect(() => {
+    if (!isDriverChat || !currentUserId || !conversation?.other_participant?.id) {
+      setDriverDeal(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const refreshDriverDeal = async () => {
+      const ctx = await fetchDriverDealContextForConversation({
+        currentUserId,
+        otherUserId: conversation.other_participant.id,
+        currentUserRole: profile?.role,
+        otherUserRole: conversation.other_participant.role,
+        offerIdHint: offerHint,
+        messages,
+      });
+
+      if (!cancelled) {
+        setDriverDeal(ctx);
+        // Ensure Supabase offer row closes cleanly when owner views a finalized driver chat
+        if (
+          ctx &&
+          ctx.deal_status === 'accepted' &&
+          ctx.owner_id === currentUserId &&
+          syncedClosedOfferRef.current !== ctx.offer_id
+        ) {
+          syncedClosedOfferRef.current = ctx.offer_id;
+          markOfferAcceptedAndClosed({
+            offerId: ctx.offer_id,
+            driverId: ctx.driver_id,
+            driverName: ctx.won_driver_name,
+          }).catch(() => {});
+        }
+      }
+    };
+
+    refreshDriverDeal();
+
+    const onLocalUpdated = () => refreshDriverDeal();
+    window.addEventListener('jadijcb_driver_offers_updated', onLocalUpdated);
+
+    let bc: BroadcastChannel | null = null;
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        bc = new BroadcastChannel('jadijcb_driver_dispatch');
+        bc.onmessage = () => refreshDriverDeal();
+      }
+    } catch {
+      bc = null;
+    }
+
+    let rtDriverChan: any = null;
+    if (isSupabaseConfigured) {
+      try {
+        rtDriverChan = supabase
+          .channel(`chat_driver_deal_${conversation.id}`)
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'driver_job_offers' },
+            () => refreshDriverDeal()
+          )
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'driver_job_applications' },
+            () => refreshDriverDeal()
+          )
+          .subscribe();
+      } catch {
+        // ignore if table not migrated
+      }
+    }
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('jadijcb_driver_offers_updated', onLocalUpdated);
+      if (bc) bc.close();
+      if (rtDriverChan) supabase.removeChannel(rtDriverChan);
+    };
+  }, [
+    isDriverChat,
+    conversation.id,
+    conversation.other_participant.id,
+    conversation.other_participant.role,
+    profile?.role,
+    currentUserId,
+    offerHint,
+    messages,
+  ]);
+
   // Quick Moroccan Construction Phrases
-  const quickChips = isSpareDeal
+  const quickChips = isDriverChat
+    ? driverPartyRole === 'driver'
+      ? [
+          '🚜 لدي خبرة كاملة بهذه الآلية وجاهز للعمل',
+          '💰 الأجرة وشروط العمل مناسبة لي جداً',
+          '📍 أين يقع الورش ومتى موعد البداية؟',
+          '🏠 هل السكن والتغذية متوفران قرب الورش؟',
+        ]
+      : [
+          '👷 أهلاً بك، متى يمكنك الالتحاق بالورش؟',
+          '📜 هل لديك رخصة السياقة وخبرة كافية بالآلية؟',
+          '💰 الشروط والأجرة نهائية، هل تناسبك؟',
+          '🤝 متفقون على الشروط، اضغط على إغلاق الصفقة',
+        ]
+    : isSpareDeal
     ? isRequesterParty
       ? [
           '🔧 هل القطعة مطابقة تماماً للمرجع Réf؟',
@@ -271,6 +402,44 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
     }
   };
 
+  const handleCloseDriverDeal = async () => {
+    if (!driverDeal || isClosingDriverDeal) return;
+    setIsClosingDriverDeal(true);
+    try {
+      const res = await acceptAndCloseDriverDealParty({
+        deal: driverDeal,
+        partyRole: driverPartyRole,
+        currentUserId,
+        currentUserName: profile?.full_name || '',
+        conversationId: conversation.id,
+      });
+
+      setDriverDeal(res.updatedDeal);
+
+      if (res.finalized) {
+        toast.success(
+          lang === 'fr'
+            ? 'Accord conclu ! L’offre d’emploi est désormais clôturée dans la liste.'
+            : 'تم إغلاق الصفقة بنجاح! أُغلق عرض العمل تلقائياً في لائحة عروض العمل.'
+        );
+      } else {
+        toast.success(
+          lang === 'fr'
+            ? 'Confirmation enregistrée ! Dès que l’autre partie clique sur «Clôturer l’accord», l’offre sera fermée.'
+            : 'تم تسجيل موافقتك على شروط العمل! بمجرد ضغط الطرف الآخر على «إغلاق الصفقة» سيُغلق العرض نهائياً.'
+        );
+      }
+    } catch {
+      toast.error(
+        lang === 'fr'
+          ? 'Impossible de clôturer l’accord pour le moment'
+          : 'تعذر إتمام إغلاق الصفقة حالياً، يرجى المحاولة مرة أخرى'
+      );
+    } finally {
+      setIsClosingDriverDeal(false);
+    }
+  };
+
   const formatDateSeparator = (dateStr: string) => {
     const d = new Date(dateStr);
     const today = new Date();
@@ -300,6 +469,10 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
     dispatchDeal &&
       (isRequesterParty ? dispatchDeal.contractor_accepted : dispatchDeal.owner_accepted)
   );
+  const hasDriverPartyAccepted = Boolean(
+    driverDeal &&
+      (driverPartyRole === 'driver' ? driverDeal.driver_accepted : driverDeal.owner_accepted)
+  );
 
   return (
     <div className="flex flex-col h-full bg-[#EFEAE2]/30 dark:bg-ink relative overflow-hidden select-none">
@@ -323,6 +496,8 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
             <div className="w-10 h-10 rounded-2xl bg-amber-100 text-ink border border-primary/40 flex items-center justify-center font-black text-xs uppercase shadow-xs">
               {other.role === 'owner' ? (
                 <Truck className="w-5 h-5 text-primary-dark" />
+              ) : other.role === 'driver' ? (
+                <HardHat className="w-5 h-5 text-primary-dark" />
               ) : (
                 <Building2 className="w-5 h-5 text-primary-dark" />
               )}
@@ -604,6 +779,133 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
         </div>
       )}
 
+      {/* 4B. Mutual "إغلاق الصفقة" Bar for Driver Job Offers */}
+      {driverDeal && !dispatchDeal && (
+        <div className="shrink-0 z-10">
+          {driverDeal.deal_status === 'accepted' ? (
+            <div className="px-3.5 py-2.5 bg-emerald-50 border-t-2 border-emerald-400 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2 min-w-0 text-emerald-900 font-black">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span className="truncate">
+                  {lang === 'fr'
+                    ? 'Accord conclu par les deux parties ! L’offre est clôturée dans la liste.'
+                    : 'تم إغلاق الصفقة بنجاح! اتفق الطرفان على شروط العمل وأُغلق العرض في لائحة عروض العمل 🤝'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  navigate(profile?.role === 'driver' ? '/driver/joboffer' : '/owner/machines')
+                }
+                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] flex items-center gap-1.5 cursor-pointer shrink-0 transition-colors"
+              >
+                <Briefcase className="w-3.5 h-3.5" />
+                <span>
+                  {profile?.role === 'driver'
+                    ? lang === 'fr'
+                      ? 'Voir les offres'
+                      : 'لائحة العروض'
+                    : lang === 'fr'
+                    ? 'Gérer mes offres'
+                    : 'حملات السائقين'}
+                </span>
+              </button>
+            </div>
+          ) : driverDeal.deal_status === 'closed' ? (
+            <div className="px-3.5 py-2.5 bg-steel-100 border-t border-steel-300 flex items-center gap-2 text-xs text-steel-700 font-bold">
+              <Lock className="w-4 h-4 text-steel-600 shrink-0" />
+              <span>
+                {lang === 'fr'
+                  ? 'Cette offre d’emploi a été clôturée par le propriétaire.'
+                  : 'تم إغلاق عرض العمل هذا وإزالته من لائحة عروض العمل.'}
+              </span>
+            </div>
+          ) : (
+            <div className="px-3.5 py-2.5 bg-ink text-white border-t-2 border-primary flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              <div className="min-w-0 space-y-1 text-start">
+                <div className="flex items-center gap-1.5 text-[11px] font-black text-primary truncate">
+                  <HardHat className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">
+                    {lang === 'fr' ? driverDeal.machine_label_fr : driverDeal.machine_label_ar}
+                    {driverDeal.offered_salary > 0
+                      ? ` · ${driverDeal.offered_salary.toLocaleString('fr-FR')} ${
+                          lang === 'fr' ? 'MAD' : 'د.م'
+                        }/${
+                          driverDeal.salary_unit === 'month'
+                            ? lang === 'fr'
+                              ? 'mois'
+                              : 'شهر'
+                            : lang === 'fr'
+                            ? 'jour'
+                            : 'يوم'
+                        }`
+                      : ''}
+                    {driverDeal.duration_label ? ` · ${driverDeal.duration_label}` : ''}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2 text-[10px] font-bold flex-wrap">
+                  <span
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg ${
+                      driverDeal.owner_accepted
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40'
+                        : 'bg-white/10 text-steel-300'
+                    }`}
+                  >
+                    {driverDeal.owner_accepted ? (
+                      <Check className="w-3 h-3" />
+                    ) : (
+                      <Clock className="w-3 h-3" />
+                    )}
+                    <span>{lang === 'fr' ? 'Propriétaire' : 'موافقة المالك'}</span>
+                  </span>
+
+                  <span
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg ${
+                      driverDeal.driver_accepted
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40'
+                        : 'bg-white/10 text-steel-300'
+                    }`}
+                  >
+                    {driverDeal.driver_accepted ? (
+                      <Check className="w-3 h-3" />
+                    ) : (
+                      <Clock className="w-3 h-3" />
+                    )}
+                    <span>{lang === 'fr' ? 'Conducteur' : 'موافقة السائق'}</span>
+                  </span>
+                </div>
+              </div>
+
+              {hasDriverPartyAccepted ? (
+                <div className="px-3.5 py-2 rounded-xl bg-white/10 border border-primary/50 text-primary text-xs font-black flex items-center justify-center gap-1.5 shrink-0 min-h-[42px]">
+                  <Clock className="w-4 h-4 animate-pulse shrink-0" />
+                  <span>
+                    {lang === 'fr'
+                      ? 'Confirmé — En attente du partenaire'
+                      : 'تمت موافقتك — في انتظار تأكيد الطرف الآخر لإغلاق الصفقة'}
+                  </span>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleCloseDriverDeal}
+                  disabled={isClosingDriverDeal}
+                  className="px-4 py-2 rounded-xl bg-primary hover:bg-primary-hover text-ink font-black text-xs flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer shrink-0 min-h-[44px] disabled:opacity-60"
+                >
+                  {isClosingDriverDeal ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Handshake className="w-4 h-4" />
+                  )}
+                  <span>{lang === 'fr' ? 'Clôturer l’accord' : 'إغلاق الصفقة'}</span>
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 5. Interactive Quick Chips */}
       {!isChatClosedByOtherDeal && (
         <div className="px-3 pt-2 pb-1 bg-white border-t border-steel-100 flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0">
@@ -642,7 +944,15 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
               placeholder={
-                isContractor
+                isDriverChat
+                  ? driverPartyRole === 'driver'
+                    ? lang === 'fr'
+                      ? 'Écrivez au propriétaire au sujet des conditions...'
+                      : 'اكتب رسالتك لمالك الآلية حول شروط العمل...'
+                    : lang === 'fr'
+                    ? 'Écrivez au conducteur pour fixer les conditions...'
+                    : 'اكتب رسالتك للسائق لتحديد شروط العمل...'
+                  : isContractor
                   ? lang === 'fr'
                     ? 'Écrivez votre message au propriétaire...'
                     : 'اكتب استفسارك لمالك الآلية هنا...'

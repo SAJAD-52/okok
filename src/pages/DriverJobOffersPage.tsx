@@ -34,6 +34,7 @@ import {
 } from '../data/driverMachines';
 import {
   applyToDriverJobOffer,
+  buildDriverOfferMarkerSuffix,
   fetchDriverJobOffers,
   subscribeDriverJobOffers,
 } from '../lib/driverOfferService';
@@ -79,7 +80,7 @@ export const DriverJobOffersPage: React.FC = () => {
   const loadOffers = useCallback(async () => {
     try {
       const list = await fetchDriverJobOffers(driverId);
-      setOffers(list);
+      setOffers(list.filter((o) => o.status === 'open'));
     } finally {
       setIsLoading(false);
     }
@@ -184,6 +185,20 @@ export const DriverJobOffersPage: React.FC = () => {
     }
 
     try {
+      if (!offer.has_applied) {
+        await applyToDriverJobOffer({
+          offer,
+          driverId,
+          driverName: profile?.full_name || 'سائق JADIJCB',
+          driverPhone: profile?.phone || '',
+          driverCity: profile?.city || '',
+          driverExperience: profile?.driver_experience_years || '3_5',
+        });
+        setOffers((prev) =>
+          prev.map((o) => (o.id === offer.id ? { ...o, has_applied: true } : o))
+        );
+      }
+
       const conv = await chatStore.getOrCreateConversation(
         driverId,
         offer.owner_id,
@@ -197,12 +212,15 @@ export const DriverJobOffersPage: React.FC = () => {
         }
       );
 
+      const baseMsg =
+        lang === 'fr'
+          ? `Bonjour, je postule pour votre offre de conducteur (${offer.machine_label_fr}) à ${offer.city}.`
+          : `السلام عليكم، أنا سائق محترف أتقدم لطلب العمل الخاص بـ (${offer.machine_label_ar}) بمدينة ${offer.city}.`;
+
       await chatStore.sendMessage(
         conv.id,
         driverId,
-        lang === 'fr'
-          ? `Bonjour, je postule pour votre offre de conducteur (${offer.machine_label_fr}) à ${offer.city}.`
-          : `السلام عليكم، أنا سائق محترف أتقدم لطلب العمل الخاص بـ (${offer.machine_label_ar}) بمدينة ${offer.city}.`,
+        `${baseMsg}${buildDriverOfferMarkerSuffix(offer, driverId)}`,
         offer.owner_id,
         {
           senderName: profile?.full_name || 'سائق',
@@ -210,7 +228,9 @@ export const DriverJobOffersPage: React.FC = () => {
         }
       );
 
-      navigate(`/driver/messages?conv=${encodeURIComponent(conv.id)}`);
+      navigate(
+        `/driver/messages?conv=${encodeURIComponent(conv.id)}&offer=${encodeURIComponent(offer.id)}`
+      );
     } catch {
       toast.error(
         lang === 'fr'

@@ -1353,7 +1353,17 @@ async function sendWebPushToTargets(
 }
 
 function stripDispatchMarkerServer(text: string): string {
-  return String(text || '')
+  const raw = String(text || '');
+  const markers = ['#DISPATCH_DATA:', '#DISPATCH_DEAL:', '#DRIVER_OFFER:', '#DRIVER_DEAL:'];
+  let cutIdx = -1;
+  for (const m of markers) {
+    const idx = raw.indexOf(m);
+    if (idx !== -1 && (cutIdx === -1 || idx < cutIdx)) {
+      cutIdx = idx;
+    }
+  }
+  const sliced = cutIdx === -1 ? raw : raw.slice(0, cutIdx);
+  return sliced
     .replace(/\s*\[JADIJCB_DISPATCH:[^\]]+\]\s*/g, '')
     .replace(/\s*\[JADIJCB_DEAL:[^\]]+\]\s*/g, '')
     .trim();

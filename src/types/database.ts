@@ -487,3 +487,19 @@ export interface DriverJobOffer {
   created_at: string;
 }
 
+export interface DriverDealContext {
+  offer_id: string;
+  owner_id: string;
+  driver_id: string;
+  machine_category: string;
+  machine_label_ar: string;
+  machine_label_fr: string;
+  offered_salary: number;
+  salary_unit: DriverSalaryUnit;
+  duration_label: string;
+  owner_accepted: boolean;
+  driver_accepted: boolean;
+  deal_status: 'open' | 'pending_owner' | 'pending_driver' | 'accepted' | 'closed';
+  won_driver_name?: string;
+}
+

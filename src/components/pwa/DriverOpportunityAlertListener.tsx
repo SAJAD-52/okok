@@ -24,6 +24,7 @@ import {
 import { DriverJobOffer, UserProfile } from '../../types/database';
 import {
   applyToDriverJobOffer,
+  buildDriverOfferMarkerSuffix,
   fetchDriverJobOffers,
   mapNotificationRowToDriverOffer,
   subscribeDriverJobOffers,
@@ -283,12 +284,15 @@ export const DriverOpportunityAlertListener: React.FC<DriverOpportunityAlertList
           role: 'owner',
         });
 
+        const baseMsg =
+          lang === 'fr'
+            ? `Bonjour, je suis conducteur disponible pour votre offre (${target.machine_label_fr}).`
+            : `السلام عليكم، أنا سائق محترف متاح للعمل على عرضكم الخاص بـ (${target.machine_label_ar}).`;
+
         await chatStore.sendMessage(
           conv.id,
           driverId,
-          lang === 'fr'
-            ? `Bonjour, je suis conducteur disponible pour votre offre (${target.machine_label_fr}).`
-            : `السلام عليكم، أنا سائق محترف متاح للعمل على عرضكم الخاص بـ (${target.machine_label_ar}).`,
+          `${baseMsg}${buildDriverOfferMarkerSuffix(target, driverId)}`,
           target.owner_id,
           {
             senderName: driverProfile?.full_name || 'سائق',
@@ -297,7 +301,11 @@ export const DriverOpportunityAlertListener: React.FC<DriverOpportunityAlertList
         );
 
         setActiveOffer(null);
-        navigate(`/driver/messages?conv=${encodeURIComponent(conv.id)}`);
+        navigate(
+          `/driver/messages?conv=${encodeURIComponent(conv.id)}&offer=${encodeURIComponent(
+            target.id
+          )}`
+        );
         return;
       }
 

@@ -34,15 +34,13 @@ export const DISPATCH_DEAL_MARKER = '\n#DISPATCH_DEAL:';
 
 export function stripDispatchMarker(raw?: string | null): string {
   if (!raw) return '';
-  const dataIdx = raw.indexOf('#DISPATCH_DATA:');
-  const dealIdx = raw.indexOf('#DISPATCH_DEAL:');
+  const markers = ['#DISPATCH_DATA:', '#DISPATCH_DEAL:', '#DRIVER_OFFER:', '#DRIVER_DEAL:'];
   let cutIdx = -1;
-  if (dataIdx !== -1 && dealIdx !== -1) {
-    cutIdx = Math.min(dataIdx, dealIdx);
-  } else if (dataIdx !== -1) {
-    cutIdx = dataIdx;
-  } else if (dealIdx !== -1) {
-    cutIdx = dealIdx;
+  for (const m of markers) {
+    const idx = raw.indexOf(m);
+    if (idx !== -1 && (cutIdx === -1 || idx < cutIdx)) {
+      cutIdx = idx;
+    }
   }
   if (cutIdx === -1) return raw;
   return raw.slice(0, cutIdx).trim();

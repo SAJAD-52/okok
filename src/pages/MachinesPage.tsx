@@ -53,6 +53,7 @@ import {
 import {
   closeDriverJobOffer,
   fetchOwnerDriverOffers,
+  finalizeDriverJobOfferDirect,
   OwnerDriverOfferWithApps,
 } from '../lib/driverOfferService';
 import { getDriverExperienceOption } from '../data/driverMachines';
@@ -77,6 +78,7 @@ export const MachinesPage: React.FC = () => {
   const [driverDispatchMachine, setDriverDispatchMachine] = useState<Machine | null>(null);
   const [spareCampaigns, setSpareCampaigns] = useState<DispatchCampaign[]>([]);
   const [driverCampaigns, setDriverCampaigns] = useState<OwnerDriverOfferWithApps[]>([]);
+  const [closingOfferDriverKey, setClosingOfferDriverKey] = useState<string | null>(null);
 
   // Fetch live machines from Supabase
   const loadMachines = useCallback(async () => {
@@ -1047,11 +1049,15 @@ export const MachinesPage: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {driverCampaigns.map((camp) => {
               const isClosed = camp.status === 'closed';
+              const isDealAccepted = camp.status === 'accepted';
+              const isInactive = isClosed || isDealAccepted;
               return (
                 <Card
                   key={camp.id}
                   className={`p-4 rounded-2xl border space-y-3 ${
-                    camp.applications.length > 0
+                    isDealAccepted
+                      ? 'bg-emerald-50/45 border-emerald-400 shadow-soft'
+                      : camp.applications.length > 0
                       ? 'bg-emerald-50/35 border-emerald-300 shadow-soft'
                       : isClosed
                       ? 'bg-steel-50/70 border-steel-200 opacity-90'
@@ -1063,18 +1069,31 @@ export const MachinesPage: React.FC = () => {
                       <div className="flex items-center gap-2 flex-wrap">
                         <span
                           className={`px-2 py-0.5 rounded-lg text-[10px] font-black inline-flex items-center gap-1 ${
-                            isClosed
+                            isDealAccepted
+                              ? 'bg-emerald-600 text-white'
+                              : isClosed
                               ? 'bg-steel-200 text-steel-700'
                               : 'bg-emerald-100 text-emerald-800'
                           }`}
                         >
-                          {isClosed
-                            ? lang === 'fr'
-                              ? 'Clôturée'
-                              : 'مغلقة'
-                            : lang === 'fr'
-                            ? 'En diffusion live'
-                            : 'نشطة الآن'}
+                          {isDealAccepted ? (
+                            <>
+                              <Handshake className="w-3 h-3" />
+                              <span>
+                                {lang === 'fr' ? 'Accord conclu' : 'تم إغلاق الصفقة'}
+                              </span>
+                            </>
+                          ) : isClosed ? (
+                            lang === 'fr' ? (
+                              'Clôturée'
+                            ) : (
+                              'مغلقة'
+                            )
+                          ) : lang === 'fr' ? (
+                            'En diffusion live'
+                          ) : (
+                            'نشطة الآن'
+                          )}
                         </span>
 
                         {camp.offered_salary > 0 && (
@@ -1107,7 +1126,11 @@ export const MachinesPage: React.FC = () => {
                       <p className="text-[11px] text-steel-500 font-bold flex items-center gap-1 mt-0.5">
                         <Users className="w-3 h-3 shrink-0" />
                         <span>
-                          {lang === 'fr'
+                          {isDealAccepted
+                            ? lang === 'fr'
+                              ? 'Offre retirée de la liste publique après accord'
+                              : 'تم إغلاق العرض وإزالته من لائحة عروض العمل'
+                            : lang === 'fr'
                             ? 'Diffusée à tous les conducteurs de cet engin'
                             : 'معروضة لجميع السائقين المسجلين بهذه الآلية'}
                         </span>
@@ -1140,23 +1163,88 @@ export const MachinesPage: React.FC = () => {
 
                       {camp.applications.map((app) => {
                         const exp = getDriverExperienceOption(app.driver_experience);
+                        const actionKey = `${camp.id}::${app.driver_id}`;
+                        const isAppWon = app.status === 'accepted';
                         return (
                           <div
                             key={app.id}
-                            className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 flex flex-wrap items-center justify-between gap-2"
+                            className={`p-2.5 rounded-xl border flex flex-wrap items-center justify-between gap-2 ${
+                              isAppWon
+                                ? 'bg-white border-emerald-400 shadow-2xs'
+                                : 'bg-emerald-50 border-emerald-200'
+                            }`}
                           >
                             <div className="min-w-0 text-xs">
-                              <p className="font-black text-ink truncate">{app.driver_name}</p>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <p className="font-black text-ink truncate">{app.driver_name}</p>
+                                {isAppWon && (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-600 text-white text-[10px] font-black">
+                                    <Handshake className="w-3 h-3" />
+                                    {lang === 'fr' ? 'Retenu' : 'تم الاتفاق معه'}
+                                  </span>
+                                )}
+                              </div>
                               <p className="text-[11px] text-steel-600 font-bold">
                                 {app.driver_city || 'المغرب'} ·{' '}
                                 {lang === 'fr' ? exp.shortFr : exp.shortAr}
                               </p>
                             </div>
 
-                            <div className="flex items-center gap-1.5 shrink-0">
+                            <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+                              {!isInactive && (
+                                <Button
+                                  type="button"
+                                  variant="primary"
+                                  size="sm"
+                                  isLoading={closingOfferDriverKey === actionKey}
+                                  onClick={async () => {
+                                    const ownerUid = user?.id || profile?.id || '';
+                                    if (!ownerUid || !app.driver_id) return;
+                                    setClosingOfferDriverKey(actionKey);
+                                    try {
+                                      await finalizeDriverJobOfferDirect({
+                                        offer: camp,
+                                        ownerId: ownerUid,
+                                        ownerName: profile?.full_name || camp.owner_name,
+                                        driverId: app.driver_id,
+                                        driverName: app.driver_name,
+                                        driverPhone: app.driver_phone,
+                                        driverCity: app.driver_city,
+                                      });
+                                      setDriverCampaigns((prev) =>
+                                        prev.map((c) =>
+                                          c.id === camp.id
+                                            ? {
+                                                ...c,
+                                                status: 'accepted',
+                                                applications: c.applications.map((a) =>
+                                                  a.driver_id === app.driver_id
+                                                    ? { ...a, status: 'accepted' }
+                                                    : a
+                                                ),
+                                              }
+                                            : c
+                                        )
+                                      );
+                                      toast.success(
+                                        lang === 'fr'
+                                          ? 'Accord conclu ! L’offre est clôturée dans la liste des offres.'
+                                          : 'تم إغلاق الصفقة بنجاح وأُغلق العرض في لائحة عروض العمل!'
+                                      );
+                                    } finally {
+                                      setClosingOfferDriverKey(null);
+                                    }
+                                  }}
+                                  leftIcon={<Handshake className="w-3.5 h-3.5" />}
+                                  className="text-[11px] min-h-[36px] font-black"
+                                >
+                                  {lang === 'fr' ? 'Clôturer l’accord' : 'إغلاق الصفقة'}
+                                </Button>
+                              )}
+
                               <Button
                                 type="button"
-                                variant="primary"
+                                variant={isInactive ? 'primary' : 'outline'}
                                 size="sm"
                                 onClick={async () => {
                                   const ownerUid = user?.id || profile?.id || '';
@@ -1173,7 +1261,11 @@ export const MachinesPage: React.FC = () => {
                                       role: 'driver',
                                     }
                                   );
-                                  navigate(`/owner/messages?conv=${encodeURIComponent(conv.id)}`);
+                                  navigate(
+                                    `/owner/messages?conv=${encodeURIComponent(
+                                      conv.id
+                                    )}&offer=${encodeURIComponent(camp.id)}`
+                                  );
                                 }}
                                 leftIcon={<MessageSquare className="w-3.5 h-3.5" />}
                                 className="text-[11px] min-h-[36px]"
@@ -1197,13 +1289,17 @@ export const MachinesPage: React.FC = () => {
                     </div>
                   ) : (
                     <p className="text-[11px] text-steel-500 pt-2 border-t border-steel-100">
-                      {lang === 'fr'
+                      {isDealAccepted
+                        ? lang === 'fr'
+                          ? 'Accord conclu avec le conducteur et offre clôturée.'
+                          : 'تم إغلاق الصفقة مع السائق وإغلاق العرض.'
+                        : lang === 'fr'
                         ? 'Alerte envoyée aux conducteurs qualifiés. En attente de candidatures...'
                         : 'تم بث العرض للسائقين المسجلين بهذه الآلية وفي انتظار تفاعلهم...'}
                     </p>
                   )}
 
-                  {!isClosed && (
+                  {!isInactive && (
                     <div className="flex justify-end pt-1">
                       <button
                         type="button"

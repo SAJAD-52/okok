@@ -10,6 +10,7 @@ import { mapDatabaseError } from '../lib/errorHelpers';
 import { UserProfile, UserRole, ClientSegment } from '../types/database';
 import { generateUniqueStorefrontSlug } from '../lib/storefrontSlug';
 import { saveStorefrontData } from '../lib/storefrontService';
+import { markUserWhatsAppVerified } from '../lib/whatsappOtpService';
 
 interface AuthContextType {
   user: any | null;
@@ -37,6 +38,7 @@ interface AuthContextType {
       driverMachines?: string[];
       driverExperienceYears?: string;
       driverAvailable?: boolean;
+      whatsappVerified?: boolean;
     }
   ) => Promise<{ success: boolean; error?: string; isNewUser?: boolean }>;
   logout: () => Promise<void>;
@@ -588,6 +590,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       driverMachines?: string[];
       driverExperienceYears?: string;
       driverAvailable?: boolean;
+      whatsappVerified?: boolean;
     }
   ): Promise<{ success: boolean; error?: string; isNewUser?: boolean }> => {
     if (!isSupabaseConfigured) {
@@ -625,6 +628,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               resolvedRole === 'driver' ? meta?.driverExperienceYears || '3_5' : undefined,
             driver_available:
               resolvedRole === 'driver' ? meta?.driverAvailable ?? true : undefined,
+            whatsapp_verified: Boolean(meta?.whatsappVerified),
             preferred_lang: 'ar',
           },
         },
@@ -696,7 +700,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           company_name: meta?.companyName || '',
           role: resolvedRole,
           city: meta?.city || 'Casablanca',
-          whatsapp_verified: false,
+          whatsapp_verified: Boolean(meta?.whatsappVerified),
           subscription_status: isVipSignup || resolvedRole !== 'owner' ? 'active' : 'trial',
           trial_started_at: new Date().toISOString(),
           trial_ends_at: new Date(Date.now() + 72 * 3600 * 1000).toISOString(),
@@ -751,7 +755,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             resolvedRole === 'driver' ? meta?.driverExperienceYears || '3_5' : undefined,
           driver_available: resolvedRole === 'driver' ? meta?.driverAvailable ?? true : undefined,
           city: meta?.city || 'Casablanca',
-          whatsapp_verified: false,
+          whatsapp_verified: Boolean(meta?.whatsappVerified),
           subscription_status: resolvedRole === 'owner' ? 'trial' : 'active',
           trial_started_at: new Date().toISOString(),
           trial_ends_at: new Date(Date.now() + 72 * 3600 * 1000).toISOString(),
@@ -761,6 +765,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         loadedProfile = {
           ...loadedProfile,
+          whatsapp_verified: Boolean(meta?.whatsappVerified) || Boolean(loadedProfile.whatsapp_verified),
           role: resolvedRole === 'driver' ? 'driver' : loadedProfile.role,
           client_segment: loadedProfile.client_segment || meta?.clientSegment,
           client_activity_note: loadedProfile.client_activity_note || meta?.clientActivityNote || '',
@@ -779,6 +784,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               ? loadedProfile.driver_available ?? meta?.driverAvailable ?? true
               : loadedProfile.driver_available,
         };
+      }
+
+      if (meta?.whatsappVerified && activeUser?.id) {
+        markUserWhatsAppVerified(activeUser.id, norm.e164).catch(() => {});
       }
 
       saveProfileLocally(loadedProfile);

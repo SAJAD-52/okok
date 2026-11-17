@@ -39,6 +39,8 @@ import {
   TrendingUp,
   MapPin,
   RefreshCw,
+  KeyRound,
+  MessageCircle,
 } from 'lucide-react';
 import { PublicHeader } from '../components/layout/PublicHeader';
 import { Footer } from '../components/layout/Footer';
@@ -52,6 +54,7 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { adminService, AdminAccountDetail, PlatformOverviewMetrics } from '../lib/adminService';
 import { bookingStore } from '../lib/bookingStore';
 import { platformSettingsStore, PlatformSettings } from '../lib/platformSettings';
+import { adminResetUserPassword } from '../lib/whatsappOtpService';
 import { PaymentRecord, PaymentStatus, Machine, Booking, UserRole } from '../types/database';
 
 type AdminTab = 'accounts' | 'machines' | 'bookings' | 'payments' | 'settings';
@@ -88,6 +91,12 @@ export const AdminPage: React.FC = () => {
   // Platform dynamic payment & subscription settings
   const [settingsForm, setSettingsForm] = useState<PlatformSettings>(() => platformSettingsStore.getSettings());
   const [isSavingSettings, setIsSavingSettings] = useState<boolean>(false);
+
+  // Admin Password Reset Modal state
+  const [resetPasswordTarget, setResetPasswordTarget] = useState<AdminAccountDetail | null>(null);
+  const [adminNewPassword, setAdminNewPassword] = useState<string>('');
+  const [isResettingPassword, setIsResettingPassword] = useState<boolean>(false);
+  const [adminPasswordSaved, setAdminPasswordSaved] = useState<boolean>(false);
 
   useEffect(() => {
     platformSettingsStore.pullFromRemote().then((s) => {
@@ -307,6 +316,40 @@ export const AdminPage: React.FC = () => {
       await adminService.deleteAccount(acc.id);
       toast.success('تم حذف الحساب بنجاح.');
       loadPlatformData();
+    }
+  };
+
+  const generateQuickPassword = () => {
+    const num = Math.floor(100000 + Math.random() * 900000);
+    return `JCB-${num}`;
+  };
+
+  const handleOpenResetPassword = (acc: AdminAccountDetail) => {
+    setResetPasswordTarget(acc);
+    setAdminNewPassword(generateQuickPassword());
+    setAdminPasswordSaved(false);
+  };
+
+  const handleConfirmAdminPasswordReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetPasswordTarget) return;
+    const cleanPass = adminNewPassword.trim();
+    if (cleanPass.length < 8) {
+      toast.error('كلمة السر يجب أن لا تقل عن 8 أحرف');
+      return;
+    }
+
+    setIsResettingPassword(true);
+    try {
+      const res = await adminResetUserPassword(resetPasswordTarget.id, cleanPass);
+      if (!res.success) {
+        toast.error(res.error || 'تعذر تحديث كلمة السر (تأكد من تشغيل migration SQL في Supabase)');
+        return;
+      }
+      setAdminPasswordSaved(true);
+      toast.success(`✅ تم تغيير كلمة السر لحساب ${resetPasswordTarget.full_name} بنجاح!`);
+    } finally {
+      setIsResettingPassword(false);
     }
   };
 
@@ -851,6 +894,19 @@ export const AdminPage: React.FC = () => {
                         +3 أيام تجربة
                       </Button>
 
+                      {/* Reset Password */}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleOpenResetPassword(acc)}
+                        leftIcon={<KeyRound className="w-3.5 h-3.5 text-emerald-700" />}
+                        className="text-xs font-bold border-emerald-200 text-emerald-800 hover:bg-emerald-50"
+                        title="إعادة تعيين كلمة السر وإرسالها عبر واتساب"
+                      >
+                        كلمة السر
+                      </Button>
+
                       {/* Suspend / Unsuspend */}
                       <Button
                         type="button"
@@ -1333,6 +1389,102 @@ export const AdminPage: React.FC = () => {
               </button>
             </div>
             <img src={selectedProofUrl} alt="وصل الدفع" className="w-full h-auto object-contain max-h-[70vh] rounded-xl" />
+          </div>
+        </div>
+      )}
+
+      {/* Admin Password Reset & WhatsApp Dispatch Modal */}
+      {resetPasswordTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/80 backdrop-blur-sm">
+          <div className="relative bg-white border border-steel-200 rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl text-start">
+            <div className="flex items-start justify-between gap-3 pb-3 border-b border-steel-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 flex items-center justify-center shrink-0">
+                  <KeyRound className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-ink">
+                    إعادة تعيين كلمة السر للحساب
+                  </h3>
+                  <p className="text-[11px] text-steel-500">
+                    {resetPasswordTarget.full_name} · <span dir="ltr" className="font-mono">{resetPasswordTarget.phone}</span>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setResetPasswordTarget(null)}
+                className="w-8 h-8 rounded-lg bg-steel-100 text-steel-500 hover:text-ink flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmAdminPasswordReset} className="pt-4 space-y-4">
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-bold text-steel-700">
+                    كلمة السر الجديدة (8 أحرف على الأقل)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAdminNewPassword(generateQuickPassword());
+                      setAdminPasswordSaved(false);
+                    }}
+                    className="text-[11px] font-bold text-primary-dark hover:underline cursor-pointer"
+                  >
+                    توليد كلمة سر عشوائية
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  dir="ltr"
+                  value={adminNewPassword}
+                  onChange={(e) => {
+                    setAdminNewPassword(e.target.value);
+                    setAdminPasswordSaved(false);
+                  }}
+                  placeholder="JCB-123456"
+                  className="w-full px-3.5 py-3 rounded-xl border border-steel-300 font-mono text-sm font-black focus:outline-none focus:ring-2 focus:ring-primary bg-surface"
+                  required
+                />
+              </div>
+
+              {adminPasswordSaved ? (
+                <div className="space-y-3">
+                  <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-900">
+                    ✅ تم تحديث كلمة السر في قاعدة البيانات بنجاح! يمكنك إرسالها الآن لصاحب الحساب عبر واتساب بنقرة واحدة:
+                  </div>
+                  {(() => {
+                    const waDigits = (resetPasswordTarget.phone || '').replace(/\D/g, '');
+                    const waMsg = `مرحباً ${resetPasswordTarget.full_name || ''}،\nتم إعادة تعيين كلمة المرور لحسابك في منصة JADIJCB:\n📱 رقم الدخول: ${resetPasswordTarget.phone}\n🔑 كلمة السر الجديدة: ${adminNewPassword.trim()}\nيمكنك تسجيل الدخول الآن وتغييرها في أي وقت.`;
+                    return (
+                      <a
+                        href={`https://wa.me/${waDigits}?text=${encodeURIComponent(waMsg)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black shadow-sm transition-colors min-h-[46px]"
+                      >
+                        <MessageCircle className="w-4 h-4" />
+                        <span>إرسال كلمة السر للزبون عبر واتساب</span>
+                      </a>
+                    );
+                  })()}
+                </div>
+              ) : (
+                <Button
+                  type="submit"
+                  variant="primary"
+                  size="lg"
+                  isLoading={isResettingPassword}
+                  leftIcon={<CheckCircle className="w-4 h-4" />}
+                  className="w-full justify-center font-black min-h-[46px]"
+                >
+                  حفظ كلمة السر الجديدة الآن
+                </Button>
+              )}
+            </form>
           </div>
         </div>
       )}

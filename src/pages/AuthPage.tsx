@@ -27,6 +27,11 @@ import {
   Briefcase,
   HardHat,
   Award,
+  MessageCircle,
+  RefreshCw,
+  KeyRound,
+  ArrowRight,
+  ArrowLeft,
 } from 'lucide-react';
 import { PublicHeader } from '../components/layout/PublicHeader';
 import { Footer } from '../components/layout/Footer';
@@ -35,6 +40,7 @@ import { Button } from '../components/ui/Button';
 import { toast } from '../components/ui/Toast';
 import { WelcomeModal } from '../components/dashboard/WelcomeModal';
 import { ClientNextStepsModal } from '../components/auth/ClientNextStepsModal';
+import { ForgotPasswordModal } from '../components/auth/ForgotPasswordModal';
 import { DriverMachineChecklist } from '../components/driver/DriverMachineChecklist';
 import { useLanguage } from '../hooks/useLanguage';
 import { useAuth } from '../hooks/useAuth';
@@ -42,6 +48,11 @@ import {
   normalizeMoroccanPhone,
   calculatePasswordStrength,
 } from '../lib/authHelpers';
+import {
+  sendWhatsAppOtp,
+  verifyWhatsAppOtp,
+  mapOtpErrorMessage,
+} from '../lib/whatsappOtpService';
 import { MOROCCAN_CITIES } from '../data/cities';
 import { CLIENT_SEGMENTS } from '../data/clientSegments';
 import { DRIVER_EXPERIENCE_LEVELS } from '../data/driverMachines';
@@ -85,6 +96,20 @@ export const AuthPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [showWelcomeModal, setShowWelcomeModal] = useState(false);
   const [showClientNextStepsModal, setShowClientNextStepsModal] = useState(false);
+  const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false);
+
+  // WhatsApp OTP Registration Step
+  const [regOtpMode, setRegOtpMode] = useState<'none' | 'otp' | 'gateway_pending'>('none');
+  const [regOtpCode, setRegOtpCode] = useState('');
+  const [regResendCooldown, setRegResendCooldown] = useState(0);
+
+  React.useEffect(() => {
+    if (regResendCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setRegResendCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [regResendCooldown]);
 
   const isClientCompany = role === 'client' && clientSegment === 'company';
 
@@ -96,123 +121,13 @@ export const AuthPage: React.FC = () => {
   const passwordStrength = calculatePasswordStrength(password);
   const isPasswordTouched = password.length > 0;
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!phoneValidation.isValid) {
-      toast.error(t('auth.phone_invalid'));
-      return;
-    }
-
-    if (password.length < 8) {
-      toast.error(
-        lang === 'fr'
-          ? 'Le mot de passe doit comporter au moins 8 caractères'
-          : 'كلمة المرور يجب أن لا تقل عن 8 أحرف'
-      );
-      return;
-    }
+  const completeRegistration = async (whatsappVerified: boolean) => {
+    const cityName = MOROCCAN_CITIES.find((c) => c.id === cityId)?.name_ar || cityId;
+    const finalCompanyName =
+      role === 'owner' || isClientCompany ? companyName.trim() : '';
 
     setIsLoading(true);
-
     try {
-      if (mode === 'login') {
-        const res = await loginWithPhone(phone, password);
-
-        if (res.success) {
-          toast.success(
-            lang === 'fr' ? 'Connexion réussie !' : 'تم تسجيل الدخول بنجاح!'
-          );
-          const actualRole = res.role || profile?.role;
-          if (actualRole === 'admin' || isSuperAdmin) {
-            navigate('/admin');
-            return;
-          }
-          if (actualRole === 'driver') {
-            navigate('/driver');
-            return;
-          }
-          const isClient = actualRole === 'client' || actualRole === 'contractor';
-          navigate(isClient ? '/entreprise' : '/owner');
-        } else {
-          toast.error(t(res.error || 'auth.auth_failed'));
-        }
-        return;
-      }
-    } catch {
-      toast.error(t('auth.network_error'));
-      return;
-    } finally {
-      setIsLoading(false);
-    }
-
-    if (mode === 'register') {
-      setIsLoading(true);
-      // Register Mode
-      if (role === 'owner') {
-        if (!fullName.trim()) {
-          toast.error(lang === 'fr' ? 'Veuillez saisir votre nom complet' : 'يرجى إدخال الاسم الكامل للمسؤول');
-          setIsLoading(false);
-          return;
-        }
-        if (!companyName.trim()) {
-          toast.error(
-            lang === 'fr'
-              ? 'Veuillez saisir le nom de votre entreprise'
-              : 'يرجى إدخال اسم الشركة أو المقاولة'
-          );
-          setIsLoading(false);
-          return;
-        }
-      } else if (role === 'driver') {
-        if (!fullName.trim()) {
-          toast.error(
-            lang === 'fr'
-              ? 'Veuillez saisir votre nom complet'
-              : 'يرجى إدخال اسمك الكامل'
-          );
-          setIsLoading(false);
-          return;
-        }
-        if (driverMachines.length === 0) {
-          toast.error(
-            lang === 'fr'
-              ? 'Veuillez cocher au moins un engin que vous maîtrisez'
-              : 'يرجى اختيار آلية واحدة على الأقل من الآليات التي تحترف قيادتها'
-          );
-          setIsLoading(false);
-          return;
-        }
-      } else {
-        // Client Registration Validation (based on chosen segment)
-        if (isClientCompany && !companyName.trim()) {
-          toast.error(
-            lang === 'fr'
-              ? 'Veuillez saisir le nom de l\'entreprise'
-              : 'يرجى إدخال اسم المقاولة'
-          );
-          setIsLoading(false);
-          return;
-        }
-        if (!fullName.trim()) {
-          toast.error(
-            isClientCompany
-              ? lang === 'fr'
-                ? 'Veuillez saisir le nom du propriétaire / gérant'
-                : 'يرجى إدخال اسم المالك / المسؤول'
-              : lang === 'fr'
-              ? 'Veuillez saisir votre nom complet'
-              : 'يرجى إدخال الاسم الكامل'
-          );
-          setIsLoading(false);
-          return;
-        }
-      }
-
-      const cityName = MOROCCAN_CITIES.find((c) => c.id === cityId)?.name_ar || cityId;
-      const finalCompanyName =
-        role === 'owner' || isClientCompany ? companyName.trim() : '';
-
       const res = await signupWithPhone(phone, password, role, {
         fullName: fullName.trim(),
         companyName: finalCompanyName,
@@ -225,6 +140,7 @@ export const AuthPage: React.FC = () => {
         driverMachines: role === 'driver' ? driverMachines : undefined,
         driverExperienceYears: role === 'driver' ? driverExperienceYears : undefined,
         driverAvailable: role === 'driver' ? true : undefined,
+        whatsappVerified,
       });
 
       if (res.success) {
@@ -243,7 +159,9 @@ export const AuthPage: React.FC = () => {
           driver_available: role === 'driver' ? true : undefined,
         });
 
-        setIsLoading(false);
+        setRegOtpMode('none');
+        setRegOtpCode('');
+
         toast.success(
           role === 'driver'
             ? lang === 'fr'
@@ -266,10 +184,185 @@ export const AuthPage: React.FC = () => {
           setShowWelcomeModal(true);
         }
       } else {
-        setIsLoading(false);
         toast.error(t(res.error || 'auth.signup_failed'));
       }
+    } finally {
+      setIsLoading(false);
     }
+  };
+
+  const handleRequestRegistrationOtp = async () => {
+    setIsLoading(true);
+    try {
+      const otpRes = await sendWhatsAppOtp({
+        phone: phoneValidation.e164,
+        purpose: 'register',
+        lang,
+      });
+
+      if (!otpRes.success) {
+        toast.error(mapOtpErrorMessage(otpRes.error, lang, otpRes.retryAfterSeconds));
+        return;
+      }
+
+      if (otpRes.delivery === 'gateway_not_configured') {
+        setRegOtpMode('gateway_pending');
+        return;
+      }
+
+      setRegOtpMode('otp');
+      setRegOtpCode('');
+      setRegResendCooldown(60);
+      toast.success(
+        lang === 'fr'
+          ? `Code d'activation envoyé sur WhatsApp (${phoneValidation.displayFormatted})`
+          : `تم إرسال كود التفعيل إلى واتساب (${phoneValidation.displayFormatted})`
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleVerifyRegistrationOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanCode = regOtpCode.replace(/\D/g, '');
+    if (cleanCode.length !== 6) {
+      toast.error(
+        lang === 'fr'
+          ? 'Veuillez saisir le code à 6 chiffres reçu sur WhatsApp'
+          : 'يرجى إدخال كود التفعيل المكون من 6 أرقام'
+      );
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const verRes = await verifyWhatsAppOtp({
+        phone: phoneValidation.e164,
+        purpose: 'register',
+        code: cleanCode,
+      });
+
+      if (!verRes.success) {
+        const extra =
+          typeof verRes.remainingAttempts === 'number'
+            ? lang === 'fr'
+              ? ` (${verRes.remainingAttempts} essai(s) restant(s))`
+              : ` (تبقى ${verRes.remainingAttempts} محاولات)`
+            : '';
+        toast.error(mapOtpErrorMessage(verRes.error, lang) + extra);
+        return;
+      }
+
+      await completeRegistration(true);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!phoneValidation.isValid) {
+      toast.error(t('auth.phone_invalid'));
+      return;
+    }
+
+    if (password.length < 8) {
+      toast.error(
+        lang === 'fr'
+          ? 'Le mot de passe doit comporter au moins 8 caractères'
+          : 'كلمة المرور يجب أن لا تقل عن 8 أحرف'
+      );
+      return;
+    }
+
+    if (mode === 'login') {
+      setIsLoading(true);
+      try {
+        const res = await loginWithPhone(phone, password);
+
+        if (res.success) {
+          toast.success(
+            lang === 'fr' ? 'Connexion réussie !' : 'تم تسجيل الدخول بنجاح!'
+          );
+          const actualRole = res.role || profile?.role;
+          if (actualRole === 'admin' || isSuperAdmin) {
+            navigate('/admin');
+            return;
+          }
+          if (actualRole === 'driver') {
+            navigate('/driver');
+            return;
+          }
+          const isClient = actualRole === 'client' || actualRole === 'contractor';
+          navigate(isClient ? '/entreprise' : '/owner');
+        } else {
+          toast.error(t(res.error || 'auth.auth_failed'));
+        }
+      } catch {
+        toast.error(t('auth.network_error'));
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
+
+    // Register Mode Validation
+    if (role === 'owner') {
+      if (!fullName.trim()) {
+        toast.error(lang === 'fr' ? 'Veuillez saisir votre nom complet' : 'يرجى إدخال الاسم الكامل للمسؤول');
+        return;
+      }
+      if (!companyName.trim()) {
+        toast.error(
+          lang === 'fr'
+            ? 'Veuillez saisir le nom de votre entreprise'
+            : 'يرجى إدخال اسم الشركة أو المقاولة'
+        );
+        return;
+      }
+    } else if (role === 'driver') {
+      if (!fullName.trim()) {
+        toast.error(
+          lang === 'fr'
+            ? 'Veuillez saisir votre nom complet'
+            : 'يرجى إدخال اسمك الكامل'
+        );
+        return;
+      }
+      if (driverMachines.length === 0) {
+        toast.error(
+          lang === 'fr'
+            ? 'Veuillez cocher au moins un engin que vous maîtrisez'
+            : 'يرجى اختيار آلية واحدة على الأقل من الآليات التي تحترف قيادتها'
+        );
+        return;
+      }
+    } else {
+      if (isClientCompany && !companyName.trim()) {
+        toast.error(
+          lang === 'fr'
+            ? 'Veuillez saisir le nom de l\'entreprise'
+            : 'يرجى إدخال اسم المقاولة'
+        );
+        return;
+      }
+      if (!fullName.trim()) {
+        toast.error(
+          isClientCompany
+            ? lang === 'fr'
+              ? 'Veuillez saisir le nom du propriétaire / gérant'
+              : 'يرجى إدخال اسم المالك / المسؤول'
+            : lang === 'fr'
+            ? 'Veuillez saisir votre nom complet'
+            : 'يرجى إدخال الاسم الكامل'
+        );
+        return;
+      }
+    }
+
+    await handleRequestRegistrationOtp();
   };
 
   return (
@@ -298,7 +391,10 @@ export const AuthPage: React.FC = () => {
           <div className="grid grid-cols-2 p-1 bg-steel-100 rounded-2xl mb-5 sm:mb-6">
             <button
               type="button"
-              onClick={() => setMode('login')}
+              onClick={() => {
+                setMode('login');
+                setRegOtpMode('none');
+              }}
               className={`py-2.5 text-xs font-black rounded-xl transition-all min-h-[44px] cursor-pointer ${
                 mode === 'login'
                   ? 'bg-white text-ink shadow-sm'
@@ -309,7 +405,10 @@ export const AuthPage: React.FC = () => {
             </button>
             <button
               type="button"
-              onClick={() => setMode('register')}
+              onClick={() => {
+                setMode('register');
+                setRegOtpMode('none');
+              }}
               className={`py-2.5 text-xs font-black rounded-xl transition-all min-h-[44px] cursor-pointer ${
                 mode === 'register'
                   ? 'bg-white text-ink shadow-sm'
@@ -321,7 +420,7 @@ export const AuthPage: React.FC = () => {
           </div>
 
           {/* Registration Role Selection: Owner vs Client vs Driver */}
-          {mode === 'register' && (
+          {mode === 'register' && regOtpMode === 'none' && (
             <div className="mb-5">
               <label className="text-xs font-black text-steel-700 block mb-2.5">
                 {t('auth.role_select')}
@@ -424,7 +523,7 @@ export const AuthPage: React.FC = () => {
           )}
 
           {/* Client Category Checklist (قائمة cocher mobile-first) */}
-          {mode === 'register' && role === 'client' && (
+          {mode === 'register' && regOtpMode === 'none' && role === 'client' && (
             <div className="mb-5 p-3.5 sm:p-4 rounded-2xl bg-steel-50/80 border border-steel-200 space-y-2.5">
               <div className="flex items-center justify-between gap-2">
                 <label className="text-xs font-black text-ink">
@@ -485,7 +584,175 @@ export const AuthPage: React.FC = () => {
             </div>
           )}
 
-          {/* Form */}
+          {/* Registration Step 2a: 6-Digit WhatsApp OTP Verification */}
+          {mode === 'register' && regOtpMode === 'otp' && (
+            <form onSubmit={handleVerifyRegistrationOtp} className="space-y-4">
+              <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 space-y-2">
+                <div className="flex items-center gap-2 text-emerald-800 font-black text-xs">
+                  <MessageCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>
+                    {lang === 'fr'
+                      ? 'Vérification WhatsApp requise'
+                      : 'تفعيل الحساب عبر واتساب'}
+                  </span>
+                </div>
+                <p className="text-xs text-emerald-900 leading-relaxed">
+                  {lang === 'fr'
+                    ? 'Nous avons envoyé un code à 6 chiffres sur votre WhatsApp :'
+                    : 'أرسلنا كود تفعيل من 6 أرقام إلى تطبيق واتساب على الرقم:'}
+                </p>
+                <div className="text-sm font-mono font-black text-emerald-700" dir="ltr">
+                  {phoneValidation.displayFormatted}
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-bold text-steel-700">
+                    {lang === 'fr' ? 'Code d’activation (6 chiffres) *' : 'كود التفعيل (6 أرقام) *'}
+                  </label>
+                  <button
+                    type="button"
+                    disabled={regResendCooldown > 0 || isLoading}
+                    onClick={handleRequestRegistrationOtp}
+                    className={`text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer ${
+                      regResendCooldown > 0
+                        ? 'text-steel-400 cursor-not-allowed'
+                        : 'text-primary-dark hover:underline'
+                    }`}
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    <span>
+                      {regResendCooldown > 0
+                        ? lang === 'fr'
+                          ? `Renvoyer (${regResendCooldown}s)`
+                          : `إعادة الإرسال (${regResendCooldown}ث)`
+                        : lang === 'fr'
+                        ? 'Renvoyer le code'
+                        : 'إعادة إرسال الكود'}
+                    </span>
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  dir="ltr"
+                  placeholder="• • • • • •"
+                  value={regOtpCode}
+                  onChange={(e) => setRegOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  className="w-full px-4 py-3.5 rounded-xl border border-steel-300 text-center text-xl font-mono font-black tracking-[0.45em] focus:outline-none focus:ring-2 focus:ring-primary bg-surface min-h-[54px]"
+                  required
+                  autoFocus
+                />
+              </div>
+
+              <Button
+                type="submit"
+                variant="primary"
+                size="lg"
+                isLoading={isLoading}
+                leftIcon={<CheckCircle2 className="w-4 h-4" />}
+                className="w-full justify-center font-black min-h-[50px]"
+              >
+                {lang === 'fr'
+                  ? 'Valider le code et créer mon compte'
+                  : 'تأكيد الكود وإنشاء الحساب'}
+              </Button>
+
+              <button
+                type="button"
+                onClick={() => setRegOtpMode('none')}
+                className="w-full py-2 text-xs font-bold text-steel-600 hover:text-ink inline-flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                {lang === 'fr' ? (
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                ) : (
+                  <ArrowRight className="w-3.5 h-3.5" />
+                )}
+                <span>
+                  {lang === 'fr'
+                    ? 'Modifier le numéro ou les informations'
+                    : 'الرجوع لتعديل الرقم أو البيانات'}
+                </span>
+              </button>
+            </form>
+          )}
+
+          {/* Registration Step 2b: Gateway Not Configured Pending View */}
+          {mode === 'register' && regOtpMode === 'gateway_pending' && (
+            <div className="space-y-4">
+              <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 space-y-2 text-xs text-amber-950">
+                <div className="flex items-center gap-2 font-black text-amber-900">
+                  <MessageCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>
+                    {lang === 'fr'
+                      ? 'Vérification WhatsApp prête'
+                      : 'تأكيد رقم الواتساب قبل إنشاء الحساب'}
+                  </span>
+                </div>
+                <p className="leading-relaxed text-amber-900">
+                  {lang === 'fr'
+                    ? `L'envoi automatique du code OTP n'est pas encore activé sur le serveur. Vous pouvez créer votre compte immédiatement pour le numéro ${phoneValidation.displayFormatted}.`
+                    : `بوابة الإرسال التلقائي لكود الواتساب غير مفعلة بعد على الخادم. يمكنك إكمال إنشاء حسابك مباشرة للرقم ${phoneValidation.displayFormatted} وسيتم توثيقه فور التفعيل.`}
+                </p>
+              </div>
+
+              {(() => {
+                const supportWa = (
+                  platformSettingsStore.getSettings().whatsapp_number || ''
+                ).replace(/\D/g, '');
+                if (supportWa.length < 9) return null;
+                const waText =
+                  lang === 'fr'
+                    ? `Bonjour, je souhaite activer mon compte JADIJCB (${phoneValidation.displayFormatted}).`
+                    : `السلام عليكم، أريد تفعيل حسابي الجديد في منصة JADIJCB بالرقم: ${phoneValidation.displayFormatted}`;
+                return (
+                  <a
+                    href={`https://wa.me/${supportWa}?text=${encodeURIComponent(waText)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black transition-colors min-h-[44px]"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    <span>
+                      {lang === 'fr'
+                        ? 'Envoyer confirmation sur WhatsApp Support'
+                        : 'إرسال طلب التفعيل على واتساب الدعم'}
+                    </span>
+                  </a>
+                );
+              })()}
+
+              <Button
+                type="button"
+                variant="primary"
+                size="lg"
+                isLoading={isLoading}
+                onClick={() => completeRegistration(false)}
+                leftIcon={<CheckCircle2 className="w-4 h-4" />}
+                className="w-full justify-center font-black min-h-[50px]"
+              >
+                {lang === 'fr' ? 'Finaliser l’inscription maintenant' : 'إكمال إنشاء الحساب الآن'}
+              </Button>
+
+              <button
+                type="button"
+                onClick={() => setRegOtpMode('none')}
+                className="w-full py-2 text-xs font-bold text-steel-600 hover:text-ink inline-flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                {lang === 'fr' ? (
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                ) : (
+                  <ArrowRight className="w-3.5 h-3.5" />
+                )}
+                <span>{lang === 'fr' ? 'Retour au formulaire' : 'الرجوع لتعديل البيانات'}</span>
+              </button>
+            </div>
+          )}
+
+          {/* Main Login / Registration Form */}
+          {(mode === 'login' || regOtpMode === 'none') && (
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Registration Specific Conditional Fields */}
             {mode === 'register' && (
@@ -845,43 +1112,22 @@ export const AuthPage: React.FC = () => {
                 </div>
               )}
 
-              {mode === 'login' &&
-                (() => {
-                  const supportWa = (
-                    platformSettingsStore.getSettings().whatsapp_number || ''
-                  ).replace(/\D/g, '');
-                  const forgotText =
-                    lang === 'fr'
-                      ? `Bonjour, j'ai oublié mon mot de passe JADIJCB pour le numéro: ${phone || '...'}`
-                      : `السلام عليكم، نسيت كلمة المرور لحسابي في منصة JADIJCB المرتبط بالرقم: ${phone || '...'}`;
-                  return (
-                    <div className="mt-2 flex justify-end">
-                      {supportWa.length >= 9 ? (
-                        <a
-                          href={`https://wa.me/${supportWa}?text=${encodeURIComponent(forgotText)}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-[11px] font-bold text-primary-dark hover:underline"
-                        >
-                          {lang === 'fr'
-                            ? 'Mot de passe oublié ? Contacter le support'
-                            : 'نسيت كلمة المرور؟ تواصل مع الدعم لإعادة التعيين'}
-                        </a>
-                      ) : (
-                        <a
-                          href={`mailto:said.cpge24@gmail.com?subject=${encodeURIComponent(
-                            'JADIJCB Password Reset'
-                          )}&body=${encodeURIComponent(forgotText)}`}
-                          className="text-[11px] font-bold text-primary-dark hover:underline"
-                        >
-                          {lang === 'fr'
-                            ? 'Mot de passe oublié ? Contacter le support'
-                            : 'نسيت كلمة المرور؟ تواصل مع الدعم لإعادة التعيين'}
-                        </a>
-                      )}
-                    </div>
-                  );
-                })()}
+              {mode === 'login' && (
+                <div className="mt-2.5 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setShowForgotPasswordModal(true)}
+                    className="inline-flex items-center gap-1.5 text-xs font-black text-primary-dark hover:underline cursor-pointer"
+                  >
+                    <KeyRound className="w-3.5 h-3.5" />
+                    <span>
+                      {lang === 'fr'
+                        ? 'Mot de passe oublié ? Réinitialiser via WhatsApp'
+                        : 'نسيت كلمة المرور؟ استعادة عبر واتساب'}
+                    </span>
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Submit Button */}
@@ -892,9 +1138,14 @@ export const AuthPage: React.FC = () => {
               className="w-full justify-center mt-3 font-black min-h-[50px] shadow-sm"
               isLoading={isLoading}
             >
-              {mode === 'login' ? t('auth.btn_login') : t('auth.btn_register')}
+              {mode === 'login'
+                ? t('auth.btn_login')
+                : lang === 'fr'
+                ? 'Envoyer le code WhatsApp et continuer'
+                : 'إرسال كود التفعيل عبر واتساب والمتابعة'}
             </Button>
           </form>
+          )}
 
           {/* Super Admin Quick Portal Link */}
           <div className="mt-5 pt-4 border-t border-steel-100 text-center">
@@ -925,6 +1176,18 @@ export const AuthPage: React.FC = () => {
       <ClientNextStepsModal
         isOpen={showClientNextStepsModal}
         onClose={() => setShowClientNextStepsModal(false)}
+      />
+
+      {/* Self-Service WhatsApp OTP Password Reset Modal */}
+      <ForgotPasswordModal
+        isOpen={showForgotPasswordModal}
+        onClose={() => setShowForgotPasswordModal(false)}
+        initialPhone={phone}
+        onPasswordResetSuccess={(normPhone, newPass) => {
+          setMode('login');
+          setPhone(normPhone);
+          setPassword(newPass);
+        }}
       />
     </div>
   );

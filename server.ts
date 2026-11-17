@@ -8,6 +8,7 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { createServer as createViteServer } from 'vite';
 import * as webpush from 'web-push';
@@ -129,6 +130,19 @@ function createTables(database: DatabaseSync) {
       subscription_json TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS whatsapp_otps (
+      id TEXT PRIMARY KEY,
+      phone TEXT NOT NULL,
+      purpose TEXT NOT NULL,
+      code_hash TEXT NOT NULL,
+      attempts INTEGER DEFAULT 0,
+      max_attempts INTEGER DEFAULT 5,
+      verified INTEGER DEFAULT 0,
+      used INTEGER DEFAULT 0,
+      expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL
     );
   `);
 }
@@ -1568,6 +1582,539 @@ app.patch('/api/machines/:id/location', requireAuth, (req: AuthedRequest, res) =
     res.json({ success: true, updated: true });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ============================================================================
+// 20. WhatsApp OTP Activation & Password Reset Routes
+// ============================================================================
+
+const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+
+function normalizeMoroccanPhoneServer(rawInput: string): string {
+  let cleaned = String(rawInput || '').trim().replace(/[\s\-\.\(\)\/]/g, '');
+  if (cleaned.startsWith('00212')) cleaned = '+212' + cleaned.slice(5);
+  else if (cleaned.startsWith('212') && !cleaned.startsWith('+212')) cleaned = '+212' + cleaned.slice(3);
+  if ((cleaned.startsWith('06') || cleaned.startsWith('07')) && cleaned.length === 10) {
+    cleaned = '+212' + cleaned.slice(1);
+  }
+  if ((cleaned.startsWith('6') || cleaned.startsWith('7')) && cleaned.length === 9) {
+    cleaned = '+212' + cleaned;
+  }
+  return /^\+212[67]\d{8}$/.test(cleaned) ? cleaned : '';
+}
+
+function getWhatsAppGatewayProvider(): 'meta' | 'ultramsg' | 'webhook' | 'none' {
+  if (process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID) {
+    return 'meta';
+  }
+  if (process.env.ULTRAMSG_INSTANCE_ID && process.env.ULTRAMSG_TOKEN) {
+    return 'ultramsg';
+  }
+  if (process.env.WHATSAPP_OTP_WEBHOOK_URL) {
+    return 'webhook';
+  }
+  return 'none';
+}
+
+function hashOtpCode(code: string, saltHex?: string): string {
+  const salt = saltHex || crypto.randomBytes(16).toString('hex');
+  const derived = crypto.scryptSync(code, salt, 32).toString('hex');
+  return `${salt}:${derived}`;
+}
+
+function verifyOtpHash(code: string, stored: string): boolean {
+  const [salt, expectedHex] = String(stored || '').split(':');
+  if (!salt || !expectedHex) return false;
+  const derived = crypto.scryptSync(code, salt, 32);
+  const expected = Buffer.from(expectedHex, 'hex');
+  if (derived.length !== expected.length) return false;
+  return crypto.timingSafeEqual(derived, expected);
+}
+
+async function checkSupabasePhoneRegistered(phoneE164: string): Promise<boolean | null> {
+  if (!isSupabaseAuthEnabled) return null;
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/rest/v1/rpc/check_phone_registered`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ p_phone: phoneE164 }),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return Boolean(data);
+  } catch {
+    return null;
+  }
+}
+
+async function dispatchWhatsAppOtpMessage(
+  phoneE164: string,
+  otpCode: string,
+  purpose: 'register' | 'reset_password',
+  lang: 'ar' | 'fr'
+): Promise<{ sent: boolean; provider: string; error?: string }> {
+  const provider = getWhatsAppGatewayProvider();
+  if (provider === 'none') {
+    return { sent: false, provider: 'none', error: 'GATEWAY_NOT_CONFIGURED' };
+  }
+
+  const digits = phoneE164.replace(/\D/g, '');
+  const message =
+    lang === 'fr'
+      ? purpose === 'reset_password'
+        ? `🔐 JADIJCB — Votre code de réinitialisation du mot de passe est : *${otpCode}*\nValable pendant 10 minutes. Ne le partagez avec personne.`
+        : `✅ JADIJCB — Votre code d'activation de compte est : *${otpCode}*\nValable pendant 10 minutes.`
+      : purpose === 'reset_password'
+      ? `🔐 منصة JADIJCB — كود إعادة تعيين كلمة المرور الخاص بك هو: *${otpCode}*\nصالح لمدة 10 دقائق. لا تشاركه مع أي شخص.`
+      : `✅ منصة JADIJCB — كود تفعيل حسابك هو: *${otpCode}*\nصالح لمدة 10 دقائق.`;
+
+  if (provider === 'meta') {
+    const token = process.env.WHATSAPP_ACCESS_TOKEN!.trim();
+    const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID!.trim();
+    const templateName = (process.env.WHATSAPP_OTP_TEMPLATE_NAME || '').trim();
+    const templateLang = (process.env.WHATSAPP_OTP_TEMPLATE_LANG || 'ar').trim();
+
+    const bodyPayload = templateName
+      ? {
+          messaging_product: 'whatsapp',
+          to: digits,
+          type: 'template',
+          template: {
+            name: templateName,
+            language: { code: templateLang },
+            components: [
+              { type: 'body', parameters: [{ type: 'text', text: otpCode }] },
+              {
+                type: 'button',
+                sub_type: 'url',
+                index: '0',
+                parameters: [{ type: 'text', text: otpCode }],
+              },
+            ],
+          },
+        }
+      : {
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: digits,
+          type: 'text',
+          text: { preview_url: false, body: message },
+        };
+
+    const resp = await fetch(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(bodyPayload),
+    });
+    if (!resp.ok) {
+      return { sent: false, provider: 'meta', error: await resp.text() };
+    }
+    return { sent: true, provider: 'meta' };
+  }
+
+  if (provider === 'ultramsg') {
+    const instanceId = process.env.ULTRAMSG_INSTANCE_ID!.trim();
+    const token = process.env.ULTRAMSG_TOKEN!.trim();
+    const resp = await fetch(`https://api.ultramsg.com/${instanceId}/messages/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token,
+        to: phoneE164,
+        body: message,
+      }),
+    });
+    if (!resp.ok) {
+      return { sent: false, provider: 'ultramsg', error: await resp.text() };
+    }
+    return { sent: true, provider: 'ultramsg' };
+  }
+
+  const webhookUrl = process.env.WHATSAPP_OTP_WEBHOOK_URL!.trim();
+  const webhookSecret = (process.env.WHATSAPP_OTP_WEBHOOK_SECRET || '').trim();
+  const resp = await fetch(webhookUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(webhookSecret ? { Authorization: `Bearer ${webhookSecret}` } : {}),
+    },
+    body: JSON.stringify({
+      phone: phoneE164,
+      digits,
+      code: otpCode,
+      purpose,
+      lang,
+      message,
+    }),
+  });
+  if (!resp.ok) {
+    return { sent: false, provider: 'webhook', error: await resp.text() };
+  }
+  return { sent: true, provider: 'webhook' };
+}
+
+async function updateSupabasePasswordAsServiceRole(
+  phoneE164: string,
+  newPassword: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!isSupabaseAuthEnabled || !SUPABASE_SERVICE_ROLE_KEY) {
+    return { success: false, error: 'SERVICE_ROLE_NOT_CONFIGURED' };
+  }
+  const digits = phoneE164.replace(/\D/g, '');
+  const syntheticEmail = `${digits}@users.jadijcb.app`;
+
+  try {
+    const listResp = await fetch(
+      `${SUPABASE_URL}/auth/v1/admin/users?filter=${encodeURIComponent(syntheticEmail)}&page=1&per_page=20`,
+      {
+        headers: {
+          apikey: SUPABASE_SERVICE_ROLE_KEY,
+          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        },
+      }
+    );
+    if (!listResp.ok) {
+      return { success: false, error: 'ADMIN_USER_LOOKUP_FAILED' };
+    }
+    const listJson: any = await listResp.json();
+    const users: any[] = Array.isArray(listJson?.users) ? listJson.users : [];
+    const target = users.find(
+      (u) =>
+        String(u.email || '').toLowerCase() === syntheticEmail.toLowerCase() ||
+        String(u.phone || '') === phoneE164
+    );
+    if (!target?.id) {
+      return { success: false, error: 'ACCOUNT_NOT_FOUND' };
+    }
+
+    const updResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${target.id}`, {
+      method: 'PUT',
+      headers: {
+        apikey: SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        password: newPassword,
+        email_confirm: true,
+      }),
+    });
+    if (!updResp.ok) {
+      return { success: false, error: await updResp.text() };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'RESET_FAILED' };
+  }
+}
+
+app.get('/api/auth/whatsapp-otp/status', (_req, res) => {
+  const provider = getWhatsAppGatewayProvider();
+  res.json({
+    success: true,
+    gatewayConfigured: provider !== 'none',
+    provider,
+    canResetSelfService: provider !== 'none' && Boolean(SUPABASE_SERVICE_ROLE_KEY || isSupabaseAuthEnabled),
+  });
+});
+
+app.post('/api/auth/whatsapp-otp/send', apiMutationLimiter, async (req, res) => {
+  try {
+    const phone = normalizeMoroccanPhoneServer(req.body?.phone || '');
+    const purpose = req.body?.purpose === 'reset_password' ? 'reset_password' : 'register';
+    const lang = req.body?.lang === 'fr' ? 'fr' : 'ar';
+
+    if (!phone) {
+      return res.status(400).json({ success: false, error: 'INVALID_PHONE' });
+    }
+
+    const isRegistered = await checkSupabasePhoneRegistered(phone);
+    if (purpose === 'register' && isRegistered === true) {
+      return res.status(409).json({ success: false, error: 'PHONE_ALREADY_REGISTERED' });
+    }
+    if (purpose === 'reset_password' && isRegistered === false) {
+      return res.status(404).json({ success: false, error: 'ACCOUNT_NOT_FOUND' });
+    }
+
+    const provider = getWhatsAppGatewayProvider();
+    if (provider === 'none') {
+      return res.json({
+        success: true,
+        delivery: 'gateway_not_configured',
+        gatewayConfigured: false,
+        provider: 'none',
+      });
+    }
+
+    // Rate limiting: 30s cooldown & max 6 codes per hour per phone
+    const oneHourAgo = new Date(Date.now() - 3600_000).toISOString();
+    const recentRows = db
+      .prepare(
+        `SELECT created_at FROM whatsapp_otps WHERE phone = ? AND purpose = ? AND created_at > ? ORDER BY created_at DESC`
+      )
+      .all(phone, purpose, oneHourAgo) as any[];
+
+    if (recentRows.length >= 6) {
+      return res.status(429).json({ success: false, error: 'RATE_LIMIT_EXCEEDED' });
+    }
+    if (recentRows[0]?.created_at) {
+      const elapsedMs = Date.now() - new Date(recentRows[0].created_at).getTime();
+      if (elapsedMs < 30_000) {
+        return res.status(429).json({
+          success: false,
+          error: 'COOLDOWN_ACTIVE',
+          retryAfterSeconds: Math.ceil((30_000 - elapsedMs) / 1000),
+        });
+      }
+    }
+
+    const otpCode = String(crypto.randomInt(100000, 1000000));
+    const nowIso = new Date().toISOString();
+    const expiresIso = new Date(Date.now() + 10 * 60_000).toISOString();
+    const id = `otp_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+
+    // Invalidate previous unconsumed codes for this phone & purpose
+    db.prepare(`UPDATE whatsapp_otps SET used = 1 WHERE phone = ? AND purpose = ? AND used = 0`).run(
+      phone,
+      purpose
+    );
+
+    db.prepare(
+      `INSERT INTO whatsapp_otps (id, phone, purpose, code_hash, attempts, max_attempts, verified, used, expires_at, created_at)
+       VALUES (?, ?, ?, ?, 0, 5, 0, 0, ?, ?)`
+    ).run(id, phone, purpose, hashOtpCode(otpCode), expiresIso, nowIso);
+
+    // Sync to Supabase OTP table if service role key is configured
+    if (isSupabaseAuthEnabled && SUPABASE_SERVICE_ROLE_KEY) {
+      fetch(`${SUPABASE_URL}/rest/v1/rpc/store_whatsapp_otp`, {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_SERVICE_ROLE_KEY,
+          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          p_phone: phone,
+          p_purpose: purpose,
+          p_code: otpCode,
+          p_ttl_seconds: 600,
+        }),
+      }).catch(() => {});
+    }
+
+    const dispatch = await dispatchWhatsAppOtpMessage(phone, otpCode, purpose, lang);
+    if (!dispatch.sent) {
+      return res.status(502).json({
+        success: false,
+        error: 'WHATSAPP_SEND_FAILED',
+        detail: dispatch.error,
+      });
+    }
+
+    return res.json({
+      success: true,
+      delivery: 'whatsapp',
+      gatewayConfigured: true,
+      provider: dispatch.provider,
+      expiresInSeconds: 600,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'INTERNAL_ERROR' });
+  }
+});
+
+app.post('/api/auth/whatsapp-otp/verify', apiMutationLimiter, async (req, res) => {
+  try {
+    const phone = normalizeMoroccanPhoneServer(req.body?.phone || '');
+    const purpose = req.body?.purpose === 'reset_password' ? 'reset_password' : 'register';
+    const code = String(req.body?.code || '').replace(/\D/g, '');
+
+    if (!phone || code.length !== 6) {
+      return res.status(400).json({ success: false, error: 'INVALID_OTP' });
+    }
+
+    const row: any = db
+      .prepare(
+        `SELECT * FROM whatsapp_otps WHERE phone = ? AND purpose = ? AND used = 0 ORDER BY created_at DESC LIMIT 1`
+      )
+      .get(phone, purpose);
+
+    if (!row) {
+      // Fallback to Supabase RPC if OTP was stored there
+      if (isSupabaseAuthEnabled) {
+        const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/verify_whatsapp_otp_code`, {
+          method: 'POST',
+          headers: {
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ p_phone: phone, p_purpose: purpose, p_code: code }),
+        });
+        if (rpcRes.ok) {
+          const rpcJson: any = await rpcRes.json();
+          if (rpcJson?.success) {
+            return res.json({ success: true, verified: true });
+          }
+          return res.status(400).json({ success: false, error: rpcJson?.error || 'INVALID_OTP' });
+        }
+      }
+      return res.status(400).json({ success: false, error: 'OTP_NOT_FOUND' });
+    }
+
+    if (new Date(row.expires_at).getTime() < Date.now()) {
+      return res.status(400).json({ success: false, error: 'OTP_EXPIRED' });
+    }
+    if (Number(row.attempts) >= Number(row.max_attempts || 5)) {
+      return res.status(429).json({ success: false, error: 'TOO_MANY_ATTEMPTS' });
+    }
+    if (!verifyOtpHash(code, row.code_hash)) {
+      db.prepare(`UPDATE whatsapp_otps SET attempts = attempts + 1 WHERE id = ?`).run(row.id);
+      return res.status(400).json({
+        success: false,
+        error: 'INVALID_OTP',
+        remainingAttempts: Math.max(0, Number(row.max_attempts || 5) - (Number(row.attempts) + 1)),
+      });
+    }
+
+    db.prepare(`UPDATE whatsapp_otps SET verified = 1 WHERE id = ?`).run(row.id);
+
+    // Mirror verification in Supabase if applicable
+    if (isSupabaseAuthEnabled) {
+      fetch(`${SUPABASE_URL}/rest/v1/rpc/verify_whatsapp_otp_code`, {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ p_phone: phone, p_purpose: purpose, p_code: code }),
+      }).catch(() => {});
+    }
+
+    return res.json({ success: true, verified: true });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'INTERNAL_ERROR' });
+  }
+});
+
+app.post('/api/auth/whatsapp-otp/reset-password', apiMutationLimiter, async (req, res) => {
+  try {
+    const phone = normalizeMoroccanPhoneServer(req.body?.phone || '');
+    const code = String(req.body?.code || '').replace(/\D/g, '');
+    const newPassword = String(req.body?.newPassword || '');
+
+    if (!phone) {
+      return res.status(400).json({ success: false, error: 'INVALID_PHONE' });
+    }
+    if (newPassword.length < 8) {
+      return res.status(400).json({ success: false, error: 'WEAK_PASSWORD' });
+    }
+    if (code.length !== 6) {
+      return res.status(400).json({ success: false, error: 'INVALID_OTP' });
+    }
+
+    const row: any = db
+      .prepare(
+        `SELECT * FROM whatsapp_otps WHERE phone = ? AND purpose = 'reset_password' AND used = 0 ORDER BY created_at DESC LIMIT 1`
+      )
+      .get(phone);
+
+    if (!row) {
+      // Try Supabase RPC directly
+      if (isSupabaseAuthEnabled) {
+        const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/reset_password_with_whatsapp_otp`, {
+          method: 'POST',
+          headers: {
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            p_phone: phone,
+            p_code: code,
+            p_new_password: newPassword,
+          }),
+        });
+        if (rpcRes.ok) {
+          const rpcJson: any = await rpcRes.json();
+          if (rpcJson?.success) {
+            return res.json({ success: true });
+          }
+          return res.status(400).json({ success: false, error: rpcJson?.error || 'RESET_FAILED' });
+        }
+      }
+      return res.status(400).json({ success: false, error: 'OTP_NOT_FOUND' });
+    }
+
+    if (new Date(row.expires_at).getTime() < Date.now()) {
+      return res.status(400).json({ success: false, error: 'OTP_EXPIRED' });
+    }
+    if (Number(row.attempts) >= Number(row.max_attempts || 5)) {
+      return res.status(429).json({ success: false, error: 'TOO_MANY_ATTEMPTS' });
+    }
+    if (!verifyOtpHash(code, row.code_hash)) {
+      db.prepare(`UPDATE whatsapp_otps SET attempts = attempts + 1 WHERE id = ?`).run(row.id);
+      return res.status(400).json({ success: false, error: 'INVALID_OTP' });
+    }
+
+    let passwordUpdated = false;
+    let lastError: string | undefined;
+
+    // Try Supabase Admin API first if service role is configured
+    if (SUPABASE_SERVICE_ROLE_KEY) {
+      const adminRes = await updateSupabasePasswordAsServiceRole(phone, newPassword);
+      if (adminRes.success) {
+        passwordUpdated = true;
+      } else {
+        lastError = adminRes.error;
+      }
+    }
+
+    // Fallback to Supabase RPC if OTP was also synced to Supabase
+    if (!passwordUpdated && isSupabaseAuthEnabled) {
+      const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/reset_password_with_whatsapp_otp`, {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          p_phone: phone,
+          p_code: code,
+          p_new_password: newPassword,
+        }),
+      });
+      if (rpcRes.ok) {
+        const rpcJson: any = await rpcRes.json();
+        if (rpcJson?.success) {
+          passwordUpdated = true;
+        } else {
+          lastError = rpcJson?.error || lastError;
+        }
+      }
+    }
+
+    if (!passwordUpdated) {
+      return res.status(500).json({
+        success: false,
+        error: lastError || 'PASSWORD_UPDATE_REQUIRES_SERVICE_ROLE',
+      });
+    }
+
+    db.prepare(`UPDATE whatsapp_otps SET verified = 1, used = 1 WHERE id = ?`).run(row.id);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'INTERNAL_ERROR' });
   }
 });
 

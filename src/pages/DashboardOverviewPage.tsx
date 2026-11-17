@@ -62,6 +62,7 @@ import { fetchOwnerDriverOffers, OwnerDriverOfferWithApps } from '../lib/driverO
 import { serverApi } from '../lib/serverApi';
 import { recordUserActivityThrottled, usePwaInstall } from '../lib/pwaHelper';
 import { mapDatabaseError } from '../lib/errorHelpers';
+import { isBookingPaused } from '../lib/breakdownService';
 
 export const DashboardOverviewPage: React.FC = () => {
   const { t, lang, isRTL } = useLanguage();
@@ -245,6 +246,8 @@ export const DashboardOverviewPage: React.FC = () => {
                 site_city_id: b.site_city_id,
                 site_address: b.site_address,
                 notes: b.notes,
+                breakdowns: b.breakdowns,
+                pause_state: b.pause_state,
                 created_at: b.created_at,
                 machine: matchedMachine,
               };
@@ -440,10 +443,11 @@ export const DashboardOverviewPage: React.FC = () => {
   const tomorrowStr = tomorrow.toISOString().slice(0, 10);
   const sevenDaysLater = useMemo(() => new Date(nowMs + 7 * 24 * 3600 * 1000), [nowMs]);
 
-  // 1. Overdue Returns
+  // 1. Overdue Returns (paused bookings never count as overdue)
   const overdueBookings = useMemo(() => {
     return bookings.filter((b) => {
       if (b.status !== 'active') return false;
+      if (isBookingPaused(b)) return false;
       const end = new Date(b.end_at || b.end_date || '').getTime();
       return end < now.getTime();
     });
@@ -453,6 +457,7 @@ export const DashboardOverviewPage: React.FC = () => {
   const dueSoonBookings = useMemo(() => {
     return bookings.filter((b) => {
       if (b.status !== 'active') return false;
+      if (isBookingPaused(b)) return false;
       const endStr = (b.end_at || b.end_date || '').slice(0, 10);
       return endStr === todayStr || endStr === tomorrowStr;
     });

@@ -1,12 +1,14 @@
 // ============================================================================
-// JADIJCB: Machine Breakdown / Fault Reporting Service (During Active Rental)
-// Handles dual persistence (bookings.breakdowns JSONB + structured notes tag
-// fallback), instant owner notifications, chat alerts, and fault resolution.
+// JADIJCB: Machine Breakdown / Fault Reporting & Rental Pause/Resume Service
+// Handles dual persistence (bookings.breakdowns / pause_state JSONB + structured
+// notes tags fallback), instant owner/client notifications, and exact remaining
+// hours preservation across pause & resume.
 // ============================================================================
 
 import {
   Booking,
   BookingBreakdownReport,
+  BookingPauseState,
   BreakdownCategory,
   BreakdownSeverity,
 } from '../types/database';
@@ -15,6 +17,9 @@ import { bookingStore } from './bookingStore';
 
 const FAULT_TAG_PREFIX = '[JADIJCB_FAULT:';
 const FAULT_TAG_REGEX = /^\[JADIJCB_FAULT:(\{.*\})\]$/;
+
+const PAUSE_TAG_PREFIX = '[JADIJCB_PAUSE:';
+const PAUSE_TAG_REGEX = /^\[JADIJCB_PAUSE:(\{.*\})\]$/;
 
 export interface BreakdownCategoryMeta {
   id: BreakdownCategory;
@@ -76,14 +81,67 @@ export function getBreakdownSeverityLabel(severity: BreakdownSeverity, lang: 'ar
 }
 
 /**
- * Extracts structured breakdown reports and clean human notes from a Booking.
- * Merges `booking.breakdowns` column and any `[JADIJCB_FAULT:...]` lines stored in `booking.notes`.
+ * Formats a remaining duration in milliseconds into clear Arabic / French hours & minutes.
  */
-export function extractBookingBreakdownsAndNotes(booking: Pick<Booking, 'notes' | 'breakdowns'>): {
+export function formatRemainingDuration(ms: number, lang: 'ar' | 'fr' | string): string {
+  const safeMs = Math.max(0, ms);
+  const totalMinutes = Math.floor(safeMs / (60 * 1000));
+  if (totalMinutes <= 0) {
+    return lang === 'fr' ? '0 heure (terminé)' : '0 ساعة (منتهي)';
+  }
+  const totalHours = Math.floor(totalMinutes / 60);
+  const remMinutes = totalMinutes % 60;
+  const days = Math.floor(totalHours / 24);
+  const remHours = totalHours % 24;
+
+  if (days > 0) {
+    if (lang === 'fr') {
+      return `${days}j ${remHours}h (${totalHours}h au total)`;
+    }
+    return `${days} يوم و ${remHours} ساعة (${totalHours} ساعة إجمالاً)`;
+  }
+
+  if (totalHours > 0) {
+    if (lang === 'fr') {
+      return remMinutes > 0 ? `${totalHours}h ${remMinutes}min` : `${totalHours}h`;
+    }
+    return remMinutes > 0
+      ? `${totalHours} ساعة و ${remMinutes} دقيقة`
+      : `${totalHours} ساعة`;
+  }
+
+  return lang === 'fr' ? `${remMinutes} min` : `${remMinutes} دقيقة`;
+}
+
+/**
+ * Formats compact remaining hours pill (e.g. "56 س" or "2ي 8س").
+ */
+export function formatCompactRemaining(ms: number, lang: 'ar' | 'fr' | string): string {
+  const safeMs = Math.max(0, ms);
+  const totalHours = Math.ceil(safeMs / (3600 * 1000));
+  if (totalHours <= 0) return lang === 'fr' ? '0h' : '0س';
+  const days = Math.floor(totalHours / 24);
+  const remHours = totalHours % 24;
+  if (days > 0) {
+    return lang === 'fr'
+      ? remHours > 0 ? `${days}j ${remHours}h` : `${days}j`
+      : remHours > 0 ? `${days}ي ${remHours}س` : `${days}ي`;
+  }
+  return lang === 'fr' ? `${totalHours}h` : `${totalHours}س`;
+}
+
+/**
+ * Extracts structured breakdown reports, pause state, and clean human notes from a Booking.
+ */
+export function extractBookingBreakdownsAndNotes(
+  booking: Pick<Booking, 'notes' | 'breakdowns' | 'pause_state'>
+): {
   breakdowns: BookingBreakdownReport[];
+  pauseState: BookingPauseState | null;
   cleanNotes: string;
 } {
   const byId = new Map<string, BookingBreakdownReport>();
+  let parsedPauseFromNotes: BookingPauseState | null = null;
 
   // 1. Read from dedicated breakdowns array if available
   if (Array.isArray(booking.breakdowns)) {
@@ -94,15 +152,16 @@ export function extractBookingBreakdownsAndNotes(booking: Pick<Booking, 'notes' 
     }
   }
 
-  // 2. Parse [JADIJCB_FAULT:{...}] lines from notes and strip them from cleanNotes
+  // 2. Parse [JADIJCB_FAULT:{...}] and [JADIJCB_PAUSE:{...}] lines from notes
   const cleanLines: string[] = [];
   const rawNotes = String(booking.notes || '');
   for (const line of rawNotes.split('\n')) {
     const trimmed = line.trim();
-    const match = trimmed.match(FAULT_TAG_REGEX);
-    if (match && match[1]) {
+
+    const faultMatch = trimmed.match(FAULT_TAG_REGEX);
+    if (faultMatch && faultMatch[1]) {
       try {
-        const parsed = JSON.parse(match[1]) as BookingBreakdownReport;
+        const parsed = JSON.parse(faultMatch[1]) as BookingBreakdownReport;
         if (parsed && parsed.id) {
           const existing = byId.get(parsed.id);
           if (!existing || (parsed.status === 'resolved' && existing.status !== 'resolved')) {
@@ -111,10 +170,22 @@ export function extractBookingBreakdownsAndNotes(booking: Pick<Booking, 'notes' 
           continue;
         }
       } catch {
-        // If malformed tag line, still keep cleanNotes safe
+        // ignore malformed line
       }
     }
     if (trimmed.startsWith(FAULT_TAG_PREFIX)) continue;
+
+    const pauseMatch = trimmed.match(PAUSE_TAG_REGEX);
+    if (pauseMatch && pauseMatch[1]) {
+      try {
+        parsedPauseFromNotes = JSON.parse(pauseMatch[1]) as BookingPauseState;
+        continue;
+      } catch {
+        // ignore malformed pause tag
+      }
+    }
+    if (trimmed.startsWith(PAUSE_TAG_PREFIX)) continue;
+
     cleanLines.push(line);
   }
 
@@ -122,21 +193,54 @@ export function extractBookingBreakdownsAndNotes(booking: Pick<Booking, 'notes' 
     (a, b) => new Date(b.reported_at || 0).getTime() - new Date(a.reported_at || 0).getTime()
   );
 
+  const pauseState = booking.pause_state || parsedPauseFromNotes || null;
+
   return {
     breakdowns,
+    pauseState,
     cleanNotes: cleanLines.join('\n').trim(),
   };
 }
 
-function buildUpdatedNotesWithBreakdowns(
+export function isBookingPaused(
+  booking: Pick<Booking, 'status' | 'notes' | 'breakdowns' | 'pause_state'>
+): boolean {
+  if (booking.status !== 'active') return false;
+  const { pauseState } = extractBookingBreakdownsAndNotes(booking);
+  return Boolean(pauseState?.is_paused);
+}
+
+/**
+ * Returns remaining milliseconds for a booking:
+ * - If paused, returns the exact frozen remaining_ms saved at pause time.
+ * - Otherwise returns max(0, end_at - nowMs).
+ */
+export function getEffectiveRemainingMs(
+  booking: Pick<Booking, 'end_at' | 'end_date' | 'status' | 'notes' | 'breakdowns' | 'pause_state'>,
+  nowMs: number = Date.now()
+): number {
+  const { pauseState } = extractBookingBreakdownsAndNotes(booking);
+  if (pauseState?.is_paused) {
+    return Math.max(0, Number(pauseState.remaining_ms) || 0);
+  }
+  const endMs = new Date(booking.end_at || booking.end_date || nowMs).getTime();
+  if (Number.isNaN(endMs)) return 0;
+  return Math.max(0, endMs - nowMs);
+}
+
+function buildUpdatedNotesWithExtras(
   cleanNotes: string,
-  breakdowns: BookingBreakdownReport[]
+  breakdowns: BookingBreakdownReport[],
+  pauseState: BookingPauseState | null
 ): string {
   const orderedOldestFirst = [...breakdowns].sort(
     (a, b) => new Date(a.reported_at || 0).getTime() - new Date(b.reported_at || 0).getTime()
   );
   const faultLines = orderedOldestFirst.map((rep) => `${FAULT_TAG_PREFIX}${JSON.stringify(rep)}]`);
-  const parts = cleanNotes ? [cleanNotes, ...faultLines] : faultLines;
+  const parts = cleanNotes ? [cleanNotes, ...faultLines] : [...faultLines];
+  if (pauseState) {
+    parts.push(`${PAUSE_TAG_PREFIX}${JSON.stringify(pauseState)}]`);
+  }
   return parts.join('\n');
 }
 
@@ -174,15 +278,15 @@ export async function reportBookingBreakdown(input: ReportBreakdownInput): Promi
     status: 'open',
   };
 
-  const { breakdowns: existingBreakdowns, cleanNotes } = extractBookingBreakdownsAndNotes(booking);
+  const { breakdowns: existingBreakdowns, pauseState, cleanNotes } =
+    extractBookingBreakdownsAndNotes(booking);
   const nextBreakdowns = [report, ...existingBreakdowns];
-  const nextNotes = buildUpdatedNotesWithBreakdowns(cleanNotes, nextBreakdowns);
+  const nextNotes = buildUpdatedNotesWithExtras(cleanNotes, nextBreakdowns, pauseState);
 
   let persistedRemotely = false;
   let remoteErrorMsg: string | undefined;
 
   if (isSupabaseConfigured) {
-    // 1a. Try updating both breakdowns JSONB column + notes
     try {
       const { data: updData, error: updErr } = await supabase
         .from('bookings')
@@ -198,7 +302,6 @@ export async function reportBookingBreakdown(input: ReportBreakdownInput): Promi
         persistedRemotely = true;
       } else if (updErr) {
         const msg = updErr.message || '';
-        // 1b. If breakdowns column isn't migrated yet, update notes alone
         if (msg.toLowerCase().includes('breakdowns') || msg.toLowerCase().includes('column')) {
           const { data: notesData, error: notesErr } = await supabase
             .from('bookings')
@@ -219,7 +322,6 @@ export async function reportBookingBreakdown(input: ReportBreakdownInput): Promi
       remoteErrorMsg = err?.message;
     }
 
-    // 1c. Fallback RPC for phone-matched bookings where client_id was NULL
     if (!persistedRemotely) {
       try {
         const { data: rpcData, error: rpcErr } = await supabase.rpc('report_booking_breakdown', {
@@ -236,7 +338,6 @@ export async function reportBookingBreakdown(input: ReportBreakdownInput): Promi
       }
     }
 
-    // 2. Insert high-priority notification for the Owner immediately
     if (booking.owner_id) {
       const machineTitleAr =
         booking.machine?.title_ar ||
@@ -273,7 +374,6 @@ export async function reportBookingBreakdown(input: ReportBreakdownInput): Promi
       }
     }
 
-    // 3. Also send a chat message to the Owner if an existing conversation is found (non-blocking)
     if (booking.owner_id && reporterId) {
       try {
         const { data: conv } = await supabase
@@ -294,7 +394,7 @@ export async function reportBookingBreakdown(input: ReportBreakdownInput): Promi
           });
         }
       } catch {
-        // Non-blocking chat alert
+        // Non-blocking
       }
     }
   }
@@ -325,14 +425,15 @@ export async function resolveBookingBreakdown(
   updatedBooking: Booking;
 }> {
   const nowIso = new Date().toISOString();
-  const { breakdowns: existingBreakdowns, cleanNotes } = extractBookingBreakdownsAndNotes(booking);
+  const { breakdowns: existingBreakdowns, pauseState, cleanNotes } =
+    extractBookingBreakdownsAndNotes(booking);
 
   const nextBreakdowns: BookingBreakdownReport[] = existingBreakdowns.map((item) =>
     item.id === breakdownId
       ? { ...item, status: 'resolved', resolved_at: nowIso }
       : item
   );
-  const nextNotes = buildUpdatedNotesWithBreakdowns(cleanNotes, nextBreakdowns);
+  const nextNotes = buildUpdatedNotesWithExtras(cleanNotes, nextBreakdowns, pauseState);
 
   let persisted = false;
   if (isSupabaseConfigured) {
@@ -371,7 +472,6 @@ export async function resolveBookingBreakdown(
       }
     }
 
-    // Notify client if client_id exists
     if (booking.client_id) {
       try {
         const machineTitleAr = booking.machine?.title_ar || booking.machine?.title_fr || 'الآلية';
@@ -407,5 +507,269 @@ export async function resolveBookingBreakdown(
   return {
     success: persisted || !isSupabaseConfigured,
     updatedBooking,
+  };
+}
+
+/**
+ * Pauses an active booking (e.g. during machine breakdown/repair) while
+ * freezing the exact remaining milliseconds/hours so the client loses zero time.
+ */
+export async function pauseBookingForBreakdown(
+  booking: Booking,
+  reason?: string
+): Promise<{
+  success: boolean;
+  pauseState: BookingPauseState;
+  updatedBooking: Booking;
+  error?: string;
+}> {
+  const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
+  const { breakdowns, pauseState: prevPauseState, cleanNotes } =
+    extractBookingBreakdownsAndNotes(booking);
+
+  // If already paused, keep frozen remaining_ms rather than overwriting
+  const endMs = new Date(booking.end_at || booking.end_date || nowMs).getTime();
+  const remainingMs = prevPauseState?.is_paused
+    ? Math.max(0, prevPauseState.remaining_ms)
+    : Number.isNaN(endMs)
+    ? 0
+    : Math.max(0, endMs - nowMs);
+
+  const openFault = breakdowns.find((f) => f.status === 'open');
+  const resolvedReason =
+    reason?.trim() ||
+    (openFault
+      ? `${getBreakdownCategoryLabel(openFault.category, 'ar')} - ${openFault.description}`
+      : 'عطل في الآلية — قيد الإصلاح');
+
+  const nextPauseState: BookingPauseState = {
+    is_paused: true,
+    paused_at: nowIso,
+    remaining_ms: remainingMs,
+    total_paused_ms: prevPauseState?.total_paused_ms || 0,
+    pause_reason: resolvedReason,
+  };
+
+  const nextNotes = buildUpdatedNotesWithExtras(cleanNotes, breakdowns, nextPauseState);
+  let persisted = false;
+  let errorMsg: string | undefined;
+
+  if (isSupabaseConfigured) {
+    try {
+      const { error: updErr } = await supabase
+        .from('bookings')
+        .update({
+          notes: nextNotes,
+          pause_state: nextPauseState,
+        })
+        .eq('id', booking.id);
+
+      if (!updErr) {
+        persisted = true;
+      } else if (updErr.message?.toLowerCase().includes('pause_state') || updErr.message?.toLowerCase().includes('column')) {
+        const { error: notesErr } = await supabase
+          .from('bookings')
+          .update({ notes: nextNotes })
+          .eq('id', booking.id);
+        if (!notesErr) {
+          persisted = true;
+        } else {
+          errorMsg = notesErr.message;
+        }
+      } else {
+        errorMsg = updErr.message;
+      }
+    } catch (e: any) {
+      errorMsg = e?.message;
+    }
+
+    if (!persisted) {
+      try {
+        const { error: rpcErr } = await supabase.rpc('pause_booking', {
+          p_booking_id: booking.id,
+          p_pause_state: nextPauseState,
+          p_notes: nextNotes,
+        });
+        if (!rpcErr) {
+          persisted = true;
+          errorMsg = undefined;
+        }
+      } catch {
+        // Ignore if RPC not migrated
+      }
+    }
+
+    // Notify client that rental countdown is paused and remaining hours are preserved
+    if (booking.client_id) {
+      try {
+        const machineTitleAr = booking.machine?.title_ar || booking.machine?.title_fr || 'الآلية';
+        const machineTitleFr = booking.machine?.title_fr || booking.machine?.title_ar || 'Engin';
+        const remTextAr = formatRemainingDuration(remainingMs, 'ar');
+        const remTextFr = formatRemainingDuration(remainingMs, 'fr');
+        await supabase.from('notifications').insert({
+          user_id: booking.client_id,
+          title_ar: `⏸️ تم إيقاف عداد الحجز مؤقتاً: ${machineTitleAr}`,
+          title_fr: `⏸️ Location mise en pause : ${machineTitleFr}`,
+          body_ar: `تم تجميد وقت الكراء بسبب العطل مع حفظ ${remTextAr} بالكامل حتى استئناف العمل.`,
+          body_fr: `Décompte suspendu pour panne : ${remTextFr} conservées jusqu'à la reprise.`,
+          type: 'booking_paused',
+          data: {
+            booking_id: booking.id,
+            machine_id: booking.machine_id,
+            remaining_ms: remainingMs,
+          },
+        });
+      } catch {
+        // Non-blocking
+      }
+    }
+  }
+
+  const updatedBooking: Booking = {
+    ...booking,
+    notes: nextNotes,
+    pause_state: nextPauseState,
+  };
+
+  bookingStore.saveBooking(updatedBooking);
+  window.dispatchEvent(new CustomEvent('jadijcb_booking_event', { detail: { action: 'booking_paused', booking: updatedBooking } }));
+
+  return {
+    success: persisted || !isSupabaseConfigured,
+    pauseState: nextPauseState,
+    updatedBooking,
+    error: persisted ? undefined : errorMsg,
+  };
+}
+
+/**
+ * Resumes a paused booking, shifting `end_at` forward by the exact preserved
+ * `remaining_ms` from `now`, so the client retains 100% of their remaining hours.
+ */
+export async function resumeBookingAfterBreakdown(booking: Booking): Promise<{
+  success: boolean;
+  newEndAt: string;
+  pauseState: BookingPauseState;
+  updatedBooking: Booking;
+  error?: string;
+}> {
+  const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
+  const { breakdowns, pauseState: prevPauseState, cleanNotes } =
+    extractBookingBreakdownsAndNotes(booking);
+
+  const preservedMs = Math.max(0, Number(prevPauseState?.remaining_ms) || 0);
+  const pausedElapsedMs = prevPauseState?.paused_at
+    ? Math.max(0, nowMs - new Date(prevPauseState.paused_at).getTime())
+    : 0;
+  const newEndAtIso = new Date(nowMs + preservedMs).toISOString();
+
+  const nextPauseState: BookingPauseState = {
+    is_paused: false,
+    remaining_ms: 0,
+    total_paused_ms: (prevPauseState?.total_paused_ms || 0) + pausedElapsedMs,
+    pause_reason: prevPauseState?.pause_reason,
+    resumed_at: nowIso,
+  };
+
+  const nextNotes = buildUpdatedNotesWithExtras(cleanNotes, breakdowns, nextPauseState);
+  let persisted = false;
+  let errorMsg: string | undefined;
+
+  if (isSupabaseConfigured) {
+    try {
+      const { error: updErr } = await supabase
+        .from('bookings')
+        .update({
+          end_at: newEndAtIso,
+          notes: nextNotes,
+          pause_state: nextPauseState,
+        })
+        .eq('id', booking.id);
+
+      if (!updErr) {
+        persisted = true;
+      } else if (updErr.message?.toLowerCase().includes('pause_state') || updErr.message?.toLowerCase().includes('column')) {
+        const { error: fallbackErr } = await supabase
+          .from('bookings')
+          .update({
+            end_at: newEndAtIso,
+            notes: nextNotes,
+          })
+          .eq('id', booking.id);
+        if (!fallbackErr) {
+          persisted = true;
+        } else {
+          errorMsg = fallbackErr.message;
+        }
+      } else {
+        errorMsg = updErr.message;
+      }
+    } catch (e: any) {
+      errorMsg = e?.message;
+    }
+
+    if (!persisted) {
+      try {
+        const { error: rpcErr } = await supabase.rpc('resume_booking', {
+          p_booking_id: booking.id,
+          p_new_end_at: newEndAtIso,
+          p_pause_state: nextPauseState,
+          p_notes: nextNotes,
+        });
+        if (!rpcErr) {
+          persisted = true;
+          errorMsg = undefined;
+        }
+      } catch {
+        // Ignore if RPC not migrated
+      }
+    }
+
+    // Notify client that rental has resumed with preserved remaining hours
+    if (booking.client_id) {
+      try {
+        const machineTitleAr = booking.machine?.title_ar || booking.machine?.title_fr || 'الآلية';
+        const machineTitleFr = booking.machine?.title_fr || booking.machine?.title_ar || 'Engin';
+        const remTextAr = formatRemainingDuration(preservedMs, 'ar');
+        const remTextFr = formatRemainingDuration(preservedMs, 'fr');
+        await supabase.from('notifications').insert({
+          user_id: booking.client_id,
+          title_ar: `▶️ تم استئناف الحجز: ${machineTitleAr}`,
+          title_fr: `▶️ Location reprise : ${machineTitleFr}`,
+          body_ar: `تمت مواصلة الحجز بعد إصلاح العطل واسترجاع ${remTextAr} المتبقية حتى ${newEndAtIso.slice(0, 16).replace('T', ' ')}.`,
+          body_fr: `Location relancée avec vos ${remTextFr} restantes jusqu'au ${newEndAtIso.slice(0, 16).replace('T', ' ')}.`,
+          type: 'booking_resumed',
+          data: {
+            booking_id: booking.id,
+            machine_id: booking.machine_id,
+            new_end_at: newEndAtIso,
+            preserved_ms: preservedMs,
+          },
+        });
+      } catch {
+        // Non-blocking
+      }
+    }
+  }
+
+  const updatedBooking: Booking = {
+    ...booking,
+    end_at: newEndAtIso,
+    end_date: newEndAtIso,
+    notes: nextNotes,
+    pause_state: nextPauseState,
+  };
+
+  bookingStore.saveBooking(updatedBooking);
+  window.dispatchEvent(new CustomEvent('jadijcb_booking_event', { detail: { action: 'booking_resumed', booking: updatedBooking } }));
+
+  return {
+    success: persisted || !isSupabaseConfigured,
+    newEndAt: newEndAtIso,
+    pauseState: nextPauseState,
+    updatedBooking,
+    error: persisted ? undefined : errorMsg,
   };
 }

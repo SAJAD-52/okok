@@ -24,6 +24,7 @@ import {
   AlertTriangle,
   Wrench,
   CheckCircle2,
+  Pause,
 } from 'lucide-react';
 import { Booking } from '../types/database';
 import { Card } from '../components/ui/Card';
@@ -38,6 +39,7 @@ import { RentalExtensionModal } from '../components/bookings/RentalExtensionModa
 import { ReportBreakdownModal } from '../components/bookings/ReportBreakdownModal';
 import {
   extractBookingBreakdownsAndNotes,
+  formatRemainingDuration,
   getBreakdownCategoryLabel,
   getBreakdownSeverityLabel,
 } from '../lib/breakdownService';
@@ -114,6 +116,7 @@ export const ContractorBookingsPage: React.FC = () => {
               status: b.status,
               notes: b.notes,
               breakdowns: Array.isArray(b.breakdowns) ? b.breakdowns : undefined,
+              pause_state: b.pause_state || null,
               created_at: b.created_at,
               machine: b.machines || b.machine,
               with_operator: Boolean(b.with_operator ?? true),
@@ -135,6 +138,7 @@ export const ContractorBookingsPage: React.FC = () => {
             status: b.status,
             notes: b.notes,
             breakdowns: Array.isArray(b.breakdowns) ? b.breakdowns : undefined,
+            pause_state: b.pause_state || null,
             created_at: b.created_at,
             machine: b.machines || b.machine,
             with_operator: Boolean(b.with_operator ?? true),
@@ -329,15 +333,20 @@ export const ContractorBookingsPage: React.FC = () => {
         <div className="grid grid-cols-1 gap-4">
           {filteredBookings.map((b) => {
             const machine = b.machine as any;
-            const { breakdowns, cleanNotes } = extractBookingBreakdownsAndNotes(b);
+            const { breakdowns, pauseState, cleanNotes } = extractBookingBreakdownsAndNotes(b);
             const hasExtensionRequest = cleanNotes.includes('[طلب تمديد');
             const openBreakdownsCount = breakdowns.filter((f) => f.status === 'open').length;
+            const isPaused = Boolean(b.status === 'active' && pauseState?.is_paused);
 
             return (
               <Card
                 key={b.id}
                 className={`p-5 bg-white shadow-soft rounded-3xl transition-all hover:shadow-md border ${
-                  openBreakdownsCount > 0 ? 'border-rose-300 ring-1 ring-rose-200' : 'border-steel-200'
+                  isPaused
+                    ? 'border-amber-400 ring-1 ring-amber-200'
+                    : openBreakdownsCount > 0
+                    ? 'border-rose-300 ring-1 ring-rose-200'
+                    : 'border-steel-200'
                 }`}
               >
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
@@ -356,7 +365,13 @@ export const ContractorBookingsPage: React.FC = () => {
 
                     <div className="space-y-1.5 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        {getStatusBadge(b.status)}
+                        {isPaused ? (
+                          <Badge variant="warning" className="text-[11px] font-black">
+                            {lang === 'fr' ? '⏸️ En pause (panne)' : '⏸️ متوقف مؤقتاً (عطل)'}
+                          </Badge>
+                        ) : (
+                          getStatusBadge(b.status)
+                        )}
                         {hasExtensionRequest && (
                           <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 text-[10px] font-black border border-amber-300">
                             {lang === 'fr' ? 'Demande de prolongation en cours' : 'طلب تمديد قيد المراجعة'}
@@ -390,12 +405,23 @@ export const ContractorBookingsPage: React.FC = () => {
 
                   {/* Countdown Box & Actions */}
                   <div className="flex flex-col sm:flex-row lg:flex-col items-start lg:items-end justify-between gap-3 shrink-0 pt-3 lg:pt-0 border-t lg:border-t-0 border-steel-100">
-                    {/* Active Rental Countdown */}
+                    {/* Active Rental Countdown (or Frozen Paused Countdown) */}
                     {b.status === 'active' && (
-                      <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-black text-emerald-900 flex items-center gap-2">
-                        <Clock className="w-4 h-4 text-emerald-700 animate-pulse" />
-                        <span>{getCountdownString(b.end_at || b.end_date || '')}</span>
-                      </div>
+                      isPaused ? (
+                        <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-300 text-xs font-black text-amber-950 flex items-center gap-2">
+                          <Pause className="w-4 h-4 text-amber-700 shrink-0" />
+                          <span>
+                            {lang === 'fr'
+                              ? `En pause · ${formatRemainingDuration(pauseState?.remaining_ms || 0, lang)} conservées`
+                              : `العداد مجمد · محفوظ لك: ${formatRemainingDuration(pauseState?.remaining_ms || 0, lang)}`}
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-black text-emerald-900 flex items-center gap-2">
+                          <Clock className="w-4 h-4 text-emerald-700 animate-pulse" />
+                          <span>{getCountdownString(b.end_at || b.end_date || '')}</span>
+                        </div>
+                      )
                     )}
 
                     {/* Action Buttons */}

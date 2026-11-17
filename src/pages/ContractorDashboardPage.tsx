@@ -34,6 +34,10 @@ import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabase';
 import { RentalExtensionModal } from '../components/bookings/RentalExtensionModal';
 import { ReportBreakdownModal } from '../components/bookings/ReportBreakdownModal';
+import {
+  extractBookingBreakdownsAndNotes,
+  formatCompactRemaining,
+} from '../lib/breakdownService';
 import { ProfileSettingsModal } from '../components/profile/ProfileSettingsModal';
 
 export const ContractorDashboardPage: React.FC = () => {
@@ -96,6 +100,8 @@ export const ContractorDashboardPage: React.FC = () => {
             total_price: Number(b.total_price) || 0,
             status: b.status,
             notes: b.notes,
+            breakdowns: Array.isArray(b.breakdowns) ? b.breakdowns : undefined,
+            pause_state: b.pause_state || null,
             created_at: b.created_at,
             machine: b.machines,
             with_operator: Boolean(b.with_operator ?? true),
@@ -342,10 +348,14 @@ export const ContractorDashboardPage: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
             {activeBookings.map((b) => {
               const machine = b.machine as any;
+              const { pauseState } = extractBookingBreakdownsAndNotes(b);
+              const isPaused = Boolean(b.status === 'active' && pauseState?.is_paused);
               return (
                 <Card
                   key={b.id}
-                  className="p-3.5 sm:p-4 bg-white border border-steel-200 shadow-soft rounded-2xl flex flex-col justify-between space-y-3 min-w-0 overflow-hidden"
+                  className={`p-3.5 sm:p-4 bg-white shadow-soft rounded-2xl flex flex-col justify-between space-y-3 min-w-0 overflow-hidden border ${
+                    isPaused ? 'border-amber-400 ring-1 ring-amber-200' : 'border-steel-200'
+                  }`}
                 >
                   <div className="flex gap-3 min-w-0">
                     <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl overflow-hidden bg-steel-100 shrink-0">
@@ -360,9 +370,17 @@ export const ContractorDashboardPage: React.FC = () => {
                     </div>
                     <div className="min-w-0 flex-1 space-y-1">
                       <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black shrink-0">
-                          {lang === 'fr' ? 'En activité' : 'قيد العمل بالموقع'}
-                        </span>
+                        {isPaused ? (
+                          <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 text-[10px] font-black shrink-0">
+                            {lang === 'fr'
+                              ? `⏸️ Pause (${formatCompactRemaining(pauseState?.remaining_ms || 0, lang)})`
+                              : `⏸️ متوقف مؤقتاً (محفوظ ${formatCompactRemaining(pauseState?.remaining_ms || 0, lang)})`}
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black shrink-0">
+                            {lang === 'fr' ? 'En activité' : 'قيد العمل بالموقع'}
+                          </span>
+                        )}
                         <span className="text-xs font-black text-primary-dark tabular-nums shrink-0">
                           {b.total_price.toLocaleString('fr-FR')} MAD
                         </span>

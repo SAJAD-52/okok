@@ -27,6 +27,8 @@ import {
   Globe,
   Navigation,
   AlertTriangle,
+  Pause,
+  Play,
 } from 'lucide-react';
 import { Logo } from '../ui/Logo';
 import { LanguageSwitcher } from '../ui/LanguageSwitcher';
@@ -262,8 +264,33 @@ export const DashboardLayout: React.FC = () => {
                   tag: `breakdown_${row.id || Date.now()}`,
                   url: '/owner/bookings?tab=active',
                 });
-              } else if (row?.type === 'booking_breakdown_resolved') {
+              } else if (
+                row?.type === 'booking_breakdown_resolved' ||
+                row?.type === 'booking_paused' ||
+                row?.type === 'booking_resumed'
+              ) {
                 window.dispatchEvent(new CustomEvent('jadijcb_booking_event'));
+                if (row.type === 'booking_paused' || row.type === 'booking_resumed') {
+                  playChatMessageSound();
+                  const title =
+                    lang === 'fr'
+                      ? row.title_fr ||
+                        (row.type === 'booking_paused'
+                          ? '⏸️ Location mise en pause'
+                          : '▶️ Location reprise')
+                      : row.title_ar ||
+                        (row.type === 'booking_paused'
+                          ? '⏸️ تم إيقاف عداد الحجز مؤقتاً'
+                          : '▶️ تم استئناف الحجز');
+                  const body = lang === 'fr' ? row.body_fr : row.body_ar;
+                  toast.info(body ? `${title} — ${body}` : title);
+                  showBrowserChatNotification({
+                    title,
+                    body: body || '',
+                    tag: `pause_${row.id || Date.now()}`,
+                    url: '/entreprise/bookings',
+                  });
+                }
               }
             }
           )
@@ -1234,6 +1261,9 @@ export const DashboardLayout: React.FC = () => {
                                 const isBreakdownNotif =
                                   notif.type === 'booking_breakdown' ||
                                   notif.type === 'booking_breakdown_resolved';
+                                const isPauseNotif =
+                                  notif.type === 'booking_paused' ||
+                                  notif.type === 'booking_resumed';
                                 const chatConvId = notif.data?.conversation_id || '';
                                 return (
                                   <div
@@ -1267,7 +1297,11 @@ export const DashboardLayout: React.FC = () => {
                                         );
                                       } else if (notif.type === 'booking_breakdown') {
                                         navigate('/owner/bookings?tab=active');
-                                      } else if (notif.type === 'booking_breakdown_resolved') {
+                                      } else if (
+                                        notif.type === 'booking_breakdown_resolved' ||
+                                        notif.type === 'booking_paused' ||
+                                        notif.type === 'booking_resumed'
+                                      ) {
                                         navigate('/entreprise/bookings');
                                       } else {
                                         navigate(
@@ -1282,6 +1316,8 @@ export const DashboardLayout: React.FC = () => {
                                     className={`p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
                                       !notif.is_read && notif.type === 'booking_breakdown'
                                         ? 'bg-rose-50 border-rose-300 font-medium'
+                                        : !notif.is_read && notif.type === 'booking_paused'
+                                        ? 'bg-amber-50 border-amber-300 font-medium'
                                         : !notif.is_read
                                         ? 'bg-primary/10 border-primary/40 font-medium'
                                         : 'bg-steel-50/70 border-steel-200 text-steel-600'
@@ -1301,6 +1337,12 @@ export const DashboardLayout: React.FC = () => {
                                             }`}
                                           />
                                         )}
+                                        {isPauseNotif &&
+                                          (notif.type === 'booking_paused' ? (
+                                            <Pause className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                          ) : (
+                                            <Play className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                          ))}
                                         <span className="truncate">
                                           {lang === 'fr' ? notif.title_fr : notif.title_ar}
                                         </span>

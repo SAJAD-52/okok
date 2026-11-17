@@ -40,6 +40,11 @@ import {
 import { MOROCCAN_CITIES } from '../../data/cities';
 import { OwnerDriverOfferWithApps } from '../../lib/driverOfferService';
 import { useLanguage } from '../../hooks/useLanguage';
+import {
+  extractBookingBreakdownsAndNotes,
+  formatCompactRemaining,
+  formatRemainingDuration,
+} from '../../lib/breakdownService';
 
 interface OwnerFleetLiveMapProps {
   machines: Machine[];
@@ -174,7 +179,12 @@ function createFleetMarkerIcon(item: MachineTelemetry, lang: 'ar' | 'fr') {
       : item.statusKey === 'working'
       ? { bg: '#0F172A', border: '#FFB400', text: '#FFB400', pill: item.remainingCompact }
       : item.statusKey === 'maintenance'
-      ? { bg: '#475569', border: '#F59E0B', text: '#FDE68A', pill: lang === 'fr' ? 'Maint.' : 'صيانة' }
+      ? {
+          bg: '#475569',
+          border: '#F59E0B',
+          text: '#FDE68A',
+          pill: item.activeBooking ? item.remainingCompact : lang === 'fr' ? 'Maint.' : 'صيانة',
+        }
       : { bg: '#16A34A', border: '#DCFCE7', text: '#FFFFFF', pill: lang === 'fr' ? 'Libre' : 'حرة' };
 
   const shortTitle = (lang === 'fr'
@@ -502,7 +512,23 @@ export const OwnerFleetLiveMap: React.FC<OwnerFleetLiveMapProps> = ({
         const totalMs = Math.max(3600 * 1000, endMs - startMs);
         bookingDurationDays = Math.max(1, Math.ceil(totalMs / (24 * 3600 * 1000)));
 
-        if (endMs < nowTick) {
+        const { pauseState } = extractBookingBreakdownsAndNotes(currentBooking);
+        const isPaused = currentBooking.status === 'active' && Boolean(pauseState?.is_paused);
+
+        if (isPaused && pauseState) {
+          statusKey = 'maintenance';
+          const preservedMs = Math.max(0, Number(pauseState.remaining_ms) || 0);
+          const elapsedBeforePause = Math.max(0, totalMs - preservedMs);
+          elapsedPercent = Math.round(
+            Math.min(100, Math.max(0, (elapsedBeforePause / totalMs) * 100))
+          );
+          const preservedDurAr = formatRemainingDuration(preservedMs, 'ar');
+          const preservedDurFr = formatRemainingDuration(preservedMs, 'fr');
+          const compactRem = formatCompactRemaining(preservedMs, lang);
+          remainingLabelAr = `⏸️ متوقف مؤقتاً — محفوظ ${preservedDurAr}`;
+          remainingLabelFr = `⏸️ En pause — ${preservedDurFr} conservées`;
+          remainingCompact = `⏸ ${compactRem}`;
+        } else if (endMs < nowTick) {
           statusKey = 'overdue';
           elapsedPercent = 100;
           const lateHours = Math.max(1, Math.floor((nowTick - endMs) / (3600 * 1000)));
@@ -999,7 +1025,13 @@ export const OwnerFleetLiveMap: React.FC<OwnerFleetLiveMapProps> = ({
                       </span>
                     ) : activeItem.statusKey === 'maintenance' ? (
                       <span className="text-amber-300">
-                        {lang === 'fr' ? 'En maintenance' : 'في الصيانة'}
+                        {activeItem.activeBooking
+                          ? lang === 'fr'
+                            ? 'En pause (panne)'
+                            : 'متوقف مؤقتاً (عطل)'
+                          : lang === 'fr'
+                          ? 'En maintenance'
+                          : 'في الصيانة'}
                       </span>
                     ) : (
                       <span className="text-emerald-400 inline-flex items-center gap-1">

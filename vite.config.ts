@@ -55,7 +55,7 @@ export default defineConfig({
       },
       workbox: {
         importScripts: ['/sw-push.js'],
-        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+        maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
         navigateFallbackDenylist: [/^\/api\//],
         runtimeCaching: [

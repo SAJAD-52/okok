@@ -171,6 +171,15 @@ export interface BookingBreakdownReport {
   resolved_at?: string;
 }
 
+export interface BookingPauseState {
+  is_paused: boolean;
+  paused_at?: string;
+  remaining_ms: number;
+  total_paused_ms?: number;
+  pause_reason?: string;
+  resumed_at?: string;
+}
+
 export interface Booking {
   id: string;
   machine_id: string;
@@ -202,6 +211,7 @@ export interface Booking {
   status: BookingStatus;
   notes?: string;
   breakdowns?: BookingBreakdownReport[];
+  pause_state?: BookingPauseState | null;
   machine?: Partial<Machine>;
   renter?: Partial<UserProfile>;
   owner?: Partial<UserProfile>;

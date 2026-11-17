@@ -21,6 +21,9 @@ import {
   FileText,
   RotateCcw,
   Search,
+  AlertTriangle,
+  Wrench,
+  CheckCircle2,
 } from 'lucide-react';
 import { Booking } from '../types/database';
 import { Card } from '../components/ui/Card';
@@ -32,6 +35,12 @@ import { useLanguage } from '../hooks/useLanguage';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabase';
 import { RentalExtensionModal } from '../components/bookings/RentalExtensionModal';
+import { ReportBreakdownModal } from '../components/bookings/ReportBreakdownModal';
+import {
+  extractBookingBreakdownsAndNotes,
+  getBreakdownCategoryLabel,
+  getBreakdownSeverityLabel,
+} from '../lib/breakdownService';
 import { bookingStore } from '../lib/bookingStore';
 
 export const ContractorBookingsPage: React.FC = () => {
@@ -45,6 +54,8 @@ export const ContractorBookingsPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [selectedBookingForExtension, setSelectedBookingForExtension] = useState<Booking | null>(null);
   const [isExtensionModalOpen, setIsExtensionModalOpen] = useState<boolean>(false);
+  const [selectedBookingForBreakdown, setSelectedBookingForBreakdown] = useState<Booking | null>(null);
+  const [isBreakdownModalOpen, setIsBreakdownModalOpen] = useState<boolean>(false);
   const [now, setNow] = useState(Date.now());
 
   // Ticking countdown timer
@@ -102,6 +113,7 @@ export const ContractorBookingsPage: React.FC = () => {
               total_price: Number(b.total_price) || 0,
               status: b.status,
               notes: b.notes,
+              breakdowns: Array.isArray(b.breakdowns) ? b.breakdowns : undefined,
               created_at: b.created_at,
               machine: b.machines || b.machine,
               with_operator: Boolean(b.with_operator ?? true),
@@ -122,6 +134,7 @@ export const ContractorBookingsPage: React.FC = () => {
             total_price: Number(b.total_price) || 0,
             status: b.status,
             notes: b.notes,
+            breakdowns: Array.isArray(b.breakdowns) ? b.breakdowns : undefined,
             created_at: b.created_at,
             machine: b.machines || b.machine,
             with_operator: Boolean(b.with_operator ?? true),
@@ -316,12 +329,16 @@ export const ContractorBookingsPage: React.FC = () => {
         <div className="grid grid-cols-1 gap-4">
           {filteredBookings.map((b) => {
             const machine = b.machine as any;
-            const hasExtensionRequest = b.notes?.includes('[طلب تمديد');
+            const { breakdowns, cleanNotes } = extractBookingBreakdownsAndNotes(b);
+            const hasExtensionRequest = cleanNotes.includes('[طلب تمديد');
+            const openBreakdownsCount = breakdowns.filter((f) => f.status === 'open').length;
 
             return (
               <Card
                 key={b.id}
-                className="p-5 bg-white border border-steel-200 shadow-soft rounded-3xl transition-all hover:shadow-md"
+                className={`p-5 bg-white shadow-soft rounded-3xl transition-all hover:shadow-md border ${
+                  openBreakdownsCount > 0 ? 'border-rose-300 ring-1 ring-rose-200' : 'border-steel-200'
+                }`}
               >
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
                   {/* Machine & Info */}
@@ -383,6 +400,23 @@ export const ContractorBookingsPage: React.FC = () => {
 
                     {/* Action Buttons */}
                     <div className="flex items-center gap-2 flex-wrap">
+                      {/* Report Machine Breakdown Button (once client received machine -> active status) */}
+                      {b.status === 'active' && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setSelectedBookingForBreakdown(b);
+                            setIsBreakdownModalOpen(true);
+                          }}
+                          leftIcon={<AlertTriangle className="w-3.5 h-3.5 text-rose-600" />}
+                          className="font-black text-xs border-rose-300 text-rose-700 bg-rose-50/70 hover:bg-rose-100"
+                        >
+                          {lang === 'fr' ? 'Signaler une panne' : 'الإبلاغ عن عطل'}
+                        </Button>
+                      )}
+
                       {/* Request Extension Button */}
                       {(b.status === 'active' || b.status === 'pending') && (
                         <Button
@@ -426,13 +460,93 @@ export const ContractorBookingsPage: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Breakdown Reports Box inside booking card */}
+                {breakdowns.length > 0 && (
+                  <div className="mt-4 pt-3 border-t border-rose-200/70 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-black text-rose-900 flex items-center gap-1.5">
+                        <Wrench className="w-3.5 h-3.5 text-rose-600" />
+                        {lang === 'fr'
+                          ? `Pannes signalées (${breakdowns.length})`
+                          : `الأعطال المبلّغ عنها (${breakdowns.length})`}
+                      </span>
+                      {openBreakdownsCount > 0 && (
+                        <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 text-[10px] font-black">
+                          {lang === 'fr' ? 'Propriétaire notifié' : 'تم إشعار المالك'}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      {breakdowns.map((rep) => {
+                        const isResolved = rep.status === 'resolved';
+                        return (
+                          <div
+                            key={rep.id}
+                            className={`p-3 rounded-xl border text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${
+                              isResolved
+                                ? 'bg-emerald-50/60 border-emerald-200 text-emerald-950'
+                                : 'bg-rose-50/70 border-rose-200 text-rose-950'
+                            }`}
+                          >
+                            <div className="space-y-0.5 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-black">
+                                  {getBreakdownCategoryLabel(rep.category, lang)}
+                                </span>
+                                <span
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                    rep.severity === 'critical'
+                                      ? 'bg-rose-600 text-white'
+                                      : rep.severity === 'moderate'
+                                      ? 'bg-amber-500 text-white'
+                                      : 'bg-sky-600 text-white'
+                                  }`}
+                                >
+                                  {getBreakdownSeverityLabel(rep.severity, lang)}
+                                </span>
+                                <span className="text-[10px] text-steel-500 font-mono" dir="ltr">
+                                  {rep.reported_at?.slice(0, 16).replace('T', ' ')}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-steel-700 leading-relaxed">
+                                {rep.description}
+                              </p>
+                            </div>
+
+                            <span
+                              className={`shrink-0 px-2.5 py-1 rounded-lg text-[10px] font-black flex items-center gap-1 self-start sm:self-center ${
+                                isResolved
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-amber-100 text-amber-900'
+                              }`}
+                            >
+                              {isResolved ? (
+                                <>
+                                  <CheckCircle2 className="w-3 h-3" />
+                                  {lang === 'fr' ? 'Résolu' : 'تم الإصلاح'}
+                                </>
+                              ) : (
+                                <>
+                                  <Clock className="w-3 h-3" />
+                                  {lang === 'fr' ? 'En cours' : 'قيد المتابعة'}
+                                </>
+                              )}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {/* Extension Notes details preview if requested */}
-                {b.notes && (
+                {cleanNotes && (
                   <div className="mt-4 pt-3 border-t border-steel-100 text-[11px] text-steel-600 bg-steel-50/80 p-2.5 rounded-xl">
                     <span className="font-bold text-ink block mb-0.5">
                       {lang === 'fr' ? 'Notes du site & Suivi :' : 'ملاحظات الموقع وتفاصيل التمديد:'}
                     </span>
-                    <p className="whitespace-pre-line">{b.notes}</p>
+                    <p className="whitespace-pre-line">{cleanNotes}</p>
                   </div>
                 )}
               </Card>
@@ -450,6 +564,19 @@ export const ContractorBookingsPage: React.FC = () => {
         }}
         booking={selectedBookingForExtension}
         onExtensionSubmitted={(updated: Booking) => {
+          setBookings((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+        }}
+      />
+
+      {/* Breakdown / Fault Report Modal */}
+      <ReportBreakdownModal
+        isOpen={isBreakdownModalOpen}
+        onClose={() => {
+          setIsBreakdownModalOpen(false);
+          setSelectedBookingForBreakdown(null);
+        }}
+        booking={selectedBookingForBreakdown}
+        onBreakdownReported={(updated: Booking) => {
           setBookings((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
         }}
       />

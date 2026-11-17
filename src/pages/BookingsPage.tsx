@@ -34,6 +34,8 @@ import {
   ChevronLeft,
   Banknote,
   Send,
+  Wrench,
+  CheckCircle2,
 } from 'lucide-react';
 import { Booking, BookingStatus, Machine, BookingPayment } from '../types/database';
 import { Card } from '../components/ui/Card';
@@ -53,6 +55,12 @@ import { businessService } from '../lib/businessService';
 import { machineStore } from '../lib/machineStore';
 import { serverApi } from '../lib/serverApi';
 import { mapDatabaseError } from '../lib/errorHelpers';
+import {
+  extractBookingBreakdownsAndNotes,
+  getBreakdownCategoryLabel,
+  getBreakdownSeverityLabel,
+  resolveBookingBreakdown,
+} from '../lib/breakdownService';
 
 type TabFilter = 'all' | 'pending' | 'active' | 'completed' | 'cancelled' | 'dues';
 
@@ -89,6 +97,7 @@ export const BookingsPage: React.FC = () => {
     booking: Booking;
     balanceDue: number;
   } | null>(null);
+  const [resolvingFaultId, setResolvingFaultId] = useState<string | null>(null);
 
   // Calendar month state
   const [calendarDate, setCalendarDate] = useState(() => new Date());
@@ -184,6 +193,7 @@ export const BookingsPage: React.FC = () => {
                 id: b.id,
                 machine_id: b.machine_id,
                 owner_id: b.owner_id,
+                client_id: b.client_id,
                 client_name: b.client_name,
                 client_phone: b.client_phone,
                 start_at: b.start_at || b.start_date,
@@ -193,6 +203,7 @@ export const BookingsPage: React.FC = () => {
                 rate_type: b.rate_type || 'daily',
                 status: b.status,
                 notes: b.notes,
+                breakdowns: Array.isArray(b.breakdowns) ? b.breakdowns : undefined,
                 created_at: b.created_at,
                 machine: matchedMachine,
                 with_operator: Boolean(b.with_operator),
@@ -212,7 +223,9 @@ export const BookingsPage: React.FC = () => {
             (b, i) =>
               b.id === bList[i]?.id &&
               b.status === bList[i]?.status &&
-              b.total_price === bList[i]?.total_price
+              b.total_price === bList[i]?.total_price &&
+              b.notes === bList[i]?.notes &&
+              JSON.stringify(b.breakdowns || []) === JSON.stringify(bList[i]?.breakdowns || [])
           )
         ) {
           return prev;
@@ -341,6 +354,26 @@ export const BookingsPage: React.FC = () => {
         ? 'تم إنهاء واستلام الآلية بنجاح!'
         : 'تم إلغاء الحجز.'
     );
+  };
+
+  // Mark a reported breakdown as resolved by the Owner
+  const handleResolveBreakdown = async (booking: Booking, breakdownId: string) => {
+    setResolvingFaultId(breakdownId);
+    try {
+      const res = await resolveBookingBreakdown(booking, breakdownId);
+      setBookings((prev) =>
+        prev.map((item) => (item.id === res.updatedBooking.id ? res.updatedBooking : item))
+      );
+      toast.success(
+        lang === 'fr'
+          ? 'Panne marquée comme résolue !'
+          : 'تم تحديث حالة العطل إلى «تم الإصلاح» بنجاح!'
+      );
+    } catch {
+      toast.error(t('common.error'));
+    } finally {
+      setResolvingFaultId(null);
+    }
   };
 
   // Generate Document Action (Contract, Invoice, Receipt)
@@ -687,6 +720,8 @@ export const BookingsPage: React.FC = () => {
           ) : (
             filteredBookings.map((booking) => {
               const stats = paymentService.computeBookingPaymentStats(booking, payments);
+              const { breakdowns, cleanNotes } = extractBookingBreakdownsAndNotes(booking);
+              const openFaultsCount = breakdowns.filter((f) => f.status === 'open').length;
               const isOverdue =
                 booking.status === 'active' &&
                 new Date(booking.end_at || booking.end_date || '').getTime() < Date.now();
@@ -695,7 +730,9 @@ export const BookingsPage: React.FC = () => {
                 <div
                   key={booking.id}
                   className={`p-5 rounded-2xl border bg-white shadow-xs space-y-4 transition-all text-xs ${
-                    isOverdue
+                    openFaultsCount > 0
+                      ? 'border-rose-300 ring-1 ring-rose-300 bg-rose-50/15'
+                      : isOverdue
                       ? 'border-red-300 ring-1 ring-red-300 bg-red-50/20'
                       : 'border-steel-200 hover:border-steel-300'
                   }`}
@@ -725,6 +762,19 @@ export const BookingsPage: React.FC = () => {
                           >
                             {booking.status}
                           </Badge>
+                          {openFaultsCount > 0 ? (
+                            <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black flex items-center gap-1">
+                              <AlertTriangle className="w-3 h-3" />
+                              {lang === 'fr'
+                                ? `${openFaultsCount} Panne signalée`
+                                : `عطل مبلّغ عنه (${openFaultsCount})`}
+                            </span>
+                          ) : breakdowns.length > 0 ? (
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3" />
+                              {lang === 'fr' ? 'Panne résolue' : 'تم إصلاح العطل'}
+                            </span>
+                          ) : null}
                           {isOverdue && (
                             <span className="px-2 py-0.5 rounded-full bg-red-600 text-white text-[10px] font-black animate-pulse">
                               {lang === 'fr' ? 'RETOUR EN RETARD' : 'تأخر في الإرجاع'}
@@ -808,12 +858,102 @@ export const BookingsPage: React.FC = () => {
                         {booking.deposit_amount.toLocaleString('fr-FR')} MAD
                       </span>
                     ) : null}
-                    {booking.notes && (
+                    {cleanNotes && (
                       <span className="text-steel-500 truncate max-w-md">
-                        {booking.notes}
+                        {cleanNotes}
                       </span>
                     )}
                   </div>
+
+                  {/* Reported Machine Breakdowns inside Booking Card Frame */}
+                  {breakdowns.length > 0 && (
+                    <div className="p-3.5 rounded-xl border border-rose-200 bg-rose-50/70 space-y-2.5">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <span className="text-xs font-black text-rose-900 flex items-center gap-1.5">
+                          <Wrench className="w-3.5 h-3.5 text-rose-600" />
+                          {lang === 'fr'
+                            ? `Signalements de pannes sur cet engin (${breakdowns.length})`
+                            : `الأعطال المسجلة على الآلية أثناء الكراء (${breakdowns.length})`}
+                        </span>
+                        {openFaultsCount > 0 && (
+                          <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-600 text-white">
+                            {lang === 'fr' ? 'Action requise' : 'يتطلب تدخل المالك'}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="space-y-2">
+                        {breakdowns.map((rep) => {
+                          const isResolved = rep.status === 'resolved';
+                          return (
+                            <div
+                              key={rep.id}
+                              className={`p-3 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 ${
+                                isResolved
+                                  ? 'bg-white/90 border-emerald-200'
+                                  : 'bg-white border-rose-200 shadow-xs'
+                              }`}
+                            >
+                              <div className="space-y-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-black text-ink">
+                                    {getBreakdownCategoryLabel(rep.category, lang)}
+                                  </span>
+                                  <span
+                                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                      rep.severity === 'critical'
+                                        ? 'bg-rose-600 text-white'
+                                        : rep.severity === 'moderate'
+                                        ? 'bg-amber-500 text-white'
+                                        : 'bg-sky-600 text-white'
+                                    }`}
+                                  >
+                                    {getBreakdownSeverityLabel(rep.severity, lang)}
+                                  </span>
+                                  {rep.reported_by_name && (
+                                    <span className="text-[10px] font-bold text-steel-600">
+                                      · {rep.reported_by_name}
+                                    </span>
+                                  )}
+                                  <span className="text-[10px] text-steel-400 font-mono" dir="ltr">
+                                    {rep.reported_at?.slice(0, 16).replace('T', ' ')}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-steel-700 leading-relaxed">
+                                  {rep.description}
+                                </p>
+                              </div>
+
+                              <div className="shrink-0 flex items-center gap-2 self-start sm:self-center">
+                                {isResolved ? (
+                                  <span className="px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-800 text-[10px] font-black flex items-center gap-1">
+                                    <CheckCircle2 className="w-3.5 h-3.5" />
+                                    {lang === 'fr' ? 'Réparé / Résolu' : 'تم الإصلاح'}
+                                  </span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    disabled={resolvingFaultId === rep.id}
+                                    onClick={() => handleResolveBreakdown(booking, rep.id)}
+                                    className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] flex items-center gap-1 cursor-pointer shadow-xs disabled:opacity-60"
+                                  >
+                                    <Check className="w-3.5 h-3.5" />
+                                    <span>
+                                      {resolvingFaultId === rep.id
+                                        ? '...'
+                                        : lang === 'fr'
+                                        ? 'Marquer réparé'
+                                        : 'تحديد كـ تم الإصلاح'}
+                                    </span>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Actions Bar: Status Buttons + Payment + Documents */}
                   <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-steel-100">

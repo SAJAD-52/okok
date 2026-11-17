@@ -26,6 +26,7 @@ import {
   Volume2,
   Globe,
   Navigation,
+  AlertTriangle,
 } from 'lucide-react';
 import { Logo } from '../ui/Logo';
 import { LanguageSwitcher } from '../ui/LanguageSwitcher';
@@ -228,11 +229,56 @@ export const DashboardLayout: React.FC = () => {
       if (document.visibilityState === 'visible') refreshSystemNotifications();
     }, 60000);
     window.addEventListener('jadijcb_chat_unread_updated', refreshSystemNotifications);
+
+    const activeId = profile?.id || user?.id;
+    let notifChannel: any = null;
+    if (isSupabaseConfigured && activeId && !(isSuperAdmin && !isImpersonating)) {
+      try {
+        notifChannel = supabase
+          .channel(`dashboard_notifs_${activeId}`)
+          .on(
+            'postgres_changes',
+            {
+              event: 'INSERT',
+              schema: 'public',
+              table: 'notifications',
+              filter: `user_id=eq.${activeId}`,
+            },
+            (payload: any) => {
+              const row = payload?.new;
+              refreshSystemNotifications();
+              if (row?.type === 'booking_breakdown') {
+                window.dispatchEvent(new CustomEvent('jadijcb_booking_event'));
+                playOpportunitySound();
+                const alertTitle =
+                  lang === 'fr'
+                    ? row.title_fr || '⚠️ Panne signalée sur un engin loué !'
+                    : row.title_ar || '⚠️ تنبيه عطل جديد في آلية مستلمة!';
+                const alertBody = lang === 'fr' ? row.body_fr : row.body_ar;
+                toast.error(alertBody ? `${alertTitle} — ${alertBody}` : alertTitle);
+                showBrowserChatNotification({
+                  title: alertTitle,
+                  body: alertBody || '',
+                  tag: `breakdown_${row.id || Date.now()}`,
+                  url: '/owner/bookings?tab=active',
+                });
+              } else if (row?.type === 'booking_breakdown_resolved') {
+                window.dispatchEvent(new CustomEvent('jadijcb_booking_event'));
+              }
+            }
+          )
+          .subscribe();
+      } catch {
+        // Ignore realtime errors
+      }
+    }
+
     return () => {
       clearInterval(timer);
       window.removeEventListener('jadijcb_chat_unread_updated', refreshSystemNotifications);
+      if (notifChannel) supabase.removeChannel(notifChannel);
     };
-  }, [refreshSystemNotifications]);
+  }, [refreshSystemNotifications, profile?.id, user?.id, isSuperAdmin, isImpersonating, lang]);
 
   // Sync open driver job offers badge count
   useEffect(() => {
@@ -1185,6 +1231,9 @@ export const DashboardLayout: React.FC = () => {
                               {/* 2. System & Chat notifications */}
                               {generalSystemNotifs.map((notif) => {
                                 const isChatNotif = notif.type === 'chat_message';
+                                const isBreakdownNotif =
+                                  notif.type === 'booking_breakdown' ||
+                                  notif.type === 'booking_breakdown_resolved';
                                 const chatConvId = notif.data?.conversation_id || '';
                                 return (
                                   <div
@@ -1216,6 +1265,10 @@ export const DashboardLayout: React.FC = () => {
                                             ? `${baseMsgRoute}?conv=${encodeURIComponent(chatConvId)}`
                                             : baseMsgRoute
                                         );
+                                      } else if (notif.type === 'booking_breakdown') {
+                                        navigate('/owner/bookings?tab=active');
+                                      } else if (notif.type === 'booking_breakdown_resolved') {
+                                        navigate('/entreprise/bookings');
                                       } else {
                                         navigate(
                                           isDriver
@@ -1227,7 +1280,9 @@ export const DashboardLayout: React.FC = () => {
                                       }
                                     }}
                                     className={`p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
-                                      !notif.is_read
+                                      !notif.is_read && notif.type === 'booking_breakdown'
+                                        ? 'bg-rose-50 border-rose-300 font-medium'
+                                        : !notif.is_read
                                         ? 'bg-primary/10 border-primary/40 font-medium'
                                         : 'bg-steel-50/70 border-steel-200 text-steel-600'
                                     }`}
@@ -1236,6 +1291,15 @@ export const DashboardLayout: React.FC = () => {
                                       <span className="flex items-center gap-1.5 min-w-0 truncate">
                                         {isChatNotif && (
                                           <MessageSquare className="w-3.5 h-3.5 text-primary-dark shrink-0" />
+                                        )}
+                                        {isBreakdownNotif && (
+                                          <AlertTriangle
+                                            className={`w-3.5 h-3.5 shrink-0 ${
+                                              notif.type === 'booking_breakdown'
+                                                ? 'text-rose-600'
+                                                : 'text-emerald-600'
+                                            }`}
+                                          />
                                         )}
                                         <span className="truncate">
                                           {lang === 'fr' ? notif.title_fr : notif.title_ar}

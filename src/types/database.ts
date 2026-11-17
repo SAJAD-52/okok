@@ -148,6 +148,29 @@ export interface SparePart {
   created_at: string;
 }
 
+export type BreakdownCategory =
+  | 'hydraulic'
+  | 'engine'
+  | 'electrical'
+  | 'tire_track'
+  | 'fuel_leak'
+  | 'other';
+
+export type BreakdownSeverity = 'critical' | 'moderate' | 'minor';
+
+export interface BookingBreakdownReport {
+  id: string;
+  category: BreakdownCategory;
+  severity: BreakdownSeverity;
+  title?: string;
+  description: string;
+  reported_by_id?: string;
+  reported_by_name?: string;
+  reported_at: string;
+  status: 'open' | 'resolved';
+  resolved_at?: string;
+}
+
 export interface Booking {
   id: string;
   machine_id: string;
@@ -178,6 +201,7 @@ export interface Booking {
   site_address?: string;
   status: BookingStatus;
   notes?: string;
+  breakdowns?: BookingBreakdownReport[];
   machine?: Partial<Machine>;
   renter?: Partial<UserProfile>;
   owner?: Partial<UserProfile>;

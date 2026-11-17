@@ -21,6 +21,7 @@ import {
   MessageSquare,
   ShieldCheck,
   AlertCircle,
+  AlertTriangle,
   Compass,
 } from 'lucide-react';
 import { Booking, ContractorSite } from '../types/database';
@@ -32,6 +33,7 @@ import { useLanguage } from '../hooks/useLanguage';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabase';
 import { RentalExtensionModal } from '../components/bookings/RentalExtensionModal';
+import { ReportBreakdownModal } from '../components/bookings/ReportBreakdownModal';
 import { ProfileSettingsModal } from '../components/profile/ProfileSettingsModal';
 
 export const ContractorDashboardPage: React.FC = () => {
@@ -46,6 +48,8 @@ export const ContractorDashboardPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [selectedBookingForExtension, setSelectedBookingForExtension] = useState<Booking | null>(null);
   const [isExtensionModalOpen, setIsExtensionModalOpen] = useState<boolean>(false);
+  const [selectedBookingForBreakdown, setSelectedBookingForBreakdown] = useState<Booking | null>(null);
+  const [isBreakdownModalOpen, setIsBreakdownModalOpen] = useState<boolean>(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState<boolean>(false);
 
   useEffect(() => {
@@ -372,7 +376,21 @@ export const ContractorDashboardPage: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="pt-2.5 border-t border-steel-100 flex items-center gap-2">
+                  <div className="pt-2.5 border-t border-steel-100 flex items-center gap-2 flex-wrap">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setSelectedBookingForBreakdown(b);
+                        setIsBreakdownModalOpen(true);
+                      }}
+                      leftIcon={<AlertTriangle className="w-3.5 h-3.5 text-rose-600" />}
+                      className="text-xs font-black border-rose-300 text-rose-700 bg-rose-50/70 hover:bg-rose-100 px-3!"
+                    >
+                      {lang === 'fr' ? 'Panne' : 'إبلاغ عن عطل'}
+                    </Button>
+
                     <Button
                       type="button"
                       variant="primary"
@@ -417,6 +435,19 @@ export const ContractorDashboardPage: React.FC = () => {
         booking={selectedBookingForExtension}
         onExtensionSubmitted={() => {
           setIsExtensionModalOpen(false);
+        }}
+      />
+
+      {/* Breakdown Modal */}
+      <ReportBreakdownModal
+        isOpen={isBreakdownModalOpen}
+        onClose={() => {
+          setIsBreakdownModalOpen(false);
+          setSelectedBookingForBreakdown(null);
+        }}
+        booking={selectedBookingForBreakdown}
+        onBreakdownReported={(updated) => {
+          setActiveBookings((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
         }}
       />
 

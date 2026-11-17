@@ -72,6 +72,7 @@ export const MachinesPage: React.FC = () => {
   const [machines, setMachines] = useState<Machine[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isError, setIsError] = useState<boolean>(false);
+  const [errorDetail, setErrorDetail] = useState<string>('');
   const [activeFilter, setActiveFilter] = useState<'all' | 'rent' | 'sale' | 'spare'>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedMachineToEdit, setSelectedMachineToEdit] = useState<Machine | null>(null);
@@ -112,6 +113,7 @@ export const MachinesPage: React.FC = () => {
 
         if (error) {
           hadFetchError = true;
+          setErrorDetail(error.message || error.code || 'Unknown error');
           console.warn('Machines load error:', error.message);
           toast.error(t(mapDatabaseError(error)));
         } else if (data) {
@@ -160,11 +162,13 @@ export const MachinesPage: React.FC = () => {
       }
     } catch (err: any) {
       hadFetchError = true;
+      setErrorDetail(err?.message || 'Network exception');
       console.warn('Machines load notice:', err);
     } finally {
       const merged = machineStore.mergeMachines(mapped, ownerUid);
       setMachines((prev) => (hadFetchError && prev.length > 0 && merged.length === 0 ? prev : merged));
       setIsError(hadFetchError && merged.length === 0);
+      if (!hadFetchError) setErrorDetail('');
       initialLoadedRef.current = true;
       inFlightRef.current = false;
       setIsLoading(false);
@@ -534,11 +538,18 @@ export const MachinesPage: React.FC = () => {
               ? 'Erreur lors du chargement des engins'
               : 'حدث خطأ أثناء تحميل قائمة الآليات'}
           </h3>
-          <p className="text-xs text-steel-500 mb-4">
+          <p className="text-xs text-steel-500 mb-2">
             {lang === 'fr'
               ? 'Impossible de récupérer votre flotte. Veuillez vérifier votre connexion.'
               : 'تعذر الاتصال بقاعدة البيانات. يرجى إعادة المحاولة.'}
           </p>
+          {errorDetail && (
+            <div className="mb-4">
+              <p dir="ltr" className="text-[11px] font-mono text-red-700/80 bg-red-100/70 inline-block px-2.5 py-1 rounded-lg max-w-full break-all">
+                {errorDetail}
+              </p>
+            </div>
+          )}
           <Button
             type="button"
             variant="outline"

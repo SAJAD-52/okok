@@ -31,7 +31,8 @@ import { MOROCCAN_CITIES, getCityById } from '../data/cities';
 import { calculateDistanceKm } from '../lib/geoUtils';
 import { Machine } from '../types/database';
 
-const PAGE_SIZE = 12;
+const PAGE_SIZE = 8;
+let marketplaceOwnerJoinSupported = true;
 
 export const MarketplacePage: React.FC = () => {
   const { t, lang } = useLanguage();
@@ -44,6 +45,7 @@ export const MarketplacePage: React.FC = () => {
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isError, setIsError] = useState(false);
+  const [errorDetail, setErrorDetail] = useState('');
   const [page, setPage] = useState(1);
 
   // Booking Modal State for Contractors & Mediating Owners
@@ -133,8 +135,6 @@ export const MarketplacePage: React.FC = () => {
     };
   }, []);
 
-let marketplaceOwnerJoinSupported = true;
-
   // Load from Supabase with range queries & merge machineStore
   const loadSupabaseMachines = useCallback(async () => {
     setIsLoading(true);
@@ -203,6 +203,7 @@ let marketplaceOwnerJoinSupported = true;
 
         if (error) {
           console.warn('Marketplace query failed:', error.message);
+          setErrorDetail(error.message || error.code || 'Unknown error');
           const cachedFallback = machineStore.mergeMachines([]);
           if (cachedFallback.length > 0) {
             setMachines(cachedFallback);
@@ -214,6 +215,7 @@ let marketplaceOwnerJoinSupported = true;
         }
 
         if (data) {
+          setErrorDetail('');
           mapped = data.map(mapSupabaseMachine);
           remoteCount = typeof count === 'number' ? count : data.length;
         }
@@ -223,8 +225,9 @@ let marketplaceOwnerJoinSupported = true;
       const finalMachines = machineStore.mergeMachines(mapped);
       setMachines(finalMachines);
       setTotalRemoteCount(Math.max(remoteCount, finalMachines.length));
-    } catch (err) {
+    } catch (err: any) {
       console.warn('Marketplace load error:', err);
+      setErrorDetail(err?.message || 'Network exception');
       const cachedFallback = machineStore.mergeMachines([]);
       if (cachedFallback.length > 0) {
         setMachines(cachedFallback);
@@ -603,11 +606,18 @@ let marketplaceOwnerJoinSupported = true;
                     ? 'Erreur lors du chargement des annonces'
                     : 'حدث خطأ أثناء تحميل المعروضات'}
                 </h3>
-                <p className="text-xs text-steel-500 max-w-md mx-auto mb-6">
+                <p className="text-xs text-steel-500 max-w-md mx-auto mb-3">
                   {lang === 'fr'
                     ? 'Impossible de récupérer la liste des matériels disponibles. Veuillez vérifier votre connexion.'
                     : 'تعذر الاتصال بقاعدة البيانات لجلب المعروضات المتاحة. يرجى إعادة المحاولة.'}
                 </p>
+                {errorDetail && (
+                  <div className="mb-5">
+                    <p dir="ltr" className="text-[11px] font-mono text-red-700/80 bg-red-50 inline-block px-3 py-1 rounded-lg max-w-md break-all">
+                      {errorDetail}
+                    </p>
+                  </div>
+                )}
                 <Button
                   type="button"
                   variant="primary"

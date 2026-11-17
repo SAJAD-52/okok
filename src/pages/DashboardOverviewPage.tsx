@@ -45,16 +45,20 @@ import { useLanguage } from '../hooks/useLanguage';
 import { useAuth } from '../hooks/useAuth';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { RevenueChart, RevenuePoint } from '../components/dashboard/RevenueChart';
+import { OwnerFleetLiveMap } from '../components/dashboard/OwnerFleetLiveMap';
 import { MachineStepperModal } from '../components/machines/MachineStepperModal';
 import { ProfileSettingsModal } from '../components/profile/ProfileSettingsModal';
 import { CreateBookingModal } from '../components/bookings/CreateBookingModal';
-import { Machine, Booking, Lead } from '../types/database';
+import { AddExpenseModal } from '../components/analytics/AddExpenseModal';
+import { Machine, Booking, Lead, MachineExpense } from '../types/database';
 import { bookingStore } from '../lib/bookingStore';
 import { machineStore } from '../lib/machineStore';
+import { expenseStore } from '../lib/expenseStore';
 import { paymentService } from '../lib/paymentService';
 import { leadService } from '../lib/leadService';
 import { businessService } from '../lib/businessService';
 import { documentService } from '../lib/documentService';
+import { fetchOwnerDriverOffers, OwnerDriverOfferWithApps } from '../lib/driverOfferService';
 import { serverApi } from '../lib/serverApi';
 import { recordUserActivityThrottled, usePwaInstall } from '../lib/pwaHelper';
 import { mapDatabaseError } from '../lib/errorHelpers';
@@ -68,9 +72,13 @@ export const DashboardOverviewPage: React.FC = () => {
   const [isAddMachineModalOpen, setIsAddMachineModalOpen] = useState(false);
   const [isCreateBookingModalOpen, setIsCreateBookingModalOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [isAddExpenseModalOpen, setIsAddExpenseModalOpen] = useState(false);
+  const [expenseMachineId, setExpenseMachineId] = useState<string | undefined>(undefined);
 
   const [machines, setMachines] = useState<Machine[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
+  const [expenses, setExpenses] = useState<MachineExpense[]>([]);
+  const [driverOffers, setDriverOffers] = useState<OwnerDriverOfferWithApps[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [docsCount, setDocsCount] = useState<number>(0);
   const [hasBusinessProfile, setHasBusinessProfile] = useState<boolean>(false);
@@ -104,7 +112,7 @@ export const DashboardOverviewPage: React.FC = () => {
     }
 
     try {
-      // 1. Machines
+      // 1. Machines (full fields including lat/lng, city, category, operator)
       let mList: Machine[] = [];
       if (isSupabaseConfigured) {
         const { data: mData } = await supabase
@@ -117,18 +125,39 @@ export const DashboardOverviewPage: React.FC = () => {
             owner_id: m.owner_id,
             title_ar: m.title_ar,
             title_fr: m.title_fr,
-            brand: m.brand,
-            model: m.model,
-            daily_rate: Number(m.daily_rate) || 2000,
-            status: m.is_published ? 'available' : 'inactive',
+            description_ar: m.description_ar || '',
+            description_fr: m.description_fr || '',
+            category: m.category,
+            category_id: m.category_id || m.category,
+            brand: m.brand || '',
+            model: m.model || '',
+            year: m.year || new Date().getFullYear(),
+            listing_mode: m.listing_mode || 'rent',
+            condition: m.condition || 'good',
+            city: m.city || '',
+            city_id: m.city_id || m.city || '',
+            lat: m.lat != null ? Number(m.lat) : undefined,
+            lng: m.lng != null ? Number(m.lng) : undefined,
+            location_lat: Number(m.location_lat ?? m.lat ?? 0),
+            location_lng: Number(m.location_lng ?? m.lng ?? 0),
+            daily_rate: Number(m.daily_rate ?? m.rate_daily) || 2000,
+            rate_daily: Number(m.rate_daily ?? m.daily_rate) || 2000,
+            rate_hourly: Number(m.rate_hourly ?? m.hourly_rate) || 0,
+            rate_weekly: Number(m.rate_weekly ?? m.weekly_rate) || 0,
+            with_operator: Boolean(m.with_operator ?? true),
+            fuel_included: Boolean(m.fuel_included),
+            delivery_available: Boolean(m.delivery_available),
+            status: m.is_published === false ? 'inactive' : m.status || 'available',
+            is_published: m.is_published ?? true,
             images: m.images || [],
+            specs: m.specs || {},
           } as Machine));
         }
       }
-      const realMachines = mList.length > 0 ? mList : machineStore.mergeMachines([], userId);
+      const realMachines = machineStore.mergeMachines(mList, userId);
       setMachines(realMachines);
 
-      // 2. Bookings (Matches owner_id OR machine ownership directly from Supabase)
+      // 2. Bookings (Matches owner_id OR machine ownership directly from Supabase + local cache)
       let bList: Booking[] = [];
       const ownerMachineIds = realMachines.map((m) => m.id).filter(Boolean);
 
@@ -145,7 +174,6 @@ export const DashboardOverviewPage: React.FC = () => {
               for (const row of allData) fetchedMap.set(row.id, row);
             }
           } else {
-            // 1. Fetch bookings where user is directly the owner
             if (userId) {
               const { data: ownerData, error: ownerErr } = await supabase
                 .from('bookings')
@@ -157,7 +185,6 @@ export const DashboardOverviewPage: React.FC = () => {
               }
             }
 
-            // 2. Fetch bookings where machine belongs to user's fleet
             if (ownerMachineIds.length > 0) {
               const { data: machineData, error: mErr } = await supabase
                 .from('bookings')
@@ -189,6 +216,9 @@ export const DashboardOverviewPage: React.FC = () => {
                 deposit_amount: Number(b.deposit_amount) || 0,
                 status: b.status,
                 with_operator: Boolean(b.with_operator ?? true),
+                site_city_id: b.site_city_id,
+                site_address: b.site_address,
+                notes: b.notes,
                 created_at: b.created_at,
                 machine: matchedMachine,
               };
@@ -199,27 +229,29 @@ export const DashboardOverviewPage: React.FC = () => {
         }
       }
 
-      setBookings((prev) => {
-        if (
-          prev.length === bList.length &&
-          prev.every((b, i) => b.id === bList[i]?.id && b.status === bList[i]?.status)
-        ) {
-          return prev;
-        }
-        return bList;
-      });
+      const mergedBookings = bookingStore.mergeOwnerBookings(
+        bList,
+        userId,
+        ownerMachineIds,
+        isSuperAdmin
+      );
+
+      setBookings(mergedBookings);
       initialLoadedRef.current = true;
 
-      // 3. Leads
-      const loadedLeads = await leadService.getLeadsForOwner(userId);
+      // 3. Machine Expenses, Accepted Driver Offers, Leads, Documents & Business Profile
+      const [loadedExpenses, loadedDriverOffers, loadedLeads, docs, bp] = await Promise.all([
+        expenseStore.getExpensesForOwner(userId),
+        fetchOwnerDriverOffers(userId).catch(() => [] as OwnerDriverOfferWithApps[]),
+        leadService.getLeadsForOwner(userId),
+        documentService.getDocumentsForOwner(userId),
+        businessService.getProfile(userId),
+      ]);
+
+      setExpenses(loadedExpenses);
+      setDriverOffers(loadedDriverOffers);
       setLeads(loadedLeads);
-
-      // 4. Documents count & activation
-      const docs = await documentService.getDocumentsForOwner(userId);
       setDocsCount(docs.length);
-
-      // 5. Business profile check
-      const bp = await businessService.getProfile(userId);
       setHasBusinessProfile(Boolean(bp.ice || bp.company_name));
     } catch (err) {
       console.warn('Dashboard load notice:', err);
@@ -234,6 +266,9 @@ export const DashboardOverviewPage: React.FC = () => {
     const handleUpdate = () => loadDashboardData(true);
     window.addEventListener('jadijcb_machines_updated', handleUpdate);
     window.addEventListener('jadijcb_booking_event', handleUpdate);
+    window.addEventListener('jadijcb_expense_event', handleUpdate);
+    window.addEventListener('jadijcb_expenses_updated', handleUpdate);
+    window.addEventListener('jadijcb_driver_offers_updated', handleUpdate);
     window.addEventListener('jadijcb_leads_updated', handleUpdate);
     window.addEventListener('jadijcb_documents_updated', handleUpdate);
     window.addEventListener('jadijcb_business_profile_updated', handleUpdate);
@@ -243,7 +278,8 @@ export const DashboardOverviewPage: React.FC = () => {
       if (
         e.key === 'jadijcb_cached_bookings' ||
         e.key === 'jadijcb_last_booking_event' ||
-        e.key === 'jadijcb_user_machines'
+        e.key === 'jadijcb_user_machines' ||
+        e.key === 'jadijcb_machine_expenses'
       ) {
         loadDashboardData(true);
       }
@@ -263,6 +299,9 @@ export const DashboardOverviewPage: React.FC = () => {
     return () => {
       window.removeEventListener('jadijcb_machines_updated', handleUpdate);
       window.removeEventListener('jadijcb_booking_event', handleUpdate);
+      window.removeEventListener('jadijcb_expense_event', handleUpdate);
+      window.removeEventListener('jadijcb_expenses_updated', handleUpdate);
+      window.removeEventListener('jadijcb_driver_offers_updated', handleUpdate);
       window.removeEventListener('jadijcb_leads_updated', handleUpdate);
       window.removeEventListener('jadijcb_documents_updated', handleUpdate);
       window.removeEventListener('jadijcb_business_profile_updated', handleUpdate);
@@ -985,6 +1024,19 @@ export const DashboardOverviewPage: React.FC = () => {
         </div>
       </div>
 
+      {/* Revolutionary Live Fleet Map & Graphical Telemetry Inspector */}
+      <OwnerFleetLiveMap
+        machines={machines}
+        bookings={bookings}
+        expenses={expenses}
+        driverOffers={driverOffers}
+        ownerId={userId}
+        onAddExpenseForMachine={(mId) => {
+          setExpenseMachineId(mId);
+          setIsAddExpenseModalOpen(true);
+        }}
+      />
+
       {/* Main Split: Left = Idle Machines WhatsApp Generator + Leads, Right = Storefront Live & Mini Chart */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Column (7 Cols) */}
@@ -1182,6 +1234,16 @@ export const DashboardOverviewPage: React.FC = () => {
       <ProfileSettingsModal
         isOpen={isProfileModalOpen}
         onClose={() => setIsProfileModalOpen(false)}
+      />
+
+      <AddExpenseModal
+        isOpen={isAddExpenseModalOpen}
+        onClose={() => setIsAddExpenseModalOpen(false)}
+        machines={machines}
+        defaultMachineId={expenseMachineId}
+        onExpenseAdded={() => {
+          loadDashboardData(true);
+        }}
       />
     </div>
   );

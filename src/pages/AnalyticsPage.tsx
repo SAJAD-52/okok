@@ -5,6 +5,7 @@
 // ============================================================================
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   TrendingUp,
   TrendingDown,
@@ -138,9 +139,12 @@ const formatMAD = (value: number): string => `${Math.round(value).toLocaleString
 export const AnalyticsPage: React.FC = () => {
   const { lang, isRTL } = useLanguage();
   const { user, profile, isSuperAdmin, isImpersonating } = useAuth();
+  const [searchParams] = useSearchParams();
 
   const [period, setPeriod] = useState<PeriodFilter>('this_month');
-  const [selectedMachineFilter, setSelectedMachineFilter] = useState<string>('all');
+  const [selectedMachineFilter, setSelectedMachineFilter] = useState<string>(
+    () => searchParams.get('machine') || 'all'
+  );
   const [chartKind, setChartKind] = useState<ChartKind>('area');
   const [ledgerTab, setLedgerTab] = useState<LedgerTab>('bookings');
   const [confirmDeleteExpenseId, setConfirmDeleteExpenseId] = useState<string | null>(null);

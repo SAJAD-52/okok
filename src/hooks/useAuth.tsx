@@ -181,7 +181,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const isLifetimeVip = isLifetimeFreePhone(mergedPhone);
       const lifetimeEnd = '2099-12-31T23:59:59.000Z';
 
-      if (isLifetimeVip && (data as any)?.subscription_status !== 'active') {
+      // Auto-heal oversized base64/data URLs previously stored in auth user_metadata (prevents JWT > 16KB gateway errors)
+      try {
+        const cleanFlagKey = `jadijcb_meta_cleaned_${userId}`;
+        const hasBloatedAvatar =
+          typeof meta?.avatar_url === 'string' &&
+          (meta.avatar_url.startsWith('data:') || meta.avatar_url.length > 1500);
+        const sf = meta?.storefront;
+        const hasBloatedSfBanner =
+          typeof sf?.banner_url === 'string' &&
+          (sf.banner_url.startsWith('data:') || sf.banner_url.length > 1500);
+        const hasBloatedSfAvatar =
+          typeof sf?.avatar_url === 'string' &&
+          (sf.avatar_url.startsWith('data:') || sf.avatar_url.length > 1500);
+
+        if ((hasBloatedAvatar || hasBloatedSfBanner || hasBloatedSfAvatar) && !sessionStorage.getItem(cleanFlagKey)) {
+          sessionStorage.setItem(cleanFlagKey, '1');
+          const patchData: Record<string, any> = {};
+          if (hasBloatedAvatar) patchData.avatar_url = null;
+          if (hasBloatedSfBanner || hasBloatedSfAvatar) {
+            patchData.storefront = {
+              ...sf,
+              banner_url: hasBloatedSfBanner ? '' : sf.banner_url,
+              avatar_url: hasBloatedSfAvatar ? '' : sf.avatar_url,
+            };
+          }
+          supabase.auth.updateUser({ data: patchData }).then(
+            () => supabase.auth.refreshSession().catch(() => {}),
+            () => {}
+          );
+        }
+      } catch {
+        // Ignore cleanup errors
+      }
+
+      if (data && isLifetimeVip && (data as any)?.subscription_status !== 'active') {
         supabase
           .from('profiles')
           .update({
@@ -839,13 +873,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         dbPayload.phone_number = updates.phone;
       }
 
-      // 2. Update Supabase auth user_metadata with ALL fields
+      // 2. Update Supabase auth user_metadata with lightweight fields only (never embed base64/data URLs in JWT)
       try {
-        await supabase.auth.updateUser({
-          data: {
-            ...updates,
-          },
-        });
+        const metaUpdates: Record<string, any> = {};
+        for (const [k, v] of Object.entries(updates)) {
+          if (v === undefined) continue;
+          if (typeof v === 'string' && (v.startsWith('data:') || v.length > 1500)) {
+            continue;
+          }
+          metaUpdates[k] = v;
+        }
+        if (Object.keys(metaUpdates).length > 0) {
+          await supabase.auth.updateUser({
+            data: metaUpdates,
+          });
+        }
       } catch (authMetaErr) {
         console.warn('Could not update auth user_metadata:', authMetaErr);
       }

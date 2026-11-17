@@ -257,11 +257,21 @@ export async function saveStorefrontData(
     console.warn('LocalStorage save notice:', err);
   }
 
-  // 2. Save in Supabase Auth user_metadata (Cloud persistent across sessions)
+  // 2. Save lightweight storefront metadata in Supabase Auth user_metadata (NEVER embed base64/data URIs in JWT)
   try {
+    const safeUrl = (u?: string | null) => {
+      if (!u) return '';
+      const s = String(u).trim();
+      return s.startsWith('data:') || s.length > 1000 ? '' : s;
+    };
+    const metaSafeStorefront: StorefrontData = {
+      ...payload,
+      banner_url: safeUrl(payload.banner_url),
+      avatar_url: safeUrl(payload.avatar_url),
+    };
     await supabase.auth.updateUser({
       data: {
-        storefront: payload,
+        storefront: metaSafeStorefront,
         storefront_slug: payload.slug,
       },
     });

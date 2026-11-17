@@ -23,10 +23,12 @@ export const paymentService = {
     return [];
   },
 
-  saveLocalPayments(payments: BookingPayment[]) {
+  saveLocalPayments(payments: BookingPayment[], emitEvent: boolean = true) {
     try {
       localStorage.setItem(LOCAL_PAYMENTS_KEY, JSON.stringify(payments));
-      window.dispatchEvent(new CustomEvent('jadijcb_payments_updated', { detail: payments }));
+      if (emitEvent) {
+        window.dispatchEvent(new CustomEvent('jadijcb_payments_updated', { detail: payments }));
+      }
     } catch {
       // Ignore
     }
@@ -62,7 +64,7 @@ export const paymentService = {
 
           // Update storage with all
           const allOther = this.getLocalPayments().filter((p) => p.owner_id !== ownerId);
-          this.saveLocalPayments([...allOther, ...payments]);
+          this.saveLocalPayments([...allOther, ...payments], false);
         }
       } catch (err) {
         console.warn('Failed to load booking payments from DB:', err);

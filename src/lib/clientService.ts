@@ -19,10 +19,12 @@ export const clientService = {
     return [];
   },
 
-  saveLocalClients(ownerId: string, clients: Client[]) {
+  saveLocalClients(ownerId: string, clients: Client[], emitEvent: boolean = true) {
     try {
       localStorage.setItem(`${LOCAL_CLIENTS_KEY}_${ownerId}`, JSON.stringify(clients));
-      window.dispatchEvent(new CustomEvent('jadijcb_clients_updated', { detail: { ownerId, clients } }));
+      if (emitEvent) {
+        window.dispatchEvent(new CustomEvent('jadijcb_clients_updated', { detail: { ownerId, clients } }));
+      }
     } catch {
       // Ignore
     }
@@ -57,7 +59,7 @@ export const clientService = {
           for (const c of clients) map.set(c.id, c);
           for (const c of dbClients) map.set(c.id, c);
           clients = Array.from(map.values());
-          this.saveLocalClients(ownerId, clients);
+          this.saveLocalClients(ownerId, clients, false);
         }
       } catch (err) {
         console.warn('Failed to load clients from DB:', err);

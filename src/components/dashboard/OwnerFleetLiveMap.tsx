@@ -8,7 +8,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { MapContainer, TileLayer, Marker, Tooltip, useMap, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, CircleMarker, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import {
   MapPin,
@@ -167,7 +167,7 @@ function resolveCityCoordinates(machine: Machine): { lat: number; lng: number; c
   };
 }
 
-function createFleetMarkerIcon(item: MachineTelemetry, isActive: boolean, lang: 'ar' | 'fr') {
+function createFleetMarkerIcon(item: MachineTelemetry, lang: 'ar' | 'fr') {
   const palette =
     item.statusKey === 'overdue'
       ? { bg: '#DC2626', border: '#FEE2E2', text: '#FFFFFF', pill: lang === 'fr' ? 'Retard' : 'متأخرة' }
@@ -182,11 +182,6 @@ function createFleetMarkerIcon(item: MachineTelemetry, isActive: boolean, lang: 
     : item.machine.title_ar || item.machine.title_fr || `${item.machine.brand} ${item.machine.model}`
   ).slice(0, 18);
 
-  const scale = isActive ? 'transform: scale(1.12);' : '';
-  const ring = isActive
-    ? 'box-shadow: 0 0 0 6px rgba(255,180,0,0.35), 0 8px 20px rgba(0,0,0,0.45);'
-    : 'box-shadow: 0 6px 16px rgba(15,23,42,0.38);';
-
   return L.divIcon({
     className: 'jadijcb-fleet-pin',
     html: `
@@ -195,8 +190,6 @@ function createFleetMarkerIcon(item: MachineTelemetry, isActive: boolean, lang: 
         flex-direction: column;
         align-items: center;
         cursor: pointer;
-        transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
-        ${scale}
       ">
         <div style="
           display: inline-flex;
@@ -209,7 +202,7 @@ function createFleetMarkerIcon(item: MachineTelemetry, isActive: boolean, lang: 
           padding: 4px 8px;
           font-family: 'Cairo', 'Plus Jakarta Sans', sans-serif;
           white-space: nowrap;
-          ${ring}
+          box-shadow: 0 6px 16px rgba(15,23,42,0.38);
         ">
           <span style="
             font-size: 11px;
@@ -255,12 +248,15 @@ function MapViewportController({
 }) {
   const map = useMap();
   const hasFittedInitial = useRef(false);
+  const lastFitTriggerRef = useRef(0);
 
-  // Fit all owner machines nicely on initial render or reset
+  // Fit all owner machines nicely on initial render or explicit reset click
   useEffect(() => {
     if (items.length === 0) return;
-    if (!hasFittedInitial.current || fitTrigger > 0) {
+    const isExplicitReset = fitTrigger !== lastFitTriggerRef.current;
+    if (!hasFittedInitial.current || isExplicitReset) {
       hasFittedInitial.current = true;
+      lastFitTriggerRef.current = fitTrigger;
       if (items.length === 1) {
         map.flyTo([items[0].lat, items[0].lng], 11, { duration: 0.9 });
       } else {
@@ -693,6 +689,14 @@ export const OwnerFleetLiveMap: React.FC<OwnerFleetLiveMapProps> = ({
     };
   }, [fleetTelemetry]);
 
+  const markerIconsMap = useMemo(() => {
+    const map = new Map<string, L.DivIcon>();
+    for (const item of filteredItems) {
+      map.set(item.machine.id, createFleetMarkerIcon(item, lang));
+    }
+    return map;
+  }, [filteredItems, lang]);
+
   const activeItemId = lockedId || hoveredId;
   const activeItem = useMemo(
     () => fleetTelemetry.find((i) => i.machine.id === activeItemId) || null,
@@ -909,13 +913,30 @@ export const OwnerFleetLiveMap: React.FC<OwnerFleetLiveMapProps> = ({
             }}
           />
 
+          {activeItem && (
+            <CircleMarker
+              center={[activeItem.lat, activeItem.lng]}
+              radius={24}
+              pathOptions={{
+                color: '#FFB400',
+                weight: 3,
+                fillColor: '#FFB400',
+                fillOpacity: 0.22,
+              }}
+              interactive={false}
+            />
+          )}
+
           {filteredItems.map((item) => {
             const isSelected = activeItemId === item.machine.id;
+            const icon = markerIconsMap.get(item.machine.id);
+            if (!icon) return null;
             return (
               <Marker
                 key={item.machine.id}
                 position={[item.lat, item.lng]}
-                icon={createFleetMarkerIcon(item, isSelected, lang)}
+                icon={icon}
+                zIndexOffset={isSelected ? 600 : 0}
                 eventHandlers={{
                   mouseover: () => {
                     cancelHoverClose();
@@ -931,13 +952,7 @@ export const OwnerFleetLiveMap: React.FC<OwnerFleetLiveMapProps> = ({
                     setEditingDriverId(null);
                   },
                 }}
-              >
-                <Tooltip direction="top" offset={[0, -34]} opacity={0.95}>
-                  <span className="font-bold text-[11px]">
-                    {item.locationLabel} · {item.remainingCompact}
-                  </span>
-                </Tooltip>
-              </Marker>
+              />
             );
           })}
         </MapContainer>
@@ -949,7 +964,7 @@ export const OwnerFleetLiveMap: React.FC<OwnerFleetLiveMapProps> = ({
             onMouseLeave={() => {
               if (!lockedId) scheduleHoverClose(activeItem.machine.id);
             }}
-            className="absolute z-[450] bottom-3 inset-x-3 md:inset-x-auto md:top-3 md:bottom-auto md:end-3 md:w-[410px] max-h-[calc(100%-24px)] overflow-y-auto rounded-2xl bg-[#0B1220]/96 backdrop-blur-md text-white border border-primary/45 shadow-2xl p-4 space-y-3.5 text-start animate-in fade-in duration-150"
+            className="absolute z-[450] bottom-3 inset-x-3 md:inset-x-auto md:top-3 md:bottom-auto md:end-3 md:w-[410px] max-h-[calc(100%-24px)] overflow-y-auto rounded-2xl bg-[#0B1220]/96 backdrop-blur-md text-white border border-primary/45 shadow-2xl p-4 space-y-3.5 text-start"
           >
             {/* Card Header: Photo + Machine Title + Status + Close */}
             <div className="flex items-start justify-between gap-3 pb-3 border-b border-white/10">

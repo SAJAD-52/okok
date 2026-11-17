@@ -24,10 +24,12 @@ export const documentService = {
     return [];
   },
 
-  saveLocalDocuments(docs: DocumentRecord[]) {
+  saveLocalDocuments(docs: DocumentRecord[], emitEvent: boolean = true) {
     try {
       localStorage.setItem(LOCAL_DOCS_KEY, JSON.stringify(docs));
-      window.dispatchEvent(new CustomEvent('jadijcb_documents_updated', { detail: docs }));
+      if (emitEvent) {
+        window.dispatchEvent(new CustomEvent('jadijcb_documents_updated', { detail: docs }));
+      }
     } catch {
       // Ignore
     }
@@ -62,7 +64,7 @@ export const documentService = {
           docs = Array.from(map.values());
 
           const otherDocs = this.getLocalDocuments().filter((d) => d.owner_id !== ownerId);
-          this.saveLocalDocuments([...otherDocs, ...docs]);
+          this.saveLocalDocuments([...otherDocs, ...docs], false);
         }
       } catch (err) {
         console.warn('Failed to load documents from DB:', err);

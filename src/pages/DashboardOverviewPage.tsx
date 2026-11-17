@@ -66,7 +66,7 @@ import { mapDatabaseError } from '../lib/errorHelpers';
 export const DashboardOverviewPage: React.FC = () => {
   const { t, lang, isRTL } = useLanguage();
   const navigate = useNavigate();
-  const { profile, user, isSuperAdmin } = useAuth();
+  const { profile, user, isSuperAdmin, isImpersonating } = useAuth();
   const { isInstallable, promptInstall } = usePwaInstall();
 
   const [isAddMachineModalOpen, setIsAddMachineModalOpen] = useState(false);
@@ -84,7 +84,7 @@ export const DashboardOverviewPage: React.FC = () => {
   const [hasBusinessProfile, setHasBusinessProfile] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  const userId = user?.id || profile?.id;
+  const userId = isImpersonating ? profile?.id : user?.id || profile?.id;
 
   // Throttled heartbeat activity ping
   useEffect(() => {
@@ -98,8 +98,11 @@ export const DashboardOverviewPage: React.FC = () => {
     }
   }, [profile, navigate]);
 
-  // Load live data
+  // Load live data with single-flight protection so rapid events never collide or flash stale cache
   const initialLoadedRef = useRef(false);
+  const inFlightRef = useRef(false);
+  const queuedReloadRef = useRef(false);
+  const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadDashboardData = useCallback(async (silent: boolean = false) => {
     if (!userId) {
@@ -107,6 +110,12 @@ export const DashboardOverviewPage: React.FC = () => {
       return;
     }
 
+    if (inFlightRef.current) {
+      queuedReloadRef.current = true;
+      return;
+    }
+
+    inFlightRef.current = true;
     if (!silent && !initialLoadedRef.current) {
       setIsLoading(true);
     }
@@ -114,66 +123,78 @@ export const DashboardOverviewPage: React.FC = () => {
     try {
       // 1. Machines (full fields including lat/lng, city, category, operator)
       let mList: Machine[] = [];
+      let machinesDbOk = !isSupabaseConfigured;
       if (isSupabaseConfigured) {
-        const { data: mData } = await supabase
-          .from('machines')
-          .select('*')
-          .eq('owner_id', userId);
-        if (mData) {
-          mList = mData.map((m: any) => ({
-            id: m.id,
-            owner_id: m.owner_id,
-            title_ar: m.title_ar,
-            title_fr: m.title_fr,
-            description_ar: m.description_ar || '',
-            description_fr: m.description_fr || '',
-            category: m.category,
-            category_id: m.category_id || m.category,
-            brand: m.brand || '',
-            model: m.model || '',
-            year: m.year || new Date().getFullYear(),
-            listing_mode: m.listing_mode || 'rent',
-            condition: m.condition || 'good',
-            city: m.city || '',
-            city_id: m.city_id || m.city || '',
-            lat: m.lat != null ? Number(m.lat) : undefined,
-            lng: m.lng != null ? Number(m.lng) : undefined,
-            location_lat: Number(m.location_lat ?? m.lat ?? 0),
-            location_lng: Number(m.location_lng ?? m.lng ?? 0),
-            daily_rate: Number(m.daily_rate ?? m.rate_daily) || 2000,
-            rate_daily: Number(m.rate_daily ?? m.daily_rate) || 2000,
-            rate_hourly: Number(m.rate_hourly ?? m.hourly_rate) || 0,
-            rate_weekly: Number(m.rate_weekly ?? m.weekly_rate) || 0,
-            with_operator: Boolean(m.with_operator ?? true),
-            fuel_included: Boolean(m.fuel_included),
-            delivery_available: Boolean(m.delivery_available),
-            status: m.is_published === false ? 'inactive' : m.status || 'available',
-            is_published: m.is_published ?? true,
-            images: m.images || [],
-            specs: m.specs || {},
-          } as Machine));
+        try {
+          const { data: mData, error: mErr } = await supabase
+            .from('machines')
+            .select('*')
+            .eq('owner_id', userId);
+          if (!mErr && mData) {
+            machinesDbOk = true;
+            mList = mData.map((m: any) => ({
+              id: m.id,
+              owner_id: m.owner_id,
+              title_ar: m.title_ar,
+              title_fr: m.title_fr,
+              description_ar: m.description_ar || '',
+              description_fr: m.description_fr || '',
+              category: m.category,
+              category_id: m.category_id || m.category,
+              brand: m.brand || '',
+              model: m.model || '',
+              year: m.year || new Date().getFullYear(),
+              listing_mode: m.listing_mode || 'rent',
+              condition: m.condition || 'good',
+              city: m.city || '',
+              city_id: m.city_id || m.city || '',
+              lat: m.lat != null ? Number(m.lat) : undefined,
+              lng: m.lng != null ? Number(m.lng) : undefined,
+              location_lat: Number(m.location_lat ?? m.lat ?? 0),
+              location_lng: Number(m.location_lng ?? m.lng ?? 0),
+              daily_rate: Number(m.daily_rate ?? m.rate_daily) || 2000,
+              rate_daily: Number(m.rate_daily ?? m.daily_rate) || 2000,
+              rate_hourly: Number(m.rate_hourly ?? m.hourly_rate) || 0,
+              rate_weekly: Number(m.rate_weekly ?? m.weekly_rate) || 0,
+              with_operator: Boolean(m.with_operator ?? true),
+              fuel_included: Boolean(m.fuel_included),
+              delivery_available: Boolean(m.delivery_available),
+              status: m.is_published === false ? 'inactive' : m.status || 'available',
+              is_published: m.is_published ?? true,
+              images: m.images || [],
+              specs: m.specs || {},
+            } as Machine));
+          }
+        } catch (mEx) {
+          console.warn('Dashboard machines load exception:', mEx);
         }
       }
+
       const realMachines = machineStore.mergeMachines(mList, userId);
-      setMachines(realMachines);
+      if (machinesDbOk || !initialLoadedRef.current) {
+        setMachines(realMachines);
+      }
 
       // 2. Bookings (Matches owner_id OR machine ownership directly from Supabase + local cache)
       let bList: Booking[] = [];
+      let bookingsDbOk = !isSupabaseConfigured;
       const ownerMachineIds = realMachines.map((m) => m.id).filter(Boolean);
 
       if (isSupabaseConfigured) {
         try {
           const fetchedMap = new Map<string, any>();
 
-          if (isSuperAdmin) {
+          if (isSuperAdmin && !isImpersonating) {
             const { data: allData, error: allErr } = await supabase
               .from('bookings')
               .select('*')
               .order('start_at', { ascending: false });
             if (!allErr && allData) {
+              bookingsDbOk = true;
               for (const row of allData) fetchedMap.set(row.id, row);
             }
           } else {
+            let ownerQueryOk = !userId;
             if (userId) {
               const { data: ownerData, error: ownerErr } = await supabase
                 .from('bookings')
@@ -181,10 +202,12 @@ export const DashboardOverviewPage: React.FC = () => {
                 .eq('owner_id', userId)
                 .order('start_at', { ascending: false });
               if (!ownerErr && ownerData) {
+                ownerQueryOk = true;
                 for (const row of ownerData) fetchedMap.set(row.id, row);
               }
             }
 
+            let machineQueryOk = ownerMachineIds.length === 0;
             if (ownerMachineIds.length > 0) {
               const { data: machineData, error: mErr } = await supabase
                 .from('bookings')
@@ -192,9 +215,12 @@ export const DashboardOverviewPage: React.FC = () => {
                 .in('machine_id', ownerMachineIds)
                 .order('start_at', { ascending: false });
               if (!mErr && machineData) {
+                machineQueryOk = true;
                 for (const row of machineData) fetchedMap.set(row.id, row);
               }
             }
+
+            bookingsDbOk = ownerQueryOk && machineQueryOk;
           }
 
           if (fetchedMap.size > 0) {
@@ -229,14 +255,16 @@ export const DashboardOverviewPage: React.FC = () => {
         }
       }
 
-      const mergedBookings = bookingStore.mergeOwnerBookings(
-        bList,
-        userId,
-        ownerMachineIds,
-        isSuperAdmin
-      );
+      if (bookingsDbOk || !initialLoadedRef.current) {
+        const mergedBookings = bookingStore.mergeOwnerBookings(
+          bList,
+          userId,
+          ownerMachineIds,
+          Boolean(isSuperAdmin && !isImpersonating)
+        );
+        setBookings(mergedBookings);
+      }
 
-      setBookings(mergedBookings);
       initialLoadedRef.current = true;
 
       // 3. Machine Expenses, Accepted Driver Offers, Leads, Documents & Business Profile
@@ -256,22 +284,36 @@ export const DashboardOverviewPage: React.FC = () => {
     } catch (err) {
       console.warn('Dashboard load notice:', err);
     } finally {
+      inFlightRef.current = false;
       setIsLoading(false);
+      if (queuedReloadRef.current) {
+        queuedReloadRef.current = false;
+        setTimeout(() => {
+          loadDashboardData(true);
+        }, 120);
+      }
     }
-  }, [userId, isSuperAdmin]);
+  }, [userId, isSuperAdmin, isImpersonating]);
 
   useEffect(() => {
     loadDashboardData(false);
 
-    const handleUpdate = () => loadDashboardData(true);
-    window.addEventListener('jadijcb_machines_updated', handleUpdate);
-    window.addEventListener('jadijcb_booking_event', handleUpdate);
-    window.addEventListener('jadijcb_expense_event', handleUpdate);
-    window.addEventListener('jadijcb_expenses_updated', handleUpdate);
-    window.addEventListener('jadijcb_driver_offers_updated', handleUpdate);
-    window.addEventListener('jadijcb_leads_updated', handleUpdate);
-    window.addEventListener('jadijcb_documents_updated', handleUpdate);
-    window.addEventListener('jadijcb_business_profile_updated', handleUpdate);
+    const scheduleSilentUpdate = () => {
+      if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+      reloadTimerRef.current = setTimeout(() => {
+        loadDashboardData(true);
+      }, 250);
+    };
+
+    window.addEventListener('jadijcb_machines_updated', scheduleSilentUpdate);
+    window.addEventListener('jadijcb_booking_event', scheduleSilentUpdate);
+    window.addEventListener('jadijcb_bookings_updated', scheduleSilentUpdate);
+    window.addEventListener('jadijcb_expense_event', scheduleSilentUpdate);
+    window.addEventListener('jadijcb_expenses_updated', scheduleSilentUpdate);
+    window.addEventListener('jadijcb_driver_offers_updated', scheduleSilentUpdate);
+    window.addEventListener('jadijcb_leads_updated', scheduleSilentUpdate);
+    window.addEventListener('jadijcb_documents_updated', scheduleSilentUpdate);
+    window.addEventListener('jadijcb_business_profile_updated', scheduleSilentUpdate);
 
     // Cross-tab storage updates
     const handleStorage = (e: StorageEvent) => {
@@ -281,7 +323,7 @@ export const DashboardOverviewPage: React.FC = () => {
         e.key === 'jadijcb_user_machines' ||
         e.key === 'jadijcb_machine_expenses'
       ) {
-        loadDashboardData(true);
+        scheduleSilentUpdate();
       }
     };
     window.addEventListener('storage', handleStorage);
@@ -292,19 +334,21 @@ export const DashboardOverviewPage: React.FC = () => {
     }, 30000);
 
     const onVisible = () => {
-      if (document.visibilityState === 'visible') loadDashboardData(true);
+      if (document.visibilityState === 'visible') scheduleSilentUpdate();
     };
     document.addEventListener('visibilitychange', onVisible);
 
     return () => {
-      window.removeEventListener('jadijcb_machines_updated', handleUpdate);
-      window.removeEventListener('jadijcb_booking_event', handleUpdate);
-      window.removeEventListener('jadijcb_expense_event', handleUpdate);
-      window.removeEventListener('jadijcb_expenses_updated', handleUpdate);
-      window.removeEventListener('jadijcb_driver_offers_updated', handleUpdate);
-      window.removeEventListener('jadijcb_leads_updated', handleUpdate);
-      window.removeEventListener('jadijcb_documents_updated', handleUpdate);
-      window.removeEventListener('jadijcb_business_profile_updated', handleUpdate);
+      if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+      window.removeEventListener('jadijcb_machines_updated', scheduleSilentUpdate);
+      window.removeEventListener('jadijcb_booking_event', scheduleSilentUpdate);
+      window.removeEventListener('jadijcb_bookings_updated', scheduleSilentUpdate);
+      window.removeEventListener('jadijcb_expense_event', scheduleSilentUpdate);
+      window.removeEventListener('jadijcb_expenses_updated', scheduleSilentUpdate);
+      window.removeEventListener('jadijcb_driver_offers_updated', scheduleSilentUpdate);
+      window.removeEventListener('jadijcb_leads_updated', scheduleSilentUpdate);
+      window.removeEventListener('jadijcb_documents_updated', scheduleSilentUpdate);
+      window.removeEventListener('jadijcb_business_profile_updated', scheduleSilentUpdate);
       window.removeEventListener('storage', handleStorage);
       clearInterval(pollInterval);
       document.removeEventListener('visibilitychange', onVisible);
@@ -384,12 +428,17 @@ export const DashboardOverviewPage: React.FC = () => {
     toast.info(lang === 'fr' ? 'Demande de location refusée' : 'تم رفض وإلغاء طلب الحجز');
   };
 
-  // Operational metrics for "اليوم"
-  const now = new Date();
+  // Operational metrics for "اليوم" (stable minute-level clock so renders don't churn useMemo)
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const tmr = setInterval(() => setNowMs(Date.now()), 60000);
+    return () => clearInterval(tmr);
+  }, []);
+  const now = useMemo(() => new Date(nowMs), [nowMs]);
   const todayStr = now.toISOString().slice(0, 10);
-  const tomorrow = new Date(now.getTime() + 24 * 3600 * 1000);
+  const tomorrow = useMemo(() => new Date(nowMs + 24 * 3600 * 1000), [nowMs]);
   const tomorrowStr = tomorrow.toISOString().slice(0, 10);
-  const sevenDaysLater = new Date(now.getTime() + 7 * 24 * 3600 * 1000);
+  const sevenDaysLater = useMemo(() => new Date(nowMs + 7 * 24 * 3600 * 1000), [nowMs]);
 
   // 1. Overdue Returns
   const overdueBookings = useMemo(() => {

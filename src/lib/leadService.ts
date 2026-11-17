@@ -23,10 +23,12 @@ export const leadService = {
     return [];
   },
 
-  saveLocalLeads(leads: Lead[]) {
+  saveLocalLeads(leads: Lead[], emitEvent: boolean = true) {
     try {
       localStorage.setItem(LOCAL_LEADS_KEY, JSON.stringify(leads));
-      window.dispatchEvent(new CustomEvent('jadijcb_leads_updated', { detail: leads }));
+      if (emitEvent) {
+        window.dispatchEvent(new CustomEvent('jadijcb_leads_updated', { detail: leads }));
+      }
     } catch {
       // Ignore
     }
@@ -66,7 +68,7 @@ export const leadService = {
           leads = Array.from(map.values());
 
           const otherLeads = this.getLocalLeads().filter((l) => l.owner_id !== ownerId);
-          this.saveLocalLeads([...otherLeads, ...leads]);
+          this.saveLocalLeads([...otherLeads, ...leads], false);
         }
       } catch (err) {
         console.warn('Failed to load leads from DB:', err);

@@ -31,10 +31,12 @@ export const businessService = {
     return null;
   },
 
-  saveLocalProfile(profile: BusinessProfile) {
+  saveLocalProfile(profile: BusinessProfile, emitEvent: boolean = true) {
     try {
       localStorage.setItem(`${LOCAL_BIZ_KEY}_${profile.owner_id}`, JSON.stringify(profile));
-      window.dispatchEvent(new CustomEvent('jadijcb_business_profile_updated', { detail: profile }));
+      if (emitEvent) {
+        window.dispatchEvent(new CustomEvent('jadijcb_business_profile_updated', { detail: profile }));
+      }
     } catch {
       // Ignore
     }
@@ -71,7 +73,7 @@ export const businessService = {
             created_at: data.created_at,
             updated_at: data.updated_at,
           };
-          this.saveLocalProfile(loaded);
+          this.saveLocalProfile(loaded, false);
           return loaded;
         }
       } catch (err) {

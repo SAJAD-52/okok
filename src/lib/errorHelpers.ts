@@ -2,10 +2,23 @@
 // JADIJCB: Supabase Error Mapping Helper
 // ============================================================================
 
+import { isSupabaseConfigured } from './supabase';
+
 export function mapDatabaseError(error: any): string {
   if (!error) return 'common.error';
   const raw = typeof error === 'string' ? error : error.message || error.details || '';
   const lower = raw.toLowerCase();
+
+  // 0. Network / Unreachable Supabase / Missing env configuration
+  if (
+    lower.includes('failed to fetch') ||
+    lower.includes('networkerror') ||
+    lower.includes('load failed') ||
+    lower.includes('network request failed') ||
+    lower.includes('err_name_not_resolved')
+  ) {
+    return isSupabaseConfigured ? 'auth.network_error' : 'auth.supabase_not_configured';
+  }
 
   // 1. Soft-Lock / RLS write restriction mapping
   if (

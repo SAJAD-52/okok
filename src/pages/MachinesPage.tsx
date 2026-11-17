@@ -93,19 +93,20 @@ export const MachinesPage: React.FC = () => {
     let mapped: Machine[] = [];
 
     try {
-      const { data, error } = await supabase
-        .from('machines')
-        .select('*')
-        .eq('owner_id', user.id)
-        .order('created_at', { ascending: false });
+      if (isSupabaseConfigured) {
+        const { data, error } = await supabase
+          .from('machines')
+          .select('*')
+          .eq('owner_id', user.id)
+          .order('created_at', { ascending: false });
 
-      if (error) {
-        setIsError(true);
-        toast.error(t(mapDatabaseError(error)));
-        return;
-      }
+        if (error) {
+          setIsError(true);
+          toast.error(t(mapDatabaseError(error)));
+          return;
+        }
 
-      if (data) {
+        if (data) {
         mapped = data.map((m: any) => ({
           id: m.id,
           owner_id: m.owner_id,
@@ -147,6 +148,7 @@ export const MachinesPage: React.FC = () => {
           created_at: m.created_at,
           updated_at: m.created_at,
         }));
+        }
       }
     } catch (err: any) {
       console.warn('Machines load notice:', err);

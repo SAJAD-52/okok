@@ -200,6 +200,13 @@ export const MarketplacePage: React.FC = () => {
 
         if (error) {
           console.warn('Marketplace query failed:', error.message);
+          const cachedFallback = machineStore.mergeMachines([]);
+          if (cachedFallback.length > 0) {
+            setMachines(cachedFallback);
+            setTotalRemoteCount(cachedFallback.length);
+            setIsLoading(false);
+            return;
+          }
           setIsError(true);
           setIsLoading(false);
           return;
@@ -211,6 +218,13 @@ export const MarketplacePage: React.FC = () => {
         }
       } catch (err) {
         console.warn('Marketplace load error:', err);
+        const cachedFallback = machineStore.mergeMachines([]);
+        if (cachedFallback.length > 0) {
+          setMachines(cachedFallback);
+          setTotalRemoteCount(cachedFallback.length);
+          setIsLoading(false);
+          return;
+        }
         setIsError(true);
         setIsLoading(false);
         return;

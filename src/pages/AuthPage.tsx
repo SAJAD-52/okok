@@ -115,29 +115,39 @@ export const AuthPage: React.FC = () => {
 
     setIsLoading(true);
 
-    if (mode === 'login') {
-      const res = await loginWithPhone(phone, password);
-      setIsLoading(false);
+    try {
+      if (mode === 'login') {
+        const res = await loginWithPhone(phone, password);
 
-      if (res.success) {
-        toast.success(
-          lang === 'fr' ? 'Connexion réussie !' : 'تم تسجيل الدخول بنجاح!'
-        );
-        const actualRole = res.role || profile?.role;
-        if (actualRole === 'admin' || isSuperAdmin) {
-          navigate('/admin');
-          return;
+        if (res.success) {
+          toast.success(
+            lang === 'fr' ? 'Connexion réussie !' : 'تم تسجيل الدخول بنجاح!'
+          );
+          const actualRole = res.role || profile?.role;
+          if (actualRole === 'admin' || isSuperAdmin) {
+            navigate('/admin');
+            return;
+          }
+          if (actualRole === 'driver') {
+            navigate('/driver');
+            return;
+          }
+          const isClient = actualRole === 'client' || actualRole === 'contractor';
+          navigate(isClient ? '/entreprise' : '/owner');
+        } else {
+          toast.error(t(res.error || 'auth.auth_failed'));
         }
-        if (actualRole === 'driver') {
-          navigate('/driver');
-          return;
-        }
-        const isClient = actualRole === 'client' || actualRole === 'contractor';
-        navigate(isClient ? '/entreprise' : '/owner');
-      } else {
-        toast.error(t(res.error || 'auth.auth_failed'));
+        return;
       }
-    } else {
+    } catch {
+      toast.error(t('auth.network_error'));
+      return;
+    } finally {
+      setIsLoading(false);
+    }
+
+    if (mode === 'register') {
+      setIsLoading(true);
       // Register Mode
       if (role === 'owner') {
         if (!fullName.trim()) {

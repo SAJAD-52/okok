@@ -3,7 +3,7 @@
 // ============================================================================
 
 import React, { useState, useEffect, useCallback, createContext, useContext } from 'react';
-import { supabase } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { normalizeMoroccanPhone, phoneToSyntheticEmail } from '../lib/authHelpers';
 import { isLifetimeFreePhone } from '../lib/constants';
 import { mapDatabaseError } from '../lib/errorHelpers';
@@ -135,25 +135,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const fetchProfile = useCallback(async (userId: string): Promise<UserProfile | null> => {
+  const fetchProfile = useCallback(async (userId: string, knownUser?: any): Promise<UserProfile | null> => {
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
+      const { data, error } = isSupabaseConfigured
+        ? await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', userId)
+            .maybeSingle()
+        : { data: null, error: null };
 
       if (error) {
         console.warn('Failed to fetch profile from Supabase:', error.message);
       }
 
-      // Also read auth metadata to retrieve non-DB fields (ice_number, onboarding_completed, etc.)
-      let meta: any = {};
-      try {
-        const { data: userData } = await supabase.auth.getUser();
-        meta = userData?.user?.user_metadata || {};
-      } catch {
-        // Ignore
+      // Use provided auth user metadata first to avoid extra redundant network call on login
+      let meta: any = knownUser?.user_metadata || {};
+      if (Object.keys(meta).length === 0 && isSupabaseConfigured) {
+        try {
+          const { data: userData } = await supabase.auth.getUser();
+          meta = userData?.user?.user_metadata || {};
+        } catch {
+          // Ignore
+        }
       }
 
       // Also check local stored profile for fallback
@@ -265,8 +269,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
+    let authSubscription: { unsubscribe: () => void } | null = null;
 
     async function initAuth() {
+      if (!isSupabaseConfigured) {
+        if (mounted) {
+          setUser(null);
+          setProfile(null);
+          setIsLoading(false);
+        }
+        return;
+      }
+
       try {
         const {
           data: { session },
@@ -274,7 +288,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (session?.user && mounted) {
           setUser(session.user);
-          await fetchProfile(session.user.id);
+          await fetchProfile(session.user.id, session.user);
         } else if (mounted) {
           setUser(null);
           setProfile(null);
@@ -286,12 +300,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (mounted) setIsLoading(false);
       }
 
+      if (!mounted) return;
       const { data: authListener } = supabase.auth.onAuthStateChange(
         async (_event, session) => {
           if (!mounted) return;
           if (session?.user) {
             setUser(session.user);
-            await fetchProfile(session.user.id);
+            await fetchProfile(session.user.id, session.user);
           } else {
             setUser(null);
             setProfile(null);
@@ -299,16 +314,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
       );
-
-      return () => {
-        authListener.subscription.unsubscribe();
-      };
+      authSubscription = authListener?.subscription || null;
     }
 
     initAuth();
 
     return () => {
       mounted = false;
+      authSubscription?.unsubscribe();
     };
   }, [fetchProfile]);
 
@@ -316,6 +329,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     rawPhone: string,
     pass: string
   ): Promise<{ success: boolean; error?: string; role?: UserRole }> => {
+    if (!isSupabaseConfigured) {
+      return { success: false, error: 'auth.supabase_not_configured' };
+    }
+
     setIsLoading(true);
 
     const norm = normalizeMoroccanPhone(rawPhone);
@@ -339,7 +356,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (data?.user) {
         setUser(data.user);
-        let prof = await fetchProfile(data.user.id);
+        let prof = await fetchProfile(data.user.id, data.user);
         if (!prof) {
           const isVipSignup = isLifetimeFreePhone(norm.e164);
           const fallbackPayload: any = {
@@ -393,6 +410,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     customEmail = SUPER_ADMIN_EMAIL,
     pass?: string
   ): Promise<{ success: boolean; error?: string; role?: UserRole }> => {
+    if (!isSupabaseConfigured) {
+      return { success: false, error: 'auth.supabase_not_configured' };
+    }
+
     setIsLoading(true);
     const email = customEmail.trim().toLowerCase().replace('٠', '0');
 
@@ -431,7 +452,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isSuperAdminEmail(data.user.email) || existingProf?.role === 'admin';
 
       if (!hasAdminPrivilege) {
-        await supabase.auth.signOut();
+        await supabase.auth.signOut({ scope: 'local' });
         setIsLoading(false);
         return { success: false, error: 'auth.invalid_credentials' };
       }
@@ -467,6 +488,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     rawEmail: string,
     pass: string
   ): Promise<{ success: boolean; error?: string; role?: UserRole }> => {
+    if (!isSupabaseConfigured) {
+      return { success: false, error: 'auth.supabase_not_configured' };
+    }
+
     setIsLoading(true);
     const email = rawEmail.trim().toLowerCase().replace('٠', '0');
 
@@ -487,7 +512,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (data?.user) {
         setUser(data.user);
-        const prof = await fetchProfile(data.user.id);
+        const prof = await fetchProfile(data.user.id, data.user);
         setIsLoading(false);
         return { success: true, role: prof?.role };
       }
@@ -515,6 +540,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       driverAvailable?: boolean;
     }
   ): Promise<{ success: boolean; error?: string; isNewUser?: boolean }> => {
+    if (!isSupabaseConfigured) {
+      return { success: false, error: 'auth.supabase_not_configured' };
+    }
+
     setIsLoading(true);
 
     const norm = normalizeMoroccanPhone(rawPhone);
@@ -734,14 +763,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => {
+    setUser(null);
+    setProfile(null);
+    setImpersonatedUser(null);
     try {
-      await supabase.auth.signOut();
+      localStorage.removeItem(LOCAL_STORAGE_PROFILE_KEY);
+      sessionStorage.removeItem('jadijcb_impersonate');
+      for (const key of Object.keys(localStorage)) {
+        if (key.startsWith('sb-') && key.endsWith('-auth-token')) {
+          localStorage.removeItem(key);
+        }
+      }
+      await Promise.race([
+        supabase.auth.signOut({ scope: 'local' }),
+        new Promise((resolve) => setTimeout(resolve, 1200)),
+      ]);
     } catch (err) {
       console.warn('Signout warning:', err);
-    } finally {
-      setUser(null);
-      setProfile(null);
-      localStorage.removeItem(LOCAL_STORAGE_PROFILE_KEY);
     }
   };
 

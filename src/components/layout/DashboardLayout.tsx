@@ -135,7 +135,9 @@ export const DashboardLayout: React.FC = () => {
     };
 
     updateUnread();
-    const interval = setInterval(updateUnread, 30000);
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') updateUnread();
+    }, 60000);
     const onVisibleUnread = () => {
       if (document.visibilityState === 'visible') updateUnread();
     };
@@ -222,7 +224,9 @@ export const DashboardLayout: React.FC = () => {
 
   useEffect(() => {
     refreshSystemNotifications();
-    const timer = setInterval(refreshSystemNotifications, 20000);
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') refreshSystemNotifications();
+    }, 60000);
     window.addEventListener('jadijcb_chat_unread_updated', refreshSystemNotifications);
     return () => {
       clearInterval(timer);
@@ -304,12 +308,17 @@ export const DashboardLayout: React.FC = () => {
           try {
             const fetchedMap = new Map<string, any>();
 
+            const BOOKING_PENDING_COLS =
+              'id, machine_id, owner_id, client_id, client_name, client_phone, start_at, end_at, total_price, status, notes, created_at, with_operator';
+            let hadQueryError = false;
+
             if (isSuperAdmin) {
               // Super admin sees all pending bookings
               const { data: allData, error: allErr } = await supabase
                 .from('bookings')
-                .select('*')
-                .eq('status', 'pending');
+                .select(BOOKING_PENDING_COLS)
+                .eq('status', 'pending')
+                .limit(50);
               if (!allErr && allData) {
                 for (const row of allData) fetchedMap.set(row.id, row);
               }
@@ -318,9 +327,11 @@ export const DashboardLayout: React.FC = () => {
               if (profile.id) {
                 const { data: ownerData, error: ownerErr } = await supabase
                   .from('bookings')
-                  .select('*')
+                  .select(BOOKING_PENDING_COLS)
                   .eq('status', 'pending')
-                  .eq('owner_id', profile.id);
+                  .eq('owner_id', profile.id)
+                  .limit(50);
+                if (ownerErr) hadQueryError = true;
                 if (!ownerErr && ownerData) {
                   for (const row of ownerData) fetchedMap.set(row.id, row);
                 }
@@ -330,20 +341,23 @@ export const DashboardLayout: React.FC = () => {
               if (ownerMachineIds.length > 0) {
                 const { data: machineData, error: mErr } = await supabase
                   .from('bookings')
-                  .select('*')
+                  .select(BOOKING_PENDING_COLS)
                   .eq('status', 'pending')
-                  .in('machine_id', ownerMachineIds);
+                  .in('machine_id', ownerMachineIds)
+                  .limit(50);
+                if (mErr) hadQueryError = true;
                 if (!mErr && machineData) {
                   for (const row of machineData) fetchedMap.set(row.id, row);
                 }
               }
 
-              // 3. Fallback: query without where clause (Supabase RLS secures records to owner)
-              if (fetchedMap.size === 0) {
+              // 3. Fallback only if queries errored
+              if (hadQueryError && fetchedMap.size === 0) {
                 const { data: rlsData, error: rlsErr } = await supabase
                   .from('bookings')
-                  .select('*')
-                  .eq('status', 'pending');
+                  .select(BOOKING_PENDING_COLS)
+                  .eq('status', 'pending')
+                  .limit(50);
                 if (!rlsErr && rlsData) {
                   for (const row of rlsData) fetchedMap.set(row.id, row);
                 }
@@ -417,8 +431,10 @@ export const DashboardLayout: React.FC = () => {
     };
     window.addEventListener('storage', handleStorage);
 
-    // 3. Relaxed silent refresh (30s) with tab visibility listener
-    const timer = setInterval(checkPending, 30000);
+    // 3. Relaxed silent refresh (60s) only while tab is visible
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') checkPending();
+    }, 60000);
     const onVisible = () => {
       if (document.visibilityState === 'visible') checkPending();
     };

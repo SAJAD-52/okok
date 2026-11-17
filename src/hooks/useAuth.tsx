@@ -135,7 +135,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const inFlightProfileFetchesRef = React.useRef<Map<string, Promise<UserProfile | null>>>(new Map());
+
   const fetchProfile = useCallback(async (userId: string, knownUser?: any): Promise<UserProfile | null> => {
+    const existingPromise = inFlightProfileFetchesRef.current.get(userId);
+    if (existingPromise) {
+      return existingPromise;
+    }
+
+    const fetchTask = (async (): Promise<UserProfile | null> => {
     try {
       const { data, error } = isSupabaseConfigured
         ? await supabase
@@ -259,6 +267,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.warn('Failed to fetch profile from Supabase:', err);
     }
     return null;
+    })();
+
+    inFlightProfileFetchesRef.current.set(userId, fetchTask);
+    try {
+      return await fetchTask;
+    } finally {
+      inFlightProfileFetchesRef.current.delete(userId);
+    }
   }, []);
 
   const refreshProfile = useCallback(async () => {

@@ -1081,10 +1081,11 @@ export async function fetchOwnerDispatchNotifications(ownerId: string): Promise<
     try {
       const { data: msgRows } = await supabase
         .from('messages')
-        .select('*')
+        .select('id, conversation_id, sender_id, content, body, created_at')
         .neq('sender_id', ownerId)
+        .ilike('content', '%[JADIJCB_DISPATCH:%')
         .order('created_at', { ascending: false })
-        .limit(40);
+        .limit(10);
 
       if (msgRows) {
         for (const m of msgRows) {

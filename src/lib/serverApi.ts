@@ -8,6 +8,43 @@ import { supabase, isSupabaseConfigured } from './supabase';
 
 const BASE_URL = typeof window !== 'undefined' ? window.location.origin : '';
 
+// Tracks whether Express /api/* backend is actually running (false on Vercel static deploys)
+let serverApiProbeState: 'unknown' | 'available' | 'unavailable' = 'unknown';
+
+async function safeFetchApiJson(url: string, init?: RequestInit): Promise<any | null> {
+  if (serverApiProbeState === 'unavailable') return null;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5000);
+  try {
+    const res = await fetch(url, { ...init, signal: controller.signal });
+    const ct = (res.headers.get('content-type') || '').toLowerCase();
+    if (!ct.includes('application/json')) {
+      // Static host SPA rewrite (e.g. Vercel returning index.html for /api/*)
+      serverApiProbeState = 'unavailable';
+      return null;
+    }
+    if (res.status === 404) {
+      serverApiProbeState = 'unavailable';
+      return null;
+    }
+    serverApiProbeState = 'available';
+    const data = await res.json();
+    return { ok: res.ok, status: res.status, data };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function isServerBackendAvailable(): Promise<boolean> {
+  if (serverApiProbeState === 'available') return true;
+  if (serverApiProbeState === 'unavailable') return false;
+  const probe = await safeFetchApiJson(`${BASE_URL}/api/notifications?limit=1`);
+  return Boolean(probe);
+}
+
 async function getAuthHeaders(withJson = false): Promise<Record<string, string>> {
   const headers: Record<string, string> = {};
   if (withJson) {
@@ -49,6 +86,7 @@ export const serverApi = {
     client_id?: string;
     status?: string;
   }): Promise<Booking[]> {
+    if (serverApiProbeState === 'unavailable') return [];
     try {
       const searchParams = new URLSearchParams();
       if (params?.owner_id) searchParams.set('owner_id', params.owner_id);
@@ -56,16 +94,12 @@ export const serverApi = {
       if (params?.client_id) searchParams.set('client_id', params.client_id);
       if (params?.status) searchParams.set('status', params.status);
 
-      const res = await fetch(`${BASE_URL}/api/bookings?${searchParams.toString()}`, {
+      const res = await safeFetchApiJson(`${BASE_URL}/api/bookings?${searchParams.toString()}`, {
         headers: await getAuthHeaders(false),
       });
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-      const data = await res.json();
-      return Array.isArray(data.bookings) ? data.bookings : [];
-    } catch (err) {
-      console.warn('Server API getBookings notice:', err);
+      if (!res || !res.ok) return [];
+      return Array.isArray(res.data?.bookings) ? res.data.bookings : [];
+    } catch {
       return [];
     }
   },
@@ -122,99 +156,79 @@ export const serverApi = {
     unread_only?: boolean;
     role?: string;
   }): Promise<{ notifications: ServerNotification[]; unread_count: number }> {
+    if (serverApiProbeState === 'unavailable') return { notifications: [], unread_count: 0 };
     try {
       const searchParams = new URLSearchParams();
       if (params?.user_id) searchParams.set('user_id', params.user_id);
       if (params?.unread_only) searchParams.set('unread_only', 'true');
       if (params?.role) searchParams.set('role', params.role);
 
-      const res = await fetch(`${BASE_URL}/api/notifications?${searchParams.toString()}`, {
+      const res = await safeFetchApiJson(`${BASE_URL}/api/notifications?${searchParams.toString()}`, {
         headers: await getAuthHeaders(false),
       });
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-      const data = await res.json();
+      if (!res || !res.ok) return { notifications: [], unread_count: 0 };
       return {
-        notifications: Array.isArray(data.notifications) ? data.notifications : [],
-        unread_count: Number(data.unread_count) || 0,
+        notifications: Array.isArray(res.data?.notifications) ? res.data.notifications : [],
+        unread_count: Number(res.data?.unread_count) || 0,
       };
-    } catch (err) {
-      console.warn('Server API getNotifications notice:', err);
+    } catch {
       return { notifications: [], unread_count: 0 };
     }
   },
 
   // 5. Mark Notification Read
   async markNotificationRead(id: string): Promise<boolean> {
-    try {
-      const res = await fetch(`${BASE_URL}/api/notifications/${id}/read`, {
-        method: 'PATCH',
-        headers: await getAuthHeaders(false),
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    if (serverApiProbeState === 'unavailable') return false;
+    const res = await safeFetchApiJson(`${BASE_URL}/api/notifications/${id}/read`, {
+      method: 'PATCH',
+      headers: await getAuthHeaders(false),
+    });
+    return Boolean(res?.ok);
   },
 
   // 6. Mark All Notifications Read
   async markAllNotificationsRead(user_id?: string): Promise<boolean> {
-    try {
-      const res = await fetch(`${BASE_URL}/api/notifications/mark-all-read`, {
-        method: 'POST',
-        headers: await getAuthHeaders(true),
-        body: JSON.stringify({ user_id }),
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    if (serverApiProbeState === 'unavailable') return false;
+    const res = await safeFetchApiJson(`${BASE_URL}/api/notifications/mark-all-read`, {
+      method: 'POST',
+      headers: await getAuthHeaders(true),
+      body: JSON.stringify({ user_id }),
+    });
+    return Boolean(res?.ok);
   },
 
   // 6b. Mark Chat Conversation Notifications Read
   async markConversationNotificationsRead(user_id: string, conversation_id: string): Promise<boolean> {
-    try {
-      const res = await fetch(`${BASE_URL}/api/notifications/mark-conversation-read`, {
-        method: 'POST',
-        headers: await getAuthHeaders(true),
-        body: JSON.stringify({ user_id, conversation_id }),
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    if (serverApiProbeState === 'unavailable') return false;
+    const res = await safeFetchApiJson(`${BASE_URL}/api/notifications/mark-conversation-read`, {
+      method: 'POST',
+      headers: await getAuthHeaders(true),
+      body: JSON.stringify({ user_id, conversation_id }),
+    });
+    return Boolean(res?.ok);
   },
 
   // 7. Save Machine to Server
   async saveMachine(machine: Machine): Promise<boolean> {
-    try {
-      const res = await fetch(`${BASE_URL}/api/machines`, {
-        method: 'POST',
-        headers: await getAuthHeaders(true),
-        body: JSON.stringify(machine),
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    if (serverApiProbeState === 'unavailable') return false;
+    const res = await safeFetchApiJson(`${BASE_URL}/api/machines`, {
+      method: 'POST',
+      headers: await getAuthHeaders(true),
+      body: JSON.stringify(machine),
+    });
+    return Boolean(res?.ok);
   },
 
   // 8. Get Machines from Server
   async getMachines(owner_id?: string): Promise<Machine[]> {
-    try {
-      const searchParams = new URLSearchParams();
-      if (owner_id) searchParams.set('owner_id', owner_id);
-
-      const res = await fetch(`${BASE_URL}/api/machines?${searchParams.toString()}`, {
-        headers: await getAuthHeaders(false),
-      });
-      if (!res.ok) return [];
-      const data = await res.json();
-      return Array.isArray(data.machines) ? data.machines : [];
-    } catch {
-      return [];
-    }
+    if (serverApiProbeState === 'unavailable') return [];
+    const searchParams = new URLSearchParams();
+    if (owner_id) searchParams.set('owner_id', owner_id);
+    const res = await safeFetchApiJson(`${BASE_URL}/api/machines?${searchParams.toString()}`, {
+      headers: await getAuthHeaders(false),
+    });
+    if (!res || !res.ok) return [];
+    return Array.isArray(res.data?.machines) ? res.data.machines : [];
   },
 
   // 9. Create Custom In-App Notification
@@ -227,32 +241,25 @@ export const serverApi = {
     type?: string;
     data?: any;
   }): Promise<boolean> {
-    try {
-      const res = await fetch(`${BASE_URL}/api/notifications`, {
-        method: 'POST',
-        headers: await getAuthHeaders(true),
-        body: JSON.stringify(payload),
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    if (serverApiProbeState === 'unavailable') return false;
+    const res = await safeFetchApiJson(`${BASE_URL}/api/notifications`, {
+      method: 'POST',
+      headers: await getAuthHeaders(true),
+      body: JSON.stringify(payload),
+    });
+    return Boolean(res?.ok);
   },
 
   // 10. Fetch Conversations from Server
   async getConversations(userId?: string): Promise<any[]> {
-    try {
-      const searchParams = new URLSearchParams();
-      if (userId) searchParams.set('user_id', userId);
-      const res = await fetch(`${BASE_URL}/api/conversations?${searchParams.toString()}`, {
-        headers: await getAuthHeaders(false),
-      });
-      if (!res.ok) return [];
-      const data = await res.json();
-      return Array.isArray(data.conversations) ? data.conversations : [];
-    } catch {
-      return [];
-    }
+    if (serverApiProbeState === 'unavailable') return [];
+    const searchParams = new URLSearchParams();
+    if (userId) searchParams.set('user_id', userId);
+    const res = await safeFetchApiJson(`${BASE_URL}/api/conversations?${searchParams.toString()}`, {
+      headers: await getAuthHeaders(false),
+    });
+    if (!res || !res.ok) return [];
+    return Array.isArray(res.data?.conversations) ? res.data.conversations : [];
   },
 
   // 11. Create or Get Conversation on Server
@@ -264,32 +271,25 @@ export const serverApi = {
     machine?: any;
     target_profile?: any;
   }): Promise<any | null> {
-    try {
-      const res = await fetch(`${BASE_URL}/api/conversations`, {
-        method: 'POST',
-        headers: await getAuthHeaders(true),
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) return null;
-      const data = await res.json();
-      return data.conversation || null;
-    } catch {
-      return null;
-    }
+    if (serverApiProbeState === 'unavailable') return null;
+    const res = await safeFetchApiJson(`${BASE_URL}/api/conversations`, {
+      method: 'POST',
+      headers: await getAuthHeaders(true),
+      body: JSON.stringify(payload),
+    });
+    if (!res || !res.ok) return null;
+    return res.data?.conversation || null;
   },
 
   // 12. Fetch Messages from Server
   async getMessages(conversationId: string): Promise<any[]> {
-    try {
-      const res = await fetch(`${BASE_URL}/api/messages?conversation_id=${encodeURIComponent(conversationId)}`, {
-        headers: await getAuthHeaders(false),
-      });
-      if (!res.ok) return [];
-      const data = await res.json();
-      return Array.isArray(data.messages) ? data.messages : [];
-    } catch {
-      return [];
-    }
+    if (serverApiProbeState === 'unavailable') return [];
+    const res = await safeFetchApiJson(
+      `${BASE_URL}/api/messages?conversation_id=${encodeURIComponent(conversationId)}`,
+      { headers: await getAuthHeaders(false) }
+    );
+    if (!res || !res.ok) return [];
+    return Array.isArray(res.data?.messages) ? res.data.messages : [];
   },
 
   // 13. Send Message on Server
@@ -302,17 +302,13 @@ export const serverApi = {
     sender_name?: string;
     recipient_role?: string;
   }): Promise<any | null> {
-    try {
-      const res = await fetch(`${BASE_URL}/api/messages`, {
-        method: 'POST',
-        headers: await getAuthHeaders(true),
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) return null;
-      const data = await res.json();
-      return data.message || null;
-    } catch {
-      return null;
-    }
+    if (serverApiProbeState === 'unavailable') return null;
+    const res = await safeFetchApiJson(`${BASE_URL}/api/messages`, {
+      method: 'POST',
+      headers: await getAuthHeaders(true),
+      body: JSON.stringify(payload),
+    });
+    if (!res || !res.ok) return null;
+    return res.data?.message || null;
   },
 };

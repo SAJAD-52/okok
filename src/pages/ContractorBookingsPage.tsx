@@ -148,8 +148,10 @@ export const ContractorBookingsPage: React.FC = () => {
 
     const handleEvent = () => loadContractorBookings();
     window.addEventListener('jadijcb_booking_event', handleEvent);
-    // Auto-refresh so owner approval shows up without reloading the page
-    const poll = setInterval(loadContractorBookings, 8000);
+    // Auto-refresh while visible so owner approval shows up without reloading the page
+    const poll = setInterval(() => {
+      if (document.visibilityState === 'visible') loadContractorBookings();
+    }, 25000);
     const onVisible = () => {
       if (document.visibilityState === 'visible') loadContractorBookings();
     };

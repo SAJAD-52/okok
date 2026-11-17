@@ -64,8 +64,10 @@ import { machineStore } from '../lib/machineStore';
 
 export const MachinesPage: React.FC = () => {
   const { t, lang } = useLanguage();
-  const { user, profile } = useAuth();
+  const { user, profile, isImpersonating } = useAuth();
   const navigate = useNavigate();
+
+  const ownerUid = isImpersonating ? profile?.id : (user?.id || profile?.id);
 
   const [machines, setMachines] = useState<Machine[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -80,84 +82,94 @@ export const MachinesPage: React.FC = () => {
   const [driverCampaigns, setDriverCampaigns] = useState<OwnerDriverOfferWithApps[]>([]);
   const [closingOfferDriverKey, setClosingOfferDriverKey] = useState<string | null>(null);
 
+  const initialLoadedRef = React.useRef(false);
+  const inFlightRef = React.useRef(false);
+
   // Fetch live machines from Supabase
   const loadMachines = useCallback(async () => {
-    if (!user?.id) {
+    if (!ownerUid) {
       setIsLoading(false);
       return;
     }
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
 
-    setIsLoading(true);
+    if (!initialLoadedRef.current) {
+      setIsLoading(true);
+    }
     setIsError(false);
 
     let mapped: Machine[] = [];
+    let hadFetchError = false;
 
     try {
       if (isSupabaseConfigured) {
         const { data, error } = await supabase
           .from('machines')
           .select('*')
-          .eq('owner_id', user.id)
+          .eq('owner_id', ownerUid)
           .order('created_at', { ascending: false });
 
         if (error) {
-          setIsError(true);
+          hadFetchError = true;
+          console.warn('Machines load error:', error.message);
           toast.error(t(mapDatabaseError(error)));
-          return;
-        }
-
-        if (data) {
-        mapped = data.map((m: any) => ({
-          id: m.id,
-          owner_id: m.owner_id,
-          title_ar: m.title_ar,
-          title_fr: m.title_fr,
-          description_ar: m.description_ar,
-          description_fr: m.description_fr,
-          category: m.category,
-          category_id: m.category,
-          brand: m.brand,
-          model: m.model,
-          year: m.year,
-          listing_mode: m.listing_mode,
-          condition: m.condition === 'new' ? 'new' : 'good',
-          city: m.city,
-          city_id: m.city,
-          lat: m.lat,
-          lng: m.lng,
-          location_lat: m.lat,
-          location_lng: m.lng,
-          rate_hourly: Number(m.hourly_rate) || 0,
-          rate_daily: Number(m.daily_rate) || 0,
-          rate_weekly: Number(m.weekly_rate) || 0,
-          hourly_rate: Number(m.hourly_rate) || 0,
-          daily_rate: Number(m.daily_rate) || 0,
-          weekly_rate: Number(m.weekly_rate) || 0,
-          sale_price: Number(m.sale_price) || 0,
-          currency: 'MAD',
-          with_operator: Boolean(m.with_operator),
-          fuel_included: Boolean(m.fuel_included),
-          delivery_available: Boolean(m.delivery_available),
-          status: m.is_published ? 'available' : 'inactive',
-          is_published: m.is_published,
-          images: m.images || [],
-          specs: m.specs || {},
-          views_count: m.views_count || 0,
-          rating_avg: m.rating_avg || 0,
-          reviews_count: m.reviews_count || 0,
-          created_at: m.created_at,
-          updated_at: m.created_at,
-        }));
+        } else if (data) {
+          mapped = data.map((m: any) => ({
+            id: m.id,
+            owner_id: m.owner_id,
+            title_ar: m.title_ar,
+            title_fr: m.title_fr,
+            description_ar: m.description_ar,
+            description_fr: m.description_fr,
+            category: m.category,
+            category_id: m.category,
+            brand: m.brand,
+            model: m.model,
+            year: m.year,
+            listing_mode: m.listing_mode,
+            condition: m.condition === 'new' ? 'new' : 'good',
+            city: m.city,
+            city_id: m.city,
+            lat: m.lat,
+            lng: m.lng,
+            location_lat: m.lat,
+            location_lng: m.lng,
+            rate_hourly: Number(m.hourly_rate) || 0,
+            rate_daily: Number(m.daily_rate) || 0,
+            rate_weekly: Number(m.weekly_rate) || 0,
+            hourly_rate: Number(m.hourly_rate) || 0,
+            daily_rate: Number(m.daily_rate) || 0,
+            weekly_rate: Number(m.weekly_rate) || 0,
+            sale_price: Number(m.sale_price) || 0,
+            currency: 'MAD',
+            with_operator: Boolean(m.with_operator),
+            fuel_included: Boolean(m.fuel_included),
+            delivery_available: Boolean(m.delivery_available),
+            status: m.is_published ? 'available' : 'inactive',
+            is_published: m.is_published,
+            images: m.images || [],
+            specs: m.specs || {},
+            views_count: m.views_count || 0,
+            rating_avg: m.rating_avg || 0,
+            reviews_count: m.reviews_count || 0,
+            created_at: m.created_at,
+            updated_at: m.created_at,
+          }));
         }
       }
     } catch (err: any) {
+      hadFetchError = true;
       console.warn('Machines load notice:', err);
     } finally {
-      const merged = machineStore.mergeMachines(mapped, user.id);
-      setMachines(merged);
+      const merged = machineStore.mergeMachines(mapped, ownerUid);
+      setMachines((prev) => (hadFetchError && prev.length > 0 && merged.length === 0 ? prev : merged));
+      setIsError(hadFetchError && merged.length === 0);
+      initialLoadedRef.current = true;
+      inFlightRef.current = false;
       setIsLoading(false);
     }
-  }, [user?.id]);
+  }, [ownerUid, t]);
 
   useEffect(() => {
     loadMachines();

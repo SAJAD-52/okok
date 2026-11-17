@@ -93,9 +93,10 @@ export const BookingsPage: React.FC = () => {
   // Calendar month state
   const [calendarDate, setCalendarDate] = useState(() => new Date());
 
-  const ownerId = isImpersonating ? profile?.id : isSuperAdmin ? null : (user?.id || profile?.id);
+  const ownerId = isImpersonating ? profile?.id : (user?.id || profile?.id);
 
   const isInitialLoadDoneRef = useRef(false);
+  const inFlightRef = useRef(false);
 
   const loadData = useCallback(async (silent: boolean = false) => {
     if (!ownerId) {
@@ -104,6 +105,9 @@ export const BookingsPage: React.FC = () => {
       setIsLoading(false);
       return;
     }
+
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
 
     if (!silent && !isInitialLoadDoneRef.current) {
       setIsLoading(true);
@@ -225,6 +229,7 @@ export const BookingsPage: React.FC = () => {
     } catch (err) {
       console.warn('Error loading bookings page data:', err);
     } finally {
+      inFlightRef.current = false;
       setIsLoading(false);
     }
   }, [ownerId, isSuperAdmin]);
@@ -266,10 +271,10 @@ export const BookingsPage: React.FC = () => {
       }
     }
 
-    // Auto-refresh silently (30s) so approval shows up without reloading
+    // Auto-refresh silently (45s) while visible
     const pollInterval = setInterval(() => {
-      loadData(true);
-    }, 30000);
+      if (document.visibilityState === 'visible') loadData(true);
+    }, 45000);
 
     const onVisible = () => {
       if (document.visibilityState === 'visible') loadData(true);

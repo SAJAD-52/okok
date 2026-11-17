@@ -137,9 +137,13 @@ export const DriverOpportunityAlertListener: React.FC<DriverOpportunityAlertList
     [driverId, driverMachines]
   );
 
+  const syncInFlightRef = useRef(false);
+
   const syncOffersAndCheckUnread = useCallback(
     async (notifyNew: boolean) => {
-      if (!driverId) return;
+      if (!driverId || syncInFlightRef.current) return;
+      syncInFlightRef.current = true;
+      try {
       onSyncRef.current?.();
 
       const offers = await fetchDriverJobOffers(driverId);
@@ -168,6 +172,9 @@ export const DriverOpportunityAlertListener: React.FC<DriverOpportunityAlertList
         if (candidate) {
           triggerDriverAlert(candidate);
         }
+      }
+      } finally {
+        syncInFlightRef.current = false;
       }
     },
     [driverId, driverMachines, triggerDriverAlert]
@@ -236,7 +243,7 @@ export const DriverOpportunityAlertListener: React.FC<DriverOpportunityAlertList
       if (document.visibilityState === 'visible') {
         syncOffersAndCheckUnread(true);
       }
-    }, 7000);
+    }, 30000);
 
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {

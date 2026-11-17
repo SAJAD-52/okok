@@ -21,7 +21,7 @@ import {
   syncServiceWorkerPushContext,
 } from '../../lib/pushService';
 import { chatStore, subscribeLocalChatEvents } from '../../lib/chatStore';
-import { serverApi } from '../../lib/serverApi';
+import { serverApi, isServerBackendAvailable } from '../../lib/serverApi';
 import { stripDispatchMarker } from '../../lib/dispatchService';
 import { useLanguage } from '../../hooks/useLanguage';
 
@@ -250,9 +250,16 @@ export const ChatAlertListener: React.FC<ChatAlertListenerProps> = ({
     }
   }, [userId, userRole]);
 
-  // Load & refresh user's conversation IDs
-  const refreshMyConversations = useCallback(async (): Promise<string[]> => {
+  const lastConvFetchAtRef = useRef<number>(0);
+  const syncInFlightRef = useRef<boolean>(false);
+
+  // Load & refresh user's conversation IDs (throttled to at most once every 60s)
+  const refreshMyConversations = useCallback(async (force = false): Promise<string[]> => {
     if (!userId) return [];
+    const now = Date.now();
+    if (!force && myConvIdsRef.current.size > 0 && now - lastConvFetchAtRef.current < 60000) {
+      return Array.from(myConvIdsRef.current);
+    }
     try {
       const localConvs = await chatStore.getConversationsForUser(userId);
       localConvs.forEach((c) => {
@@ -264,6 +271,7 @@ export const ChatAlertListener: React.FC<ChatAlertListenerProps> = ({
       });
 
       if (isSupabaseConfigured) {
+        lastConvFetchAtRef.current = now;
         const { data } = await supabase
           .from('conversations')
           .select('id')
@@ -290,9 +298,12 @@ export const ChatAlertListener: React.FC<ChatAlertListenerProps> = ({
 
     // Helper: Poll unread chat notifications & messages from Express SQLite + Supabase
     const syncUnreadAndAlert = async (isInitialBaseline: boolean) => {
-      const convIds = await refreshMyConversations();
+      if (syncInFlightRef.current) return;
+      syncInFlightRef.current = true;
+      try {
+      const convIds = await refreshMyConversations(isInitialBaseline);
 
-      // A. Express SQLite /api/notifications
+      // A. Express SQLite /api/notifications (only if backend exists)
       try {
         const res = await serverApi.getNotifications({
           user_id: userId,
@@ -403,15 +414,21 @@ export const ChatAlertListener: React.FC<ChatAlertListenerProps> = ({
       }
 
       baselineDoneRef.current = true;
+      } finally {
+        syncInFlightRef.current = false;
+      }
     };
 
     syncUnreadAndAlert(true);
 
-    // 1. Express Server-Sent Events (SSE) for instant 0ms cross-device delivery
+    // 1. Express Server-Sent Events (SSE) — only if Express backend is actually running
     let sse: EventSource | null = null;
     let sseDisposed = false;
     (async () => {
       try {
+        const backendAvailable = await isServerBackendAvailable();
+        if (!backendAvailable || sseDisposed) return;
+
         let tokenParam = '';
         if (isSupabaseConfigured) {
           try {
@@ -564,12 +581,12 @@ export const ChatAlertListener: React.FC<ChatAlertListenerProps> = ({
         .subscribe();
     }
 
-    // 4. Fallback poll every 4 seconds (catches missed WebSockets across devices/tabs)
+    // 4. Lightweight 30s fallback poll while visible (Realtime + Broadcast handle instant alerts)
     const pollInterval = setInterval(() => {
       if (document.visibilityState === 'visible') {
         syncUnreadAndAlert(false);
       }
-    }, 4000);
+    }, 30000);
 
     const onVisible = () => {
       if (document.visibilityState === 'visible') {

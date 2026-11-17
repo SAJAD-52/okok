@@ -51,7 +51,7 @@ export function useChatRealtime(activeConversation: ChatConversationItem | null)
         if (isSupabaseConfigured && !convId.startsWith('conv_')) {
           const { data, error } = await supabase
             .from('messages')
-            .select('*')
+            .select('id, conversation_id, sender_id, content, body, read_at, created_at')
             .eq('conversation_id', convId)
             .order('created_at', { ascending: true });
 
@@ -292,12 +292,12 @@ export function useChatRealtime(activeConversation: ChatConversationItem | null)
     };
     window.addEventListener('jadijcb_sse_chat_message', onSseChatMessage);
 
-    // Lightweight 5s silent sync fallback while viewing a thread
+    // Lightweight 25s silent sync fallback while viewing a thread (Realtime delivers instantly)
     const syncTimer = setInterval(() => {
       if (document.visibilityState === 'visible') {
         loadMessages(true);
       }
-    }, 5000);
+    }, 25000);
 
     return () => {
       clearInterval(syncTimer);

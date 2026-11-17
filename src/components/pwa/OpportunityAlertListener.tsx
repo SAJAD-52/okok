@@ -121,9 +121,13 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
     setActiveAlert(notif);
   }, []);
 
+  const syncInFlightRef = useRef(false);
+
   const syncFromSource = useCallback(
     async (notifyUnread: boolean) => {
-      if (!ownerId) return;
+      if (!ownerId || syncInFlightRef.current) return;
+      syncInFlightRef.current = true;
+      try {
       const list = await fetchOwnerDispatchNotifications(ownerId);
       onSyncRef.current(list);
 
@@ -150,6 +154,9 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
         if (newestUnread) {
           triggerCelebrationAlert(newestUnread);
         }
+      }
+      } finally {
+        syncInFlightRef.current = false;
       }
     },
     [ownerId, triggerCelebrationAlert]
@@ -282,12 +289,12 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
         .subscribe();
     }
 
-    // 4. Lightweight 7s fallback polling while tab is visible
+    // 4. Lightweight 30s fallback polling while tab is visible (Realtime handles instant push)
     const pollTimer = setInterval(() => {
       if (document.visibilityState === 'visible') {
         syncFromSource(true);
       }
-    }, 7000);
+    }, 30000);
 
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {

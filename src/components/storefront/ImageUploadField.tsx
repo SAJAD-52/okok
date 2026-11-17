@@ -6,6 +6,7 @@
 import React, { useRef, useState } from 'react';
 import { UploadCloud, Image as ImageIcon, Trash2, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { readFileAsDataUrl } from '../../lib/storefrontSlug';
+import { compressImage } from '../../lib/imageCompressor';
 
 interface ImageUploadFieldProps {
   label: string;
@@ -42,7 +43,12 @@ export const ImageUploadField: React.FC<ImageUploadFieldProps> = ({
     setIsLoading(true);
     try {
       setFileName(file.name);
-      const dataUrl = await readFileAsDataUrl(file);
+      const maxDim = aspectRatio === 'square' ? 512 : 1200;
+      const compressed = await compressImage(file, maxDim, maxDim, 0.76);
+      const dataUrl = await readFileAsDataUrl(compressed.file);
+      if (compressed.previewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(compressed.previewUrl);
+      }
       onChange(dataUrl);
     } catch (err) {
       console.error('Failed to read image file:', err);

@@ -133,6 +133,8 @@ export const MarketplacePage: React.FC = () => {
     };
   }, []);
 
+let marketplaceOwnerJoinSupported = true;
+
   // Load from Supabase with range queries & merge machineStore
   const loadSupabaseMachines = useCallback(async () => {
     setIsLoading(true);
@@ -141,57 +143,58 @@ export const MarketplacePage: React.FC = () => {
     let mapped: Machine[] = [];
     let remoteCount = 0;
 
-    if (isSupabaseConfigured) {
-      const buildQuery = (withOwnerJoin: boolean) => {
-        const selectStr = withOwnerJoin
-          ? '*, profiles:owner_id(full_name, company_name, phone, city)'
-          : '*';
-        let query = supabase
-          .from('machines')
-          .select(selectStr, { count: 'exact' })
-          .eq('is_published', true);
+    try {
+      if (isSupabaseConfigured) {
+        const buildQuery = (withOwnerJoin: boolean) => {
+          const selectStr = withOwnerJoin
+            ? '*, profiles:owner_id(full_name, company_name, phone, city)'
+            : '*';
+          let query = supabase
+            .from('machines')
+            .select(selectStr, { count: 'estimated' })
+            .eq('is_published', true);
 
-        if (isSparePartsSection) {
-          query = query.eq('category', 'spare-parts');
-        } else {
-          if (modeParam && modeParam !== 'all') {
-            query = query.eq('listing_mode', modeParam);
-          }
-          if (categoryParam) {
-            query = query.eq('category', categoryParam);
-          }
-        }
-
-        if (cityParam) {
-          const cityObj = getCityById(cityParam);
-          if (cityObj) {
-            query = query.or(
-              `city.ilike.%${cityObj.id}%,city.ilike.%${cityObj.name_ar}%,city.ilike.%${cityObj.name_fr}%`
-            );
+          if (isSparePartsSection) {
+            query = query.eq('category', 'spare-parts');
           } else {
-            query = query.ilike('city', `%${cityParam}%`);
+            if (modeParam && modeParam !== 'all') {
+              query = query.eq('listing_mode', modeParam);
+            }
+            if (categoryParam) {
+              query = query.eq('category', categoryParam);
+            }
           }
-        }
 
-        if (sortParam === 'price_asc') {
-          const orderCol = isSparePartsSection || modeParam === 'sale' ? 'sale_price' : 'daily_rate';
-          query = query.order(orderCol, { ascending: true, nullsFirst: false });
-        } else if (sortParam === 'price_desc') {
-          const orderCol = isSparePartsSection || modeParam === 'sale' ? 'sale_price' : 'daily_rate';
-          query = query.order(orderCol, { ascending: false, nullsFirst: false });
-        } else {
-          query = query.order('created_at', { ascending: false });
-        }
+          if (cityParam) {
+            const cityObj = getCityById(cityParam);
+            if (cityObj) {
+              query = query.or(
+                `city.ilike.%${cityObj.id}%,city.ilike.%${cityObj.name_ar}%,city.ilike.%${cityObj.name_fr}%`
+              );
+            } else {
+              query = query.ilike('city', `%${cityParam}%`);
+            }
+          }
 
-        const from = 0;
-        const to = page * PAGE_SIZE - 1;
-        return query.range(from, to);
-      };
+          if (sortParam === 'price_asc') {
+            const orderCol = isSparePartsSection || modeParam === 'sale' ? 'sale_price' : 'daily_rate';
+            query = query.order(orderCol, { ascending: true, nullsFirst: false });
+          } else if (sortParam === 'price_desc') {
+            const orderCol = isSparePartsSection || modeParam === 'sale' ? 'sale_price' : 'daily_rate';
+            query = query.order(orderCol, { ascending: false, nullsFirst: false });
+          } else {
+            query = query.order('created_at', { ascending: false });
+          }
 
-      try {
-        let { data, count, error } = await buildQuery(true);
-        if (error) {
-          // Retry without foreign-key alias in case relationship name differs
+          const from = 0;
+          const to = page * PAGE_SIZE - 1;
+          return query.range(from, to);
+        };
+
+        let { data, count, error } = await buildQuery(marketplaceOwnerJoinSupported);
+        if (error && marketplaceOwnerJoinSupported) {
+          // Remember FK join isn't available so future queries don't trigger 400s
+          marketplaceOwnerJoinSupported = false;
           const fallback = await buildQuery(false);
           data = fallback.data;
           count = fallback.count;
@@ -204,11 +207,9 @@ export const MarketplacePage: React.FC = () => {
           if (cachedFallback.length > 0) {
             setMachines(cachedFallback);
             setTotalRemoteCount(cachedFallback.length);
-            setIsLoading(false);
             return;
           }
           setIsError(true);
-          setIsLoading(false);
           return;
         }
 
@@ -216,26 +217,24 @@ export const MarketplacePage: React.FC = () => {
           mapped = data.map(mapSupabaseMachine);
           remoteCount = typeof count === 'number' ? count : data.length;
         }
-      } catch (err) {
-        console.warn('Marketplace load error:', err);
-        const cachedFallback = machineStore.mergeMachines([]);
-        if (cachedFallback.length > 0) {
-          setMachines(cachedFallback);
-          setTotalRemoteCount(cachedFallback.length);
-          setIsLoading(false);
-          return;
-        }
-        setIsError(true);
-        setIsLoading(false);
-        return;
       }
-    }
 
-    // Merge real locally saved machines when Supabase doesn't already include them
-    const finalMachines = machineStore.mergeMachines(mapped);
-    setMachines(finalMachines);
-    setTotalRemoteCount(Math.max(remoteCount, finalMachines.length));
-    setIsLoading(false);
+      // Merge real locally saved machines when Supabase doesn't already include them
+      const finalMachines = machineStore.mergeMachines(mapped);
+      setMachines(finalMachines);
+      setTotalRemoteCount(Math.max(remoteCount, finalMachines.length));
+    } catch (err) {
+      console.warn('Marketplace load error:', err);
+      const cachedFallback = machineStore.mergeMachines([]);
+      if (cachedFallback.length > 0) {
+        setMachines(cachedFallback);
+        setTotalRemoteCount(cachedFallback.length);
+      } else {
+        setIsError(true);
+      }
+    } finally {
+      setIsLoading(false);
+    }
   }, [modeParam, categoryParam, cityParam, sortParam, page, isSparePartsSection, mapSupabaseMachine]);
 
   useEffect(() => {

@@ -88,27 +88,13 @@ export const machineStore = {
     );
   },
 
-  // Completely wipe all mock machines from local storage and remote DB
+  // Completely wipe cached mock machines from local storage (keep UUID DB queries safe)
   async wipeAllMockData(): Promise<void> {
     try {
-      // 1. Wipe local machine cache
+      // 1. Wipe local machine cache & cached bookings
       localStorage.removeItem(CACHE_KEY);
       localStorage.setItem(MOCK_CLEARED_FLAG, 'true');
-
-      // 2. Wipe cached bookings
       localStorage.removeItem('jadijcb_cached_bookings');
-
-      // 3. If Supabase is connected, delete any seed machines and seed bookings
-      if (isSupabaseConfigured) {
-        try {
-          await supabase.from('machines').delete().ilike('id', '%atlas%');
-          await supabase.from('machines').delete().ilike('id', '%seed%');
-          await supabase.from('bookings').delete().ilike('id', '%seed%');
-          await supabase.from('bookings').delete().ilike('id', '%bkg_%');
-        } catch (e) {
-          console.warn('Supabase mock wipe notice:', e);
-        }
-      }
 
       // Notify window
       window.dispatchEvent(new CustomEvent('jadijcb_machines_updated', { detail: { action: 'wiped' } }));
@@ -119,7 +105,13 @@ export const machineStore = {
   },
 };
 
-// Automatically run wipe on first execution if not yet marked
+// Automatically mark local mock cache cleared on first execution without hitting Postgres
 if (typeof window !== 'undefined' && !localStorage.getItem(MOCK_CLEARED_FLAG)) {
-  machineStore.wipeAllMockData();
+  try {
+    localStorage.removeItem(CACHE_KEY);
+    localStorage.removeItem('jadijcb_cached_bookings');
+    localStorage.setItem(MOCK_CLEARED_FLAG, 'true');
+  } catch {
+    // ignore storage errors
+  }
 }

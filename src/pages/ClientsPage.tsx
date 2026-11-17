@@ -62,7 +62,10 @@ export const ClientsPage: React.FC = () => {
   const ownerId = user?.id || profile?.id;
 
   const loadData = async () => {
-    if (!ownerId) return;
+    if (!ownerId) {
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
     try {
       const allBookings = bookingStore.getCachedBookings().filter(

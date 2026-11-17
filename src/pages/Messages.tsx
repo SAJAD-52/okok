@@ -63,6 +63,10 @@ export const Messages: React.FC = () => {
             )
             .order('last_message_at', { ascending: false });
 
+          if (convError) {
+            console.warn('Conversations load error:', convError.message);
+          }
+
           if (!convError && convData && convData.length > 0) {
             // Collect other participants IDs
             const otherIds = Array.from(
@@ -84,13 +88,19 @@ export const Messages: React.FC = () => {
 
             const convIds = convData.map((c: any) => c.id);
 
-            // Parallel batch queries for profiles, machines, latest messages, and unread counts
-            const [profilesRes, machinesRes, messagesRes, unreadRes] = await Promise.all([
+            // Parallel fault-tolerant batch queries with lean column selection
+            const [profilesSettled, machinesSettled, messagesSettled, unreadSettled] = await Promise.allSettled([
               otherIds.length > 0
-                ? supabase.from('profiles').select('*').in('id', otherIds)
+                ? supabase
+                    .from('profiles')
+                    .select('id, full_name, company_name, phone, city, role, avatar_url')
+                    .in('id', otherIds)
                 : Promise.resolve({ data: [] }),
               machineIds.length > 0
-                ? supabase.from('machines').select('*').in('id', machineIds)
+                ? supabase
+                    .from('machines')
+                    .select('id, owner_id, title_ar, title_fr, brand, model, city, daily_rate, hourly_rate, sale_price, listing_mode, category, images')
+                    .in('id', machineIds)
                 : Promise.resolve({ data: [] }),
               convIds.length > 0
                 ? supabase
@@ -98,6 +108,7 @@ export const Messages: React.FC = () => {
                     .select('conversation_id, content, body, created_at')
                     .in('conversation_id', convIds)
                     .order('created_at', { ascending: false })
+                    .limit(100)
                 : Promise.resolve({ data: [] }),
               convIds.length > 0
                 ? supabase
@@ -106,8 +117,14 @@ export const Messages: React.FC = () => {
                     .in('conversation_id', convIds)
                     .neq('sender_id', currentUserId)
                     .is('read_at', null)
+                    .limit(100)
                 : Promise.resolve({ data: [] }),
             ]);
+
+            const profilesRes = profilesSettled.status === 'fulfilled' ? profilesSettled.value : { data: [] };
+            const machinesRes = machinesSettled.status === 'fulfilled' ? machinesSettled.value : { data: [] };
+            const messagesRes = messagesSettled.status === 'fulfilled' ? messagesSettled.value : { data: [] };
+            const unreadRes = unreadSettled.status === 'fulfilled' ? unreadSettled.value : { data: [] };
 
             const profilesMap = new Map<string, any>();
             (profilesRes.data || []).forEach((p: any) => profilesMap.set(p.id, p));

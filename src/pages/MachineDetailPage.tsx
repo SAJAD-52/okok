@@ -1203,49 +1203,37 @@ export const MachineDetailPage: React.FC = () => {
 
                         {/* Exact entered tariff breakdown */}
                         <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-center">
-                          {termButtons.map((tb) => {
-                            const hasTermTiers = machineVolumeTiers.some(
-                              (tier) =>
-                                tier.term === tb.key &&
-                                (tb.price === 0 || tier.discounted_unit_price < tb.price)
-                            );
-                            return (
-                              <button
-                                key={tb.key}
-                                type="button"
-                                onClick={() => {
-                                  setSelectedTerm(tb.key);
-                                  setSelectedDuration(1);
-                                }}
-                                className={`relative p-2 rounded-xl border text-[10px] transition-all cursor-pointer ${
-                                  selectedTerm === tb.key
-                                    ? 'border-primary bg-amber-50/70 text-ink ring-1 ring-primary/40'
-                                    : 'border-steel-200 bg-surface text-steel-600 hover:border-steel-300'
-                                }`}
-                              >
-                                <span className="block font-bold opacity-80">{tb.shortLabel}</span>
-                                <span className="font-mono font-black text-xs text-ink latin-nums">
-                                  {tb.price > 0 ? formatPriceMAD(tb.price, lang) : (lang === 'fr' ? 'Non défini' : 'غير محدد')}
-                                </span>
-                                {hasTermTiers && (
-                                  <span className="block text-[9px] font-black text-emerald-700 mt-0.5">
-                                    {lang === 'fr' ? 'Remise durée' : 'تخفيض متاح'}
-                                  </span>
-                                )}
-                              </button>
-                            );
-                          })}
+                          {termButtons.map((tb) => (
+                            <button
+                              key={tb.key}
+                              type="button"
+                              onClick={() => {
+                                setSelectedTerm(tb.key);
+                                setSelectedDuration(1);
+                              }}
+                              className={`relative p-2 rounded-xl border text-[10px] transition-all cursor-pointer ${
+                                selectedTerm === tb.key
+                                  ? 'border-primary bg-amber-50/70 text-ink ring-1 ring-primary/40'
+                                  : 'border-steel-200 bg-surface text-steel-600 hover:border-steel-300'
+                              }`}
+                            >
+                              <span className="block font-bold opacity-80">{tb.shortLabel}</span>
+                              <span className="font-mono font-black text-xs text-ink latin-nums">
+                                {tb.price > 0 ? formatPriceMAD(tb.price, lang) : (lang === 'fr' ? 'Non défini' : 'غير محدد')}
+                              </span>
+                            </button>
+                          ))}
                         </div>
 
-                        {/* Clickable Tiered Volume Discounts for the Selected Period */}
+                        {/* Clickable Tiered Volume Discounts for the Selected Period Only */}
                         {rateEval.sortedTiersForTerm.length > 0 && (
                           <div className="pt-2 border-t border-steel-200 space-y-2">
                             <span className="text-[11px] font-black text-ink flex items-center gap-1.5">
                               <TrendingDown className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                               <span>
                                 {lang === 'fr'
-                                  ? 'Tarifs dégressifs selon la durée :'
-                                  : 'عروض التخفيض التلقائي حسب المدة:'}
+                                  ? `Tarifs dégressifs (${termButtons.find((tb) => tb.key === selectedTerm)?.shortLabel || ''}) :`
+                                  : `تخفيضات المدة (${termButtons.find((tb) => tb.key === selectedTerm)?.shortLabel || ''}):`}
                               </span>
                             </span>
                             <div className="flex flex-wrap gap-1.5">

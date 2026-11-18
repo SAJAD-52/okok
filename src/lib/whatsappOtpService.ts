@@ -356,6 +356,102 @@ export async function adminResetUserPassword(
   }
 }
 
+export async function generateMyRecoveryCode(
+  rawPhone?: string
+): Promise<{ success: boolean; code?: string; phone?: string; error?: string }> {
+  if (!isSupabaseConfigured) {
+    return { success: false, error: 'SUPABASE_NOT_CONFIGURED' };
+  }
+  const norm = rawPhone ? normalizeMoroccanPhone(rawPhone) : null;
+  try {
+    const { data, error } = await supabase.rpc('generate_my_recovery_code', {
+      p_phone: norm?.isValid ? norm.e164 : null,
+    });
+    if (error) {
+      return { success: false, error: error.message };
+    }
+    if (data && typeof data === 'object') {
+      return {
+        success: Boolean((data as any).success),
+        code: (data as any).code,
+        phone: (data as any).phone,
+        error: (data as any).error,
+      };
+    }
+    return { success: false, error: 'GENERATION_FAILED' };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'GENERATION_FAILED' };
+  }
+}
+
+export async function resetPasswordWithRecoveryCode(params: {
+  phone: string;
+  recoveryCode: string;
+  newPassword: string;
+}): Promise<ResetPasswordResult> {
+  if (!isSupabaseConfigured) {
+    return { success: false, error: 'SUPABASE_NOT_CONFIGURED' };
+  }
+  const norm = normalizeMoroccanPhone(params.phone);
+  const cleanCode = String(params.recoveryCode || '').replace(/\D/g, '');
+  if (!norm.isValid) {
+    return { success: false, error: 'INVALID_PHONE' };
+  }
+  if (cleanCode.length !== 8) {
+    return { success: false, error: 'INVALID_RECOVERY_CODE' };
+  }
+  if (!params.newPassword || params.newPassword.length < 8) {
+    return { success: false, error: 'WEAK_PASSWORD' };
+  }
+
+  try {
+    const { data, error } = await supabase.rpc('reset_password_with_recovery_code', {
+      p_phone: norm.e164,
+      p_recovery_code: cleanCode,
+      p_new_password: params.newPassword,
+    });
+    if (error) {
+      return { success: false, error: error.message };
+    }
+    if (data && typeof data === 'object') {
+      return {
+        success: Boolean((data as any).success),
+        error: (data as any).error,
+      };
+    }
+    return { success: false, error: 'RESET_FAILED' };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'RESET_FAILED' };
+  }
+}
+
+export async function adminIssueWhatsAppOtp(
+  userId: string
+): Promise<{ success: boolean; code?: string; phone?: string; error?: string }> {
+  if (!isSupabaseConfigured) {
+    return { success: false, error: 'SUPABASE_NOT_CONFIGURED' };
+  }
+  try {
+    const { data, error } = await supabase.rpc('admin_issue_whatsapp_otp', {
+      p_user_id: userId,
+    });
+    if (error) {
+      return { success: false, error: error.message };
+    }
+    if (data && typeof data === 'object') {
+      return {
+        success: Boolean((data as any).success),
+        code: (data as any).code,
+        phone: (data as any).phone,
+        error: (data as any).error,
+      };
+    }
+    return { success: false, error: 'OTP_ISSUE_FAILED' };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'OTP_ISSUE_FAILED' };
+  }
+}
+
 export function mapOtpErrorMessage(
   errorCode: string | undefined,
   lang: 'ar' | 'fr',
@@ -376,12 +472,16 @@ export function mapOtpErrorMessage(
         return 'Trop de tentatives. Réessayez plus tard.';
       case 'INVALID_OTP':
         return 'Code d’activation incorrect (6 chiffres).';
+      case 'INVALID_RECOVERY_CODE':
+        return 'Code de récupération incorrect (8 chiffres).';
+      case 'RECOVERY_NOT_FOUND':
+        return 'Aucun code de récupération enregistré pour ce compte. Demandez un code au support via WhatsApp.';
       case 'OTP_EXPIRED':
         return 'Le code a expiré. Demandez un nouveau code.';
       case 'OTP_NOT_FOUND':
         return 'Aucun code actif trouvé. Demandez un nouveau code.';
       case 'TOO_MANY_ATTEMPTS':
-        return 'Nombre maximal de tentatives dépassé. Demandez un nouveau code.';
+        return 'Nombre maximal de tentatives dépassé. Réessayez plus tard.';
       case 'WEAK_PASSWORD':
         return 'Le mot de passe doit contenir au moins 8 caractères.';
       case 'WHATSAPP_SEND_FAILED':
@@ -406,12 +506,16 @@ export function mapOtpErrorMessage(
       return 'تم تجاوز الحد المسموح من المحاولات. يرجى الانتظار قليلاً.';
     case 'INVALID_OTP':
       return 'كود التفعيل غير صحيح (تأكد من الأرقام الستة).';
+    case 'INVALID_RECOVERY_CODE':
+      return 'كود الاسترجاع غير صحيح (يجب أن يتكون من 8 أرقام).';
+    case 'RECOVERY_NOT_FOUND':
+      return 'لم يتم حفظ كود استرجاع لهذا الحساب مسبقاً. اطلب كوداً مجانياً عبر واتساب الدعم أدناه.';
     case 'OTP_EXPIRED':
-      return 'انتهت صلاحية كود التفعيل. اضغط على إعادة الإرسال.';
+      return 'انتهت صلاحية كود التفعيل. اطلب كوداً جديداً.';
     case 'OTP_NOT_FOUND':
-      return 'لم يتم العثور على كود نشط. يرجى طلب كود جديد.';
+      return 'لم يتم العثور على كود نشط. اطلب كوداً جديداً عبر واتساب الدعم أدناه.';
     case 'TOO_MANY_ATTEMPTS':
-      return 'تم استنفاد عدد المحاولات المسموحة. اطلب كوداً جديداً.';
+      return 'تم استنفاد عدد المحاولات المسموحة. يرجى الانتظار والمحاولة مجدداً.';
     case 'WEAK_PASSWORD':
       return 'كلمة السر يجب أن لا تقل عن 8 أحرف.';
     case 'WHATSAPP_SEND_FAILED':

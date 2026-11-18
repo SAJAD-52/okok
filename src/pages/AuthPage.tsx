@@ -51,8 +51,10 @@ import {
 import {
   sendWhatsAppOtp,
   verifyWhatsAppOtp,
+  generateMyRecoveryCode,
   mapOtpErrorMessage,
 } from '../lib/whatsappOtpService';
+import { Copy, Check } from 'lucide-react';
 import { MOROCCAN_CITIES } from '../data/cities';
 import { CLIENT_SEGMENTS } from '../data/clientSegments';
 import { DRIVER_EXPERIENCE_LEVELS } from '../data/driverMachines';
@@ -98,10 +100,12 @@ export const AuthPage: React.FC = () => {
   const [showClientNextStepsModal, setShowClientNextStepsModal] = useState(false);
   const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false);
 
-  // WhatsApp OTP Registration Step
-  const [regOtpMode, setRegOtpMode] = useState<'none' | 'otp' | 'gateway_pending'>('none');
+  // WhatsApp OTP / Free Recovery Registration Step
+  const [regOtpMode, setRegOtpMode] = useState<'none' | 'otp' | 'free_recovery_saved'>('none');
   const [regOtpCode, setRegOtpCode] = useState('');
   const [regResendCooldown, setRegResendCooldown] = useState(0);
+  const [savedRecoveryCode, setSavedRecoveryCode] = useState('');
+  const [copiedRecovery, setCopiedRecovery] = useState(false);
 
   React.useEffect(() => {
     if (regResendCooldown <= 0) return;
@@ -121,7 +125,19 @@ export const AuthPage: React.FC = () => {
   const passwordStrength = calculatePasswordStrength(password);
   const isPasswordTouched = password.length > 0;
 
-  const completeRegistration = async (whatsappVerified: boolean) => {
+  const proceedAfterRegistration = () => {
+    setRegOtpMode('none');
+    setSavedRecoveryCode('');
+    if (role === 'driver') {
+      navigate('/driver');
+    } else if (role === 'client') {
+      setShowClientNextStepsModal(true);
+    } else {
+      setShowWelcomeModal(true);
+    }
+  };
+
+  const completeRegistration = async (whatsappVerified: boolean, showFreeRecoveryCard = false) => {
     const cityName = MOROCCAN_CITIES.find((c) => c.id === cityId)?.name_ar || cityId;
     const finalCompanyName =
       role === 'owner' || isClientCompany ? companyName.trim() : '';
@@ -159,8 +175,10 @@ export const AuthPage: React.FC = () => {
           driver_available: role === 'driver' ? true : undefined,
         });
 
-        setRegOtpMode('none');
-        setRegOtpCode('');
+        const recRes = await generateMyRecoveryCode(phoneValidation.e164).catch(() => ({
+          success: false,
+          code: undefined,
+        }));
 
         toast.success(
           role === 'driver'
@@ -176,13 +194,14 @@ export const AuthPage: React.FC = () => {
             : 'تم إنشاء الحساب وتفعيل التجربة المجانية بنجاح!'
         );
 
-        if (role === 'driver') {
-          navigate('/driver');
-        } else if (role === 'client') {
-          setShowClientNextStepsModal(true);
-        } else {
-          setShowWelcomeModal(true);
+        if (showFreeRecoveryCard && recRes?.success && recRes.code) {
+          setSavedRecoveryCode(recRes.code);
+          setRegOtpMode('free_recovery_saved');
+          return;
         }
+
+        setRegOtpCode('');
+        proceedAfterRegistration();
       } else {
         toast.error(t(res.error || 'auth.signup_failed'));
       }
@@ -206,7 +225,7 @@ export const AuthPage: React.FC = () => {
       }
 
       if (otpRes.delivery === 'gateway_not_configured') {
-        setRegOtpMode('gateway_pending');
+        await completeRegistration(false, true);
         return;
       }
 
@@ -679,46 +698,66 @@ export const AuthPage: React.FC = () => {
             </form>
           )}
 
-          {/* Registration Step 2b: Gateway Not Configured Pending View */}
-          {mode === 'register' && regOtpMode === 'gateway_pending' && (
+          {/* Registration Step 2b: 100% Free Personal WhatsApp Recovery Code Card */}
+          {mode === 'register' && regOtpMode === 'free_recovery_saved' && (
             <div className="space-y-4">
-              <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 space-y-2 text-xs text-amber-950">
-                <div className="flex items-center gap-2 font-black text-amber-900">
-                  <MessageCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+              <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 space-y-2 text-xs text-emerald-950">
+                <div className="flex items-center gap-2 font-black text-emerald-800 text-sm">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
                   <span>
                     {lang === 'fr'
-                      ? 'Vérification WhatsApp prête'
-                      : 'تأكيد رقم الواتساب قبل إنشاء الحساب'}
+                      ? 'Compte créé ! Sauvegardez votre code de récupération'
+                      : 'تم إنشاء حسابك! احفظ كود استرجاع كلمة السر مجاناً'}
                   </span>
                 </div>
-                <p className="leading-relaxed text-amber-900">
+                <p className="leading-relaxed text-emerald-900">
                   {lang === 'fr'
-                    ? `L'envoi automatique du code OTP n'est pas encore activé sur le serveur. Vous pouvez créer votre compte immédiatement pour le numéro ${phoneValidation.displayFormatted}.`
-                    : `بوابة الإرسال التلقائي لكود الواتساب غير مفعلة بعد على الخادم. يمكنك إكمال إنشاء حسابك مباشرة للرقم ${phoneValidation.displayFormatted} وسيتم توثيقه فور التفعيل.`}
+                    ? 'En cas d’oubli de votre mot de passe, ce code personnel vous permet de le réinitialiser instantanément sans frais. Envoyez-le dans votre propre WhatsApp pour le garder en sécurité :'
+                    : 'إذا نسيت كلمة السر مستقبلاً، هذا الكود الشخصي يمكّنك من استرجاع حسابك فوراً وبشكل مجاني 100%. احفظه الآن في محادثتك على واتساب:'}
                 </p>
               </div>
 
+              <div className="p-4 rounded-2xl bg-surface border-2 border-dashed border-primary/60 text-center space-y-2">
+                <span className="text-[11px] font-bold text-steel-500 block">
+                  {lang === 'fr' ? 'Votre code personnel (8 chiffres)' : 'كود الاسترجاع الشخصي الخاص بك'}
+                </span>
+                <div className="flex items-center justify-center gap-2">
+                  <span className="text-2xl font-mono font-black tracking-widest text-ink" dir="ltr">
+                    {savedRecoveryCode}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard?.writeText(savedRecoveryCode);
+                      setCopiedRecovery(true);
+                      setTimeout(() => setCopiedRecovery(false), 2000);
+                    }}
+                    className="p-2 rounded-xl bg-white border border-steel-200 text-steel-600 hover:text-ink cursor-pointer"
+                    title="نسخ الكود"
+                  >
+                    {copiedRecovery ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
               {(() => {
-                const supportWa = (
-                  platformSettingsStore.getSettings().whatsapp_number || ''
-                ).replace(/\D/g, '');
-                if (supportWa.length < 9) return null;
-                const waText =
+                const userDigits = phoneValidation.e164.replace(/\D/g, '');
+                const saveText =
                   lang === 'fr'
-                    ? `Bonjour, je souhaite activer mon compte JADIJCB (${phoneValidation.displayFormatted}).`
-                    : `السلام عليكم، أريد تفعيل حسابي الجديد في منصة JADIJCB بالرقم: ${phoneValidation.displayFormatted}`;
+                    ? `🔐 Mon code de récupération JADIJCB (${phoneValidation.displayFormatted}) : *${savedRecoveryCode}*\nÀ conserver pour réinitialiser le mot de passe gratuitement.`
+                    : `🔐 كود استرجاع حسابي في منصة JADIJCB\n📱 الرقم: ${phoneValidation.displayFormatted}\n🔑 كود الاسترجاع: *${savedRecoveryCode}*\n(احتفظ بهذه الرسالة لاستعادة كلمة السر مجاناً في أي وقت)`;
                 return (
                   <a
-                    href={`https://wa.me/${supportWa}?text=${encodeURIComponent(waText)}`}
+                    href={`https://wa.me/${userDigits}?text=${encodeURIComponent(saveText)}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black transition-colors min-h-[44px]"
+                    className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black shadow-sm transition-colors min-h-[48px]"
                   >
                     <MessageCircle className="w-4 h-4" />
                     <span>
                       {lang === 'fr'
-                        ? 'Envoyer confirmation sur WhatsApp Support'
-                        : 'إرسال طلب التفعيل على واتساب الدعم'}
+                        ? 'Sauvegarder ce code dans mon WhatsApp (Gratuit)'
+                        : 'إرسال وحفظ الكود في واتسابي الآن (مجاناً)'}
                     </span>
                   </a>
                 );
@@ -728,26 +767,11 @@ export const AuthPage: React.FC = () => {
                 type="button"
                 variant="primary"
                 size="lg"
-                isLoading={isLoading}
-                onClick={() => completeRegistration(false)}
-                leftIcon={<CheckCircle2 className="w-4 h-4" />}
+                onClick={proceedAfterRegistration}
                 className="w-full justify-center font-black min-h-[50px]"
               >
-                {lang === 'fr' ? 'Finaliser l’inscription maintenant' : 'إكمال إنشاء الحساب الآن'}
+                {lang === 'fr' ? 'Accéder à mon tableau de bord' : 'دخول إلى حسابي ←'}
               </Button>
-
-              <button
-                type="button"
-                onClick={() => setRegOtpMode('none')}
-                className="w-full py-2 text-xs font-bold text-steel-600 hover:text-ink inline-flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                {lang === 'fr' ? (
-                  <ArrowLeft className="w-3.5 h-3.5" />
-                ) : (
-                  <ArrowRight className="w-3.5 h-3.5" />
-                )}
-                <span>{lang === 'fr' ? 'Retour au formulaire' : 'الرجوع لتعديل البيانات'}</span>
-              </button>
             </div>
           )}
 
@@ -1138,11 +1162,7 @@ export const AuthPage: React.FC = () => {
               className="w-full justify-center mt-3 font-black min-h-[50px] shadow-sm"
               isLoading={isLoading}
             >
-              {mode === 'login'
-                ? t('auth.btn_login')
-                : lang === 'fr'
-                ? 'Envoyer le code WhatsApp et continuer'
-                : 'إرسال كود التفعيل عبر واتساب والمتابعة'}
+              {mode === 'login' ? t('auth.btn_login') : t('auth.btn_register')}
             </Button>
           </form>
           )}

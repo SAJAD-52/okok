@@ -282,6 +282,7 @@
     "db_trigger_error": "خطأ في تريجر قاعدة البيانات (Database error saving new user). يرجى تشغيل استعلام إصلاح التريجر في Supabase SQL Editor.",
     "schema_not_applied": "جداول قاعدة البيانات غير منشأة في مشروع Supabase بعد. يرجى تشغيل كود ملف (20261104000000_init_schema.sql) في SQL Editor في لوحة تحكم Supabase.",
     "network_error": "تعذر الاتصال بقاعدة البيانات (Supabase). تحقق من الإنترنت أو تأكد أن مشروع Supabase نشط وغير متوقف.",
+    "account_suspended": "⛔ تم تجميد هذا الحساب من طرف إدارة المنصة. يرجى التواصل مع الإدارة لإعادة التفعيل.",
     "supabase_not_configured": "مفاتيح الاتصال بقاعدة البيانات (VITE_SUPABASE_URL و VITE_SUPABASE_ANON_KEY) غير مضبوطة في بيئة النشر (Vercel). أضفها في إعدادات المشروع ثم أعد النشر."
   },
   "welcome": {

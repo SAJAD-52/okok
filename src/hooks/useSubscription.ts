@@ -49,6 +49,26 @@ export function useSubscription(): SubscriptionInfo {
       isLifetimeFreePhone((user as any)?.phone) ||
       isLifetimeFreePhone((user as any)?.user_metadata?.phone);
 
+    // Suspended accounts (non-admin) are immediately locked regardless of VIP/role/dates
+    if (profile?.subscription_status === 'suspended' && profile?.role !== 'admin') {
+      return {
+        status: 'suspended',
+        isTrial: false,
+        isActive: false,
+        isExpired: false,
+        isLocked: true,
+        isUrgent: false,
+        isLifetimeFree: isVipPhone,
+        remainingSeconds: 0,
+        formattedCountdown: '00:00:00',
+        hours: 0,
+        minutes: 0,
+        seconds: 0,
+        trialEndsAt: null,
+        subscriptionEndsAt: null,
+      };
+    }
+
     // If user is admin or holds a lifetime-free VIP phone number, they are never locked and always active
     if (profile?.role === 'admin' || isVipPhone) {
       return {

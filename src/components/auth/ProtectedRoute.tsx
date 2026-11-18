@@ -16,7 +16,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   children,
   requiredRole,
 }) => {
-  const { isAuthenticated, isLoading, profile, isSuperAdmin, isImpersonating } = useAuth();
+  const { isAuthenticated, isLoading, profile, isSuperAdmin, isImpersonating, logout } = useAuth();
   const location = useLocation();
 
   // 1. Wait for auth initialization to complete
@@ -56,6 +56,30 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   // 4. Super Admin when impersonating has access to the target role view
   if (isSuperAdmin || profile?.role === 'admin') {
     return children;
+  }
+
+  // 4b. Block suspended accounts across all portals with clear notice & logout
+  if (profile?.subscription_status === 'suspended') {
+    return (
+      <div className="min-h-screen bg-surface flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white border border-rose-200 rounded-3xl p-6 sm:p-8 shadow-xl text-center space-y-4">
+          <div className="w-14 h-14 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center mx-auto text-2xl">
+            ⛔
+          </div>
+          <h1 className="text-lg font-black text-ink">تم تجميد هذا الحساب</h1>
+          <p className="text-xs font-bold text-steel-600 leading-relaxed">
+            تم إيقاف وتجميد حسابك مؤقتاً من طرف إدارة منصة JADIJCB. يرجى التواصل مع الإدارة لإعادة التفعيل.
+          </p>
+          <button
+            type="button"
+            onClick={() => logout()}
+            className="w-full py-3 px-4 rounded-xl bg-ink text-white hover:bg-steel-800 text-xs font-black transition-colors cursor-pointer"
+          >
+            تسجيل الخروج
+          </button>
+        </div>
+      </div>
+    );
   }
 
   // 5. Role-specific route gating

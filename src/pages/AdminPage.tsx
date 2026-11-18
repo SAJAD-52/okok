@@ -100,6 +100,11 @@ export const AdminPage: React.FC = () => {
   const [adminPasswordSaved, setAdminPasswordSaved] = useState<boolean>(false);
   const [adminIssuedOtp, setAdminIssuedOtp] = useState<string>('');
 
+  // Account action loading & Delete Confirmation Modal state
+  const [processingAccountId, setProcessingAccountId] = useState<string | null>(null);
+  const [deleteAccountTarget, setDeleteAccountTarget] = useState<AdminAccountDetail | null>(null);
+  const [isDeletingAccount, setIsDeletingAccount] = useState<boolean>(false);
+
   useEffect(() => {
     platformSettingsStore.pullFromRemote().then((s) => {
       setSettingsForm(s);
@@ -282,42 +287,103 @@ export const AdminPage: React.FC = () => {
 
   // Account actions
   const handleToggleSuspend = async (acc: AdminAccountDetail) => {
-    const isNowSuspended = await adminService.toggleSuspendUser(acc.id);
-    toast.success(
-      isNowSuspended
-        ? `تم تجميد حساب ${acc.full_name} بنجاح.`
-        : `تم إلغاء التجميد وإعادة تنشيط حساب ${acc.full_name}.`
-    );
-    loadPlatformData();
+    if (acc.role === 'admin' || acc.id === user?.id) {
+      toast.error('لا يمكن تجميد حساب المشرف العام.');
+      return;
+    }
+    setProcessingAccountId(acc.id);
+    try {
+      const isNowSuspended = await adminService.toggleSuspendUser(acc.id, acc.is_suspended);
+      setAccounts((prev) =>
+        prev.map((item) =>
+          item.id === acc.id
+            ? {
+                ...item,
+                is_suspended: isNowSuspended,
+                subscription_status: isNowSuspended ? 'suspended' : 'active',
+              }
+            : item
+        )
+      );
+      toast.success(
+        isNowSuspended
+          ? `⛔ تم تجميد حساب ${acc.full_name} بنجاح وإيقاف دخوله للمنصة.`
+          : `🔓 تم إلغاء التجميد وإعادة تنشيط حساب ${acc.full_name}.`
+      );
+      await loadPlatformData();
+    } catch (err: any) {
+      toast.error(err?.message || 'تعذر تغيير حالة تجميد الحساب، يرجى المحاولة مرة أخرى.');
+    } finally {
+      setProcessingAccountId(null);
+    }
   };
 
   const handleGrantVip = async (acc: AdminAccountDetail) => {
-    await adminService.grantVipSubscription(acc.id, 12);
-    toast.success(`تم تفعيل اشتراك VIP سنوي غير محدود لحساب ${acc.full_name} 👑!`);
-    loadPlatformData();
+    setProcessingAccountId(acc.id);
+    try {
+      await adminService.grantVipSubscription(acc.id, 12);
+      toast.success(`تم تفعيل اشتراك VIP سنوي غير محدود لحساب ${acc.full_name} 👑!`);
+      await loadPlatformData();
+    } catch (err: any) {
+      toast.error(err?.message || 'تعذر تفعيل اشتراك VIP.');
+    } finally {
+      setProcessingAccountId(null);
+    }
   };
 
   const handleExtendTrial = async (acc: AdminAccountDetail) => {
-    await adminService.extendTrial(acc.id, 3);
-    toast.success(`تم تمديد الفترة التجريبية 72 ساعة إضافية لحساب ${acc.full_name}.`);
-    loadPlatformData();
+    setProcessingAccountId(acc.id);
+    try {
+      await adminService.extendTrial(acc.id, 3);
+      toast.success(`تم تمديد الفترة التجريبية 72 ساعة إضافية لحساب ${acc.full_name}.`);
+      await loadPlatformData();
+    } catch (err: any) {
+      toast.error(err?.message || 'تعذر تمديد الفترة التجريبية.');
+    } finally {
+      setProcessingAccountId(null);
+    }
   };
 
   const handleChangeRole = async (acc: AdminAccountDetail, newRole: UserRole) => {
-    await adminService.changeUserRole(acc.id, newRole);
-    toast.success(
-      `تم تغيير صفة الحساب إلى: ${
-        newRole === 'owner' ? 'مالك آليات' : newRole === 'driver' ? 'سائق آليات' : 'زبون / مقاولة'
-      }`
-    );
-    loadPlatformData();
+    setProcessingAccountId(acc.id);
+    try {
+      await adminService.changeUserRole(acc.id, newRole);
+      toast.success(
+        `تم تغيير صفة الحساب إلى: ${
+          newRole === 'owner' ? 'مالك آليات' : newRole === 'driver' ? 'سائق آليات' : 'زبون / مقاولة'
+        }`
+      );
+      await loadPlatformData();
+    } catch (err: any) {
+      toast.error(err?.message || 'تعذر تغيير صفة الحساب.');
+    } finally {
+      setProcessingAccountId(null);
+    }
   };
 
-  const handleDeleteAccount = async (acc: AdminAccountDetail) => {
-    if (confirm(`هل أنت متأكد من حذف حساب ${acc.full_name} نهائياً من المنصة؟`)) {
-      await adminService.deleteAccount(acc.id);
-      toast.success('تم حذف الحساب بنجاح.');
-      loadPlatformData();
+  const handleOpenDeleteAccount = (acc: AdminAccountDetail) => {
+    if (acc.role === 'admin' || acc.id === user?.id) {
+      toast.error('لا يمكن حذف حساب المشرف العام.');
+      return;
+    }
+    setDeleteAccountTarget(acc);
+  };
+
+  const handleConfirmDeleteAccount = async () => {
+    if (!deleteAccountTarget) return;
+    setIsDeletingAccount(true);
+    setProcessingAccountId(deleteAccountTarget.id);
+    try {
+      await adminService.deleteAccount(deleteAccountTarget.id);
+      setAccounts((prev) => prev.filter((item) => item.id !== deleteAccountTarget.id));
+      toast.success(`تم حذف حساب ${deleteAccountTarget.full_name} نهائياً من المنصة.`);
+      setDeleteAccountTarget(null);
+      await loadPlatformData();
+    } catch (err: any) {
+      toast.error(err?.message || 'تعذر حذف الحساب من قاعدة البيانات.');
+    } finally {
+      setIsDeletingAccount(false);
+      setProcessingAccountId(null);
     }
   };
 
@@ -759,6 +825,21 @@ export const AdminPage: React.FC = () => {
                     type="button"
                     onClick={() => {
                       setFilterRole('all');
+                      setFilterStatus('suspended');
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      filterStatus === 'suspended'
+                        ? 'bg-rose-700 text-white shadow-xs'
+                        : 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100'
+                    }`}
+                  >
+                    ⛔ حسابات مجمدة ({accounts.filter((a) => a.is_suspended).length})
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFilterRole('all');
                       setFilterStatus('inactive_7d');
                     }}
                     className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
@@ -928,27 +1009,37 @@ export const AdminPage: React.FC = () => {
                       </Button>
 
                       {/* Suspend / Unsuspend */}
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleToggleSuspend(acc)}
-                        className={`text-xs font-bold ${
-                          acc.is_suspended ? 'text-emerald-700 hover:bg-emerald-50' : 'text-rose-600 hover:bg-rose-50'
-                        }`}
-                      >
-                        {acc.is_suspended ? 'إلغاء التجميد 🔓' : 'تجميد الحساب ⛔'}
-                      </Button>
+                      {acc.role !== 'admin' && acc.id !== user?.id && (
+                        <>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            disabled={processingAccountId === acc.id}
+                            isLoading={processingAccountId === acc.id}
+                            onClick={() => handleToggleSuspend(acc)}
+                            className={`text-xs font-bold ${
+                              acc.is_suspended
+                                ? 'text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100'
+                                : 'text-rose-600 hover:bg-rose-50'
+                            }`}
+                          >
+                            {acc.is_suspended ? 'إلغاء التجميد 🔓' : 'تجميد الحساب ⛔'}
+                          </Button>
 
-                      {/* Delete */}
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteAccount(acc)}
-                        className="p-2 rounded-xl text-steel-400 hover:text-danger hover:bg-rose-50 transition-colors cursor-pointer"
-                        title="حذف الحساب"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                          {/* Delete */}
+                          <button
+                            type="button"
+                            disabled={processingAccountId === acc.id}
+                            onClick={() => handleOpenDeleteAccount(acc)}
+                            className="p-2 rounded-xl text-steel-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer disabled:opacity-50"
+                            title="حذف الحساب نهائياً"
+                            aria-label="حذف الحساب"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 </Card>
@@ -1575,6 +1666,76 @@ export const AdminPage: React.FC = () => {
                 )}
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Permanent Account Deletion Confirmation Modal */}
+      {deleteAccountTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/80 backdrop-blur-sm">
+          <div className="relative bg-white border border-rose-200 rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl text-start">
+            <div className="flex items-start justify-between gap-3 pb-3 border-b border-steel-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center shrink-0">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-ink">تأكيد حذف الحساب نهائياً</h3>
+                  <p className="text-[11px] text-steel-500">
+                    هذا الإجراء لا يمكن التراجع عنه
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={isDeletingAccount}
+                onClick={() => setDeleteAccountTarget(null)}
+                className="w-8 h-8 rounded-lg bg-steel-100 text-steel-500 hover:text-ink flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="py-4 space-y-3">
+              <div className="p-3.5 rounded-2xl bg-steel-50 border border-steel-200 space-y-1">
+                <div className="text-sm font-black text-ink">{deleteAccountTarget.full_name}</div>
+                {deleteAccountTarget.company_name && (
+                  <div className="text-xs font-bold text-steel-700">{deleteAccountTarget.company_name}</div>
+                )}
+                <div className="text-xs font-mono font-bold text-steel-600" dir="ltr">
+                  {deleteAccountTarget.phone}
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs font-bold text-rose-800 leading-relaxed">
+                سيتم حذف الحساب نهائياً من قاعدة البيانات مع جميع آلياته ووثائقه وبيانات تسجيل الدخول. إذا كنت تريد إيقافه مؤقتاً فقط يمكنك استخدام زر «تجميد الحساب».
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-steel-100">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={isDeletingAccount}
+                onClick={() => setDeleteAccountTarget(null)}
+                className="font-bold"
+              >
+                إلغاء
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                isLoading={isDeletingAccount}
+                disabled={isDeletingAccount}
+                onClick={handleConfirmDeleteAccount}
+                leftIcon={<Trash2 className="w-4 h-4" />}
+                className="bg-rose-600 hover:bg-rose-700 text-white border-rose-600 font-black"
+              >
+                نعم، حذف الحساب نهائياً
+              </Button>
+            </div>
           </div>
         </div>
       )}

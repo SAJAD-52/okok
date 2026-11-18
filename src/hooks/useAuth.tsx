@@ -217,7 +217,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Ignore cleanup errors
       }
 
-      if (data && isLifetimeVip && (data as any)?.subscription_status !== 'active') {
+      if (
+        data &&
+        isLifetimeVip &&
+        (data as any)?.subscription_status !== 'active' &&
+        (data as any)?.subscription_status !== 'suspended'
+      ) {
         supabase
           .from('profiles')
           .update({
@@ -283,11 +288,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         ice_number: (data as any)?.ice_number || meta.ice_number || meta.iceNumber || localCached.ice_number || '',
         onboarding_completed: (data as any)?.onboarding_completed ?? meta.onboarding_completed ?? localCached.onboarding_completed ?? true,
         whatsapp_verified: Boolean((data as any)?.whatsapp_verified ?? meta.whatsapp_verified ?? localCached.whatsapp_verified ?? true),
-        subscription_status: isLifetimeVip
-          ? 'active'
-          : resolvedRole === 'driver' || resolvedRole === 'client' || resolvedRole === 'contractor'
-          ? 'active'
-          : (data as any)?.subscription_status || localCached.subscription_status || 'trial',
+        subscription_status:
+          (data as any)?.subscription_status === 'suspended' && resolvedRole !== 'admin'
+            ? 'suspended'
+            : isLifetimeVip
+            ? 'active'
+            : resolvedRole === 'driver' || resolvedRole === 'client' || resolvedRole === 'contractor'
+            ? 'active'
+            : (data as any)?.subscription_status || localCached.subscription_status || 'trial',
         trial_started_at: (data as any)?.trial_started_at || localCached.trial_started_at || new Date().toISOString(),
         trial_ends_at: (data as any)?.trial_ends_at || localCached.trial_ends_at || new Date(Date.now() + 72 * 3600 * 1000).toISOString(),
         subscription_ends_at: isLifetimeVip
@@ -439,6 +447,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             saveProfileLocally(prof);
           }
         }
+        if (prof?.subscription_status === 'suspended' && prof?.role !== 'admin') {
+          await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+          setUser(null);
+          saveProfileLocally(null);
+          setIsLoading(false);
+          return { success: false, error: 'auth.account_suspended' };
+        }
         setIsLoading(false);
         const finalRole =
           data.user.user_metadata?.role === 'driver' && prof?.role !== 'admin'
@@ -565,6 +580,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (data?.user) {
         setUser(data.user);
         const prof = await fetchProfile(data.user.id, data.user);
+        if (prof?.subscription_status === 'suspended' && prof?.role !== 'admin') {
+          await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+          setUser(null);
+          saveProfileLocally(null);
+          setIsLoading(false);
+          return { success: false, error: 'auth.account_suspended' };
+        }
         setIsLoading(false);
         return { success: true, role: prof?.role };
       }

@@ -75,6 +75,7 @@ class AdminService {
 
         const rawPhone = p.phone || p.phone_number || '';
         const isVipLifetime = isLifetimeFreePhone(rawPhone);
+        const isSuspendedInDb = p.subscription_status === 'suspended';
 
         return {
           id: p.id,
@@ -85,7 +86,11 @@ class AdminService {
           city: p.city || 'Casablanca',
           ice_number: p.ice_number,
           rc_number: p.rc_number,
-          subscription_status: isVipLifetime ? 'active' : p.subscription_status || 'trial',
+          subscription_status: isSuspendedInDb
+            ? 'suspended'
+            : isVipLifetime
+            ? 'active'
+            : p.subscription_status || 'trial',
           trial_started_at: p.trial_started_at,
           trial_ends_at: p.trial_ends_at,
           subscription_ends_at: isVipLifetime
@@ -101,7 +106,7 @@ class AdminService {
           bookings_count: userBookings.length,
           documents_count: userDocs.length,
           total_volume_mad: totalVolume,
-          is_suspended: p.subscription_status === 'suspended',
+          is_suspended: isSuspendedInDb,
         };
       });
 
@@ -179,24 +184,71 @@ class AdminService {
     }
   }
 
-  // Toggle user suspension / freezing in real database
-  async toggleSuspendUser(userId: string, currentStatus?: SubscriptionStatus): Promise<boolean> {
+  // Toggle user suspension / freezing in real database (RPC first, verified fallback)
+  async toggleSuspendUser(userId: string, currentlySuspended?: boolean): Promise<boolean> {
     if (!isSupabaseConfigured) return false;
 
-    const isSuspended = currentStatus === 'suspended';
-    const newStatus: SubscriptionStatus = isSuspended ? 'active' : 'suspended';
+    const targetSuspend = currentlySuspended !== undefined ? !currentlySuspended : null;
 
-    const { error } = await supabase
+    // 1. Try dedicated SECURITY DEFINER RPC first
+    const { data: rpcData, error: rpcError } = await supabase.rpc('admin_toggle_suspend_user', {
+      p_user_id: userId,
+      p_suspend: targetSuspend,
+    });
+
+    if (!rpcError && rpcData) {
+      if (rpcData.success) {
+        return Boolean(rpcData.is_suspended);
+      }
+      const errCode = rpcData.error || 'SUSPEND_FAILED';
+      if (errCode === 'CANNOT_SUSPEND_ADMIN' || errCode === 'CANNOT_SUSPEND_SELF') {
+        throw new Error('لا يمكن تجميد حساب المشرف العام.');
+      }
+      if (errCode === 'FORBIDDEN') {
+        throw new Error('صلاحية المشرف العام مطلوبة لتنفيذ هذا الإجراء.');
+      }
+      throw new Error(`تعذر تغيير حالة التجميد (${errCode})`);
+    }
+
+    // 2. Fallback if latest SQL migration isn't applied yet: direct update with row verification
+    let nextSuspended = targetSuspend;
+    if (nextSuspended === null) {
+      const { data: row } = await supabase
+        .from('profiles')
+        .select('subscription_status')
+        .eq('id', userId)
+        .maybeSingle();
+      nextSuspended = row?.subscription_status !== 'suspended';
+    }
+
+    const newStatus: SubscriptionStatus = nextSuspended ? 'suspended' : 'active';
+
+    const { data: updatedRows, error } = await supabase
       .from('profiles')
       .update({ subscription_status: newStatus })
-      .eq('id', userId);
+      .eq('id', userId)
+      .select('id, subscription_status');
 
     if (error) {
       console.warn('toggleSuspendUser error:', error);
       throw error;
     }
 
-    return !isSuspended;
+    if (!updatedRows || updatedRows.length === 0) {
+      throw new Error(
+        'تعذر تحديث حالة الحساب بسبب صلاحيات قاعدة البيانات (يرجى تطبيق ملف migration الأخير في Supabase SQL Editor).'
+      );
+    }
+
+    if (nextSuspended) {
+      await supabase
+        .from('machines')
+        .update({ is_published: false })
+        .eq('owner_id', userId)
+        .then(() => {}, () => {});
+    }
+
+    return Boolean(nextSuspended);
   }
 
   // Grant VIP Unlimited Lifetime or Annual Subscription in real database
@@ -256,18 +308,45 @@ class AdminService {
     }
   }
 
-  // Delete user account permanently from database
+  // Delete user account permanently from database (profiles + auth.users via RPC, verified fallback)
   async deleteAccount(userId: string): Promise<void> {
     if (!isSupabaseConfigured) return;
 
-    const { error } = await supabase
+    // 1. Try dedicated SECURITY DEFINER RPC (deletes profiles + auth.users + related records)
+    const { data: rpcData, error: rpcError } = await supabase.rpc('admin_delete_user_account', {
+      p_user_id: userId,
+    });
+
+    if (!rpcError && rpcData) {
+      if (rpcData.success) {
+        return;
+      }
+      const errCode = rpcData.error || 'DELETE_FAILED';
+      if (errCode === 'CANNOT_DELETE_ADMIN' || errCode === 'CANNOT_DELETE_SELF') {
+        throw new Error('لا يمكن حذف حساب المشرف العام.');
+      }
+      if (errCode === 'FORBIDDEN') {
+        throw new Error('صلاحية المشرف العام مطلوبة لحذف الحسابات.');
+      }
+      throw new Error(`تعذر حذف الحساب (${errCode})`);
+    }
+
+    // 2. Fallback if latest SQL migration isn't applied yet: direct delete with row verification
+    const { data: deletedRows, error } = await supabase
       .from('profiles')
       .delete()
-      .eq('id', userId);
+      .eq('id', userId)
+      .select('id');
 
     if (error) {
       console.warn('deleteAccount error:', error);
       throw error;
+    }
+
+    if (!deletedRows || deletedRows.length === 0) {
+      throw new Error(
+        'تعذر حذف الحساب بسبب قيود صلاحيات قاعدة البيانات (يرجى تشغيل ملف migration الأخير في Supabase SQL Editor).'
+      );
     }
   }
 }

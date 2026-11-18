@@ -282,6 +282,7 @@
     "db_trigger_error": "Erreur de déclencheur de base de données (Database error saving new user). Veuillez exécuter le script de réparation dans Supabase SQL Editor.",
     "schema_not_applied": "Les tables de base de données ne sont pas encore créées dans Supabase. Veuillez exécuter le fichier (20261104000000_init_schema.sql) dans l'éditeur SQL de Supabase.",
     "network_error": "Impossible de joindre la base de données (Supabase). Vérifiez votre connexion Internet ou l'état actif de votre projet Supabase.",
+    "account_suspended": "⛔ Ce compte a été suspendu par l'administration. Veuillez contacter le support pour le réactiver.",
     "supabase_not_configured": "Les variables VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY sont absentes de l'environnement de déploiement (Vercel). Ajoutez-les puis redéployez."
   },
   "welcome": {

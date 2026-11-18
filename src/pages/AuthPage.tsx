@@ -6,7 +6,7 @@
 // ============================================================================
 
 import React, { useState } from 'react';
-import { useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Truck,
   Users,
@@ -15,7 +15,6 @@ import {
   Eye,
   EyeOff,
   Sparkles,
-  ShieldCheck,
   CheckSquare,
   Square,
   Building2,
@@ -1166,21 +1165,6 @@ export const AuthPage: React.FC = () => {
             </Button>
           </form>
           )}
-
-          {/* Super Admin Quick Portal Link */}
-          <div className="mt-5 pt-4 border-t border-steel-100 text-center">
-            <Link
-              to="/admin/login"
-              className="inline-flex items-center gap-1.5 text-[11px] font-bold text-steel-500 hover:text-ink transition-colors"
-            >
-              <ShieldCheck className="w-3.5 h-3.5 text-primary-dark" />
-              <span>
-                {lang === 'fr'
-                  ? 'Accès Super Admin (Direction)'
-                  : 'بوابة المشرف العام (Super Admin) ←'}
-              </span>
-            </Link>
-          </div>
         </Card>
       </main>
 

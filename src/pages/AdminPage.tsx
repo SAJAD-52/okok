@@ -41,6 +41,7 @@ import {
   RefreshCw,
   KeyRound,
   MessageCircle,
+  LogOut,
 } from 'lucide-react';
 import { PublicHeader } from '../components/layout/PublicHeader';
 import { Footer } from '../components/layout/Footer';
@@ -62,7 +63,7 @@ type AdminTab = 'accounts' | 'machines' | 'bookings' | 'payments' | 'settings';
 export const AdminPage: React.FC = () => {
   const { t, lang, isRTL } = useLanguage();
   const navigate = useNavigate();
-  const { user, profile, impersonateUser, impersonatedUser, stopImpersonating, isImpersonating } = useAuth();
+  const { user, profile, impersonateUser, impersonatedUser, stopImpersonating, isImpersonating, logout } = useAuth();
 
   const [activeTab, setActiveTab] = useState<AdminTab>('accounts');
 
@@ -632,6 +633,20 @@ export const AdminPage: React.FC = () => {
             className="text-xs text-steel-300 hover:text-white"
           >
             تحديث البيانات
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              await logout();
+              toast.success(lang === 'fr' ? 'Déconnexion réussie' : 'تم تسجيل الخروج بنجاح');
+              navigate('/admin/login');
+            }}
+            leftIcon={<LogOut className="w-3.5 h-3.5" />}
+            className="text-xs font-black border-rose-500/40 text-rose-300 hover:bg-rose-600 hover:text-white hover:border-rose-600"
+          >
+            {lang === 'fr' ? 'Déconnexion' : 'تسجيل الخروج'}
           </Button>
         </div>
       </div>

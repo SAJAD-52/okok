@@ -1201,30 +1201,6 @@ export const MachineDetailPage: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* Exact entered tariff breakdown */}
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-center">
-                          {termButtons.map((tb) => (
-                            <button
-                              key={tb.key}
-                              type="button"
-                              onClick={() => {
-                                setSelectedTerm(tb.key);
-                                setSelectedDuration(1);
-                              }}
-                              className={`relative p-2 rounded-xl border text-[10px] transition-all cursor-pointer ${
-                                selectedTerm === tb.key
-                                  ? 'border-primary bg-amber-50/70 text-ink ring-1 ring-primary/40'
-                                  : 'border-steel-200 bg-surface text-steel-600 hover:border-steel-300'
-                              }`}
-                            >
-                              <span className="block font-bold opacity-80">{tb.shortLabel}</span>
-                              <span className="font-mono font-black text-xs text-ink latin-nums">
-                                {tb.price > 0 ? formatPriceMAD(tb.price, lang) : (lang === 'fr' ? 'Non défini' : 'غير محدد')}
-                              </span>
-                            </button>
-                          ))}
-                        </div>
-
                         {/* Clickable Tiered Volume Discounts for the Selected Period Only */}
                         {rateEval.sortedTiersForTerm.length > 0 && (
                           <div className="pt-2 border-t border-steel-200 space-y-2">

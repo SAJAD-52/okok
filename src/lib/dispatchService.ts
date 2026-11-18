@@ -72,15 +72,15 @@ export interface MatchedOwnerTarget {
 }
 
 const CATEGORY_ALIASES: Record<string, string[]> = {
-  loader: ['loader', 'loaders', 'backhoe-loaders', 'backhoe', 'tractopelle', 'jcb'],
-  excavator: ['excavator', 'excavators', 'pelle', 'pelleteuse'],
-  bulldozer: ['bulldozer', 'bulldozers', 'bouteur'],
-  crane: ['crane', 'cranes', 'grue'],
-  truck: ['truck', 'trucks', 'camion', 'benne'],
-  'concrete-mixer': ['concrete-mixer', 'concrete', 'toupie', 'malaxeur'],
-  compactor: ['compactor', 'compactors', 'compacteur', 'rouleau'],
+  loader: ['loader', 'loaders', 'backhoe-loaders', 'backhoe', 'tractopelle', 'chargeuse', 'bobcat', 'tracteur_agricole', 'moissonneuse', 'jcb'],
+  excavator: ['excavator', 'excavators', 'pelle', 'pelleteuse', 'pelle_chenilles', 'pelle_pneus', 'mini_pelle', 'brise_roche_carriere', 'foreuse'],
+  bulldozer: ['bulldozer', 'bulldozers', 'bouteur', 'niveleuse'],
+  crane: ['crane', 'cranes', 'grue', 'grue_mobile', 'grue_tour', 'camion_grue'],
+  truck: ['truck', 'trucks', 'camion', 'benne', 'camion_benne', 'porte_char'],
+  'concrete-mixer': ['concrete-mixer', 'concrete', 'toupie', 'malaxeur', 'camion_toupie', 'pompe_beton'],
+  compactor: ['compactor', 'compactors', 'compacteur', 'rouleau', 'finisseur', 'fraiseuse_route'],
   generator: ['generator', 'generators', 'groupe-electrogene'],
-  forklift: ['forklift', 'forklifts', 'chariot', 'telescopique', 'manitou'],
+  forklift: ['forklift', 'forklifts', 'chariot', 'telescopique', 'manitou', 'chariot_elevateur'],
   scaffolding: ['scaffolding', 'echafaudage', 'coffrage'],
 };
 

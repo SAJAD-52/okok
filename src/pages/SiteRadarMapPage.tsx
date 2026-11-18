@@ -28,7 +28,7 @@ import {
   ChevronLeft,
 } from 'lucide-react';
 import { Machine, ContractorSite, MoroccanCity } from '../types/database';
-import { EQUIPMENT_CATEGORIES } from '../data/categories';
+import { EQUIPMENT_CATEGORIES, matchesEquipmentCategoryFilter } from '../data/categories';
 import { MOROCCAN_CITIES } from '../data/cities';
 import { calculateDistanceKm, estimateDeliveryMinutes, formatDistanceKm, formatEta } from '../lib/geoUtils';
 import { useLanguage } from '../hooks/useLanguage';
@@ -245,7 +245,11 @@ export const SiteRadarMapPage: React.FC = () => {
       })
       .filter((m) => {
         // Category filter
-        if (selectedCategory !== 'all' && m.category !== selectedCategory) {
+        if (
+          selectedCategory !== 'all' &&
+          !matchesEquipmentCategoryFilter(m.category, selectedCategory) &&
+          !matchesEquipmentCategoryFilter(m.category_id, selectedCategory)
+        ) {
           return false;
         }
         // Radius filter

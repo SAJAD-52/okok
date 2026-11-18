@@ -38,6 +38,7 @@ import {
   FileText,
 } from 'lucide-react';
 import { PublicHeader } from '../components/layout/PublicHeader';
+import { matchesEquipmentCategoryFilter } from '../data/categories';
 import { Footer } from '../components/layout/Footer';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -238,7 +239,11 @@ export const PublicStorefrontPage: React.FC = () => {
       if (filterMode === 'sale' && m.listing_mode === 'rent') return false;
 
       // 2. Category Filter
-      if (categoryFilter !== 'all' && m.category !== categoryFilter && m.category_id !== categoryFilter) {
+      if (
+        categoryFilter !== 'all' &&
+        !matchesEquipmentCategoryFilter(m.category, categoryFilter) &&
+        !matchesEquipmentCategoryFilter(m.category_id, categoryFilter)
+      ) {
         return false;
       }
 

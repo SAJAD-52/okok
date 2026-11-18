@@ -28,6 +28,7 @@ import { useLanguage } from '../hooks/useLanguage';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { machineStore, resolveMachineRates, resolveVolumeDiscounts } from '../lib/machineStore';
 import { MOROCCAN_CITIES, getCityById } from '../data/cities';
+import { matchesEquipmentCategoryFilter } from '../data/categories';
 import { calculateDistanceKm } from '../lib/geoUtils';
 import { Machine } from '../types/database';
 
@@ -342,9 +343,12 @@ export const MarketplacePage: React.FC = () => {
         if (modeParam === 'sale' && item.listing_mode === 'rent') return false;
       }
 
-      // 4. Category filter (standard equipment categories)
+      // 4. Category filter (supports parent categories and specific driver categories)
       if (!isSparePartsSection && categoryParam && categoryParam !== 'spare-parts') {
-        if (item.category_id !== categoryParam && item.category !== categoryParam) {
+        if (
+          !matchesEquipmentCategoryFilter(item.category_id, categoryParam) &&
+          !matchesEquipmentCategoryFilter(item.category, categoryParam)
+        ) {
           return false;
         }
       }

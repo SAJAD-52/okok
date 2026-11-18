@@ -290,6 +290,9 @@ export function inferDriverMachineCategory(machine?: {
 } | null): string {
   if (!machine) return 'tractopelle';
   const cat = String(machine.category || machine.category_id || '').toLowerCase();
+  const exactMatch = DRIVER_MACHINE_OPTIONS.find((m) => m.id === cat);
+  if (exactMatch) return exactMatch.id;
+
   const hay = `${cat} ${machine.title_ar || ''} ${machine.title_fr || ''} ${machine.brand || ''} ${
     machine.model || ''
   }`.toLowerCase();

@@ -22,7 +22,8 @@ import {
   TrendingDown,
 } from 'lucide-react';
 import { Machine, ListingMode, MachineCondition, VolumeDiscountTier, RentalTermType } from '../../types/database';
-import { EQUIPMENT_CATEGORIES } from '../../data/categories';
+import { EQUIPMENT_CATEGORIES, normalizeOwnerCategoryId } from '../../data/categories';
+import { DRIVER_MACHINE_GROUPS, DRIVER_MACHINE_OPTIONS } from '../../data/driverMachines';
 import { MOROCCAN_CITIES } from '../../data/cities';
 import { formatPriceMAD, formatTermQuantityUnit } from '../../data/rentalTerms';
 import { Button } from '../ui/Button';
@@ -63,11 +64,7 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
   const [titleFr, setTitleFr] = useState(machineToEdit?.title_fr || '');
   const [descAr, setDescAr] = useState(machineToEdit?.description_ar || '');
   const [descFr, setDescFr] = useState(machineToEdit?.description_fr || '');
-  const [categoryId, setCategoryId] = useState(
-    machineToEdit?.category_id && machineToEdit.category_id !== 'backhoe-loaders'
-      ? machineToEdit.category_id
-      : 'loader'
-  );
+  const [categoryId, setCategoryId] = useState(() => normalizeOwnerCategoryId(machineToEdit));
   const [brand, setBrand] = useState(machineToEdit?.brand || 'JCB');
   const [model, setModel] = useState(machineToEdit?.model || '3CX Eco');
   const [year, setYear] = useState<number>(machineToEdit?.year || 2022);
@@ -156,11 +153,7 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
     setTitleFr(machineToEdit?.title_fr || '');
     setDescAr(machineToEdit?.description_ar || '');
     setDescFr(machineToEdit?.description_fr || '');
-    setCategoryId(
-      machineToEdit?.category_id && machineToEdit.category_id !== 'backhoe-loaders'
-        ? machineToEdit.category_id
-        : 'loader'
-    );
+    setCategoryId(normalizeOwnerCategoryId(machineToEdit));
     setBrand(machineToEdit?.brand || 'JCB');
     setModel(machineToEdit?.model || '3CX Eco');
     setYear(machineToEdit?.year || 2022);
@@ -734,11 +727,29 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
                       onChange={(e) => setCategoryId(e.target.value)}
                       className="w-full px-3 py-2.5 text-xs font-bold bg-white border border-steel-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary min-h-[44px]"
                     >
-                      {EQUIPMENT_CATEGORIES.filter((c) => c.slug !== 'spare-parts').map((cat) => (
-                        <option key={cat.id} value={cat.slug}>
-                          {lang === 'fr' ? cat.name_fr : cat.name_ar}
-                        </option>
+                      {DRIVER_MACHINE_GROUPS.map((grp) => (
+                        <optgroup
+                          key={grp.id}
+                          label={lang === 'fr' ? grp.labelFr : grp.labelAr}
+                        >
+                          {DRIVER_MACHINE_OPTIONS.filter((m) => m.group === grp.id).map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {lang === 'fr' ? m.labelFr : m.labelAr}
+                            </option>
+                          ))}
+                        </optgroup>
                       ))}
+                      <optgroup
+                        label={lang === 'fr' ? 'Équipements de chantier & Énergie' : 'تجهيزات الورش والطاقة'}
+                      >
+                        {EQUIPMENT_CATEGORIES.filter(
+                          (c) => c.slug === 'generator' || c.slug === 'scaffolding'
+                        ).map((cat) => (
+                          <option key={cat.id} value={cat.slug}>
+                            {lang === 'fr' ? cat.name_fr : cat.name_ar}
+                          </option>
+                        ))}
+                      </optgroup>
                     </select>
                   </div>
 

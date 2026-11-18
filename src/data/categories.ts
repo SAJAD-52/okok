@@ -1,4 +1,5 @@
 import { EquipmentCategory } from '../types/database';
+import { DRIVER_MACHINE_OPTIONS, inferDriverMachineCategory } from './driverMachines';
 
 export const EQUIPMENT_CATEGORIES: EquipmentCategory[] = [
   {
@@ -119,8 +120,52 @@ export const getCategoryById = (id: string): EquipmentCategory | undefined => {
 
 export const getCategoryName = (categoryId: string, lang: 'ar' | 'fr' = 'ar'): string => {
   const cat = getCategoryById(categoryId);
-  if (!cat) return categoryId;
-  return lang === 'fr' ? cat.name_fr : cat.name_ar;
+  if (cat) return lang === 'fr' ? cat.name_fr : cat.name_ar;
+  const driverOpt = DRIVER_MACHINE_OPTIONS.find((opt) => opt.id === categoryId);
+  if (driverOpt) return lang === 'fr' ? driverOpt.labelFr : driverOpt.labelAr;
+  return categoryId;
+};
+
+const PARENT_TO_DRIVER_CATEGORIES: Record<string, string[]> = {
+  excavator: ['excavator', 'pelle_chenilles', 'pelle_pneus', 'mini_pelle', 'brise_roche_carriere', 'foreuse'],
+  loader: ['loader', 'tractopelle', 'chargeuse', 'bobcat', 'tracteur_agricole', 'moissonneuse'],
+  bulldozer: ['bulldozer', 'niveleuse'],
+  crane: ['crane', 'grue_mobile', 'grue_tour', 'camion_grue'],
+  truck: ['truck', 'camion_benne', 'porte_char'],
+  'concrete-mixer': ['concrete-mixer', 'camion_toupie', 'pompe_beton'],
+  compactor: ['compactor', 'compacteur', 'finisseur', 'fraiseuse_route'],
+  forklift: ['forklift', 'manitou', 'chariot_elevateur'],
+  generator: ['generator'],
+  scaffolding: ['scaffolding'],
+  'spare-parts': ['spare-parts'],
+};
+
+export const matchesEquipmentCategoryFilter = (
+  itemCategory: string | undefined,
+  filterCategory: string
+): boolean => {
+  if (!filterCategory || filterCategory === 'all') return true;
+  const normItem = String(itemCategory || '').toLowerCase();
+  const normFilter = String(filterCategory || '').toLowerCase();
+  if (normItem === normFilter) return true;
+  const children = PARENT_TO_DRIVER_CATEGORIES[normFilter];
+  return Boolean(children && children.includes(normItem));
+};
+
+export const normalizeOwnerCategoryId = (machine?: {
+  category?: string;
+  category_id?: string;
+  title_ar?: string;
+  title_fr?: string;
+  brand?: string;
+  model?: string;
+} | null): string => {
+  if (!machine) return 'tractopelle';
+  const raw = String(machine.category_id || machine.category || '').toLowerCase();
+  if (raw === 'generator' || raw === 'scaffolding' || raw === 'spare-parts') return raw;
+  const exactDriver = DRIVER_MACHINE_OPTIONS.find((opt) => opt.id === raw);
+  if (exactDriver) return exactDriver.id;
+  return inferDriverMachineCategory(machine);
 };
 
 export interface MachineryCategory {

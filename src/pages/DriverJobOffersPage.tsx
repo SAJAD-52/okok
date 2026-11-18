@@ -6,7 +6,7 @@
 // ============================================================================
 
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Briefcase,
   MapPin,
@@ -26,6 +26,7 @@ import {
   Calendar,
   FileText,
   Flag,
+  Lock,
 } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -42,12 +43,16 @@ import {
   applyToDriverJobOffer,
   buildDriverOfferMarkerSuffix,
   buildFallbackDriverContractFromDeal,
+  checkDriverOfferAvailability,
   fetchDriverAgreedDeals,
   fetchDriverJobOffers,
+  fetchSingleDriverOfferById,
+  parseDriverOfferMessageRow,
   submitWorkTerminationAction,
   subscribeDriverJobOffers,
 } from '../lib/driverOfferService';
 import { chatStore } from '../lib/chatStore';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { DriverContractModal } from '../components/driver/DriverContractModal';
 import { WorkTerminationModal } from '../components/driver/WorkTerminationModal';
 
@@ -73,6 +78,10 @@ export const DriverJobOffersPage: React.FC = () => {
   const { lang } = useLanguage();
   const { user, profile } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  const focusedOfferId = searchParams.get('offer') || '';
+  const tabParam = searchParams.get('tab') || '';
 
   const [offers, setOffers] = useState<DriverJobOffer[]>([]);
   const [agreedDeals, setAgreedDeals] = useState<AgreedDriverDealItem[]>([]);
@@ -82,11 +91,13 @@ export const DriverJobOffersPage: React.FC = () => {
     useState<AgreedDriverDealItem | null>(null);
   const [isEndingWork, setIsEndingWork] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<OfferFilterTab>('all');
+  const [activeTab, setActiveTab] = useState<OfferFilterTab>(
+    tabParam === 'agreed' ? 'agreed' : 'all'
+  );
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCity, setSelectedCity] = useState('all');
   const [selectedMachine, setSelectedMachine] = useState('all');
-  const [applyingId, setApplyingId] = useState<string | null>(null);
+  const [startingChatId, setStartingChatId] = useState<string | null>(null);
 
   const driverId = profile?.id || user?.id || 'driver-local';
   const driverMachines = useMemo(
@@ -100,12 +111,25 @@ export const DriverJobOffersPage: React.FC = () => {
         fetchDriverJobOffers(driverId),
         fetchDriverAgreedDeals(driverId),
       ]);
-      setOffers(list.filter((o) => o.status === 'open'));
+
+      let hydrated = list;
+      if (
+        focusedOfferId &&
+        !list.some((o) => o.id === focusedOfferId) &&
+        !agreed.some((d) => d.offer_id === focusedOfferId)
+      ) {
+        const single = await fetchSingleDriverOfferById(focusedOfferId, driverId);
+        if (single) {
+          hydrated = [single, ...list];
+        }
+      }
+
+      setOffers(hydrated);
       setAgreedDeals(agreed);
     } finally {
       setIsLoading(false);
     }
-  }, [driverId]);
+  }, [driverId, focusedOfferId]);
 
   useEffect(() => {
     loadOffers();
@@ -114,6 +138,37 @@ export const DriverJobOffersPage: React.FC = () => {
     });
     return unsub;
   }, [loadOffers, driverMachines]);
+
+  // Handle deep-link ?offer=<id> or ?tab=agreed from notification bell / push click
+  useEffect(() => {
+    if (tabParam === 'agreed') {
+      setActiveTab('agreed');
+    } else if (focusedOfferId) {
+      const inAgreed = agreedDeals.some((d) => d.offer_id === focusedOfferId);
+      setActiveTab(inAgreed ? 'agreed' : 'all');
+      setSearchQuery('');
+      setSelectedCity('all');
+      setSelectedMachine('all');
+    }
+
+    if (!focusedOfferId || isLoading) return;
+
+    const timer = setTimeout(() => {
+      const targetEl =
+        document.getElementById(`offer-card-${focusedOfferId}`) ||
+        document.getElementById(`agreed-deal-${focusedOfferId}`);
+      if (targetEl) {
+        targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 180);
+
+    return () => clearTimeout(timer);
+  }, [focusedOfferId, tabParam, isLoading, offers.length, agreedDeals]);
+
+  const openOffersCount = useMemo(
+    () => offers.filter((o) => o.status === 'open').length,
+    [offers]
+  );
 
   const availableCities = useMemo(() => {
     const set = new Set<string>();
@@ -126,6 +181,15 @@ export const DriverJobOffersPage: React.FC = () => {
   const filteredOffers = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return offers.filter((offer) => {
+      const isFocused = Boolean(focusedOfferId && offer.id === focusedOfferId);
+      // On 'all'/'matching'/'urgent' hide offers closed by others unless specifically opened via notification
+      if (
+        !isFocused &&
+        activeTab !== 'applied' &&
+        offer.status !== 'open'
+      ) {
+        return false;
+      }
       if (
         activeTab === 'matching' &&
         driverMachines.length > 0 &&
@@ -160,52 +224,24 @@ export const DriverJobOffersPage: React.FC = () => {
 
       return true;
     });
-  }, [offers, activeTab, driverMachines, selectedCity, selectedMachine, searchQuery]);
-
-  const handleApply = async (offer: DriverJobOffer) => {
-    setApplyingId(offer.id);
-    await applyToDriverJobOffer({
-      offer,
-      driverId,
-      driverName: profile?.full_name || 'سائق JADIJCB',
-      driverPhone: profile?.phone || '',
-      driverCity: profile?.city || '',
-      driverExperience: profile?.driver_experience_years || '3_5',
-    });
-
-    setOffers((prev) =>
-      prev.map((o) => (o.id === offer.id ? { ...o, has_applied: true } : o))
-    );
-    setApplyingId(null);
-
-    toast.success(
-      lang === 'fr'
-        ? 'Votre intérêt a été transmis ! Vous pouvez aussi appeler le propriétaire.'
-        : 'تم تسجيل طلبك للعمل بنجاح! يمكنك أيضاً الاتصال المباشر بالمالك.'
-    );
-  };
+  }, [offers, activeTab, driverMachines, selectedCity, selectedMachine, searchQuery, focusedOfferId]);
 
   const handleStartChat = async (offer: DriverJobOffer) => {
-    if (offer.is_demo || offer.owner_id.startsWith('starter-')) {
-      if (!offer.has_applied) {
-        await handleApply(offer);
-      }
-      if (offer.owner_phone) {
-        const cleanWa = offer.owner_phone.replace(/\D/g, '');
-        window.open(
-          `https://wa.me/${cleanWa}?text=${encodeURIComponent(
-            lang === 'fr'
-              ? `Bonjour, je suis conducteur (${profile?.full_name || ''}) intéressé par l'offre : ${offer.machine_label_fr}`
-              : `السلام عليكم، أنا سائق (${profile?.full_name || ''}) مهتم بعرض العمل الخاص بـ: ${offer.machine_label_ar}`
-          )}`,
-          '_blank',
-          'noopener,noreferrer'
-        );
-      }
-      return;
-    }
-
+    setStartingChatId(offer.id);
     try {
+      const avail = await checkDriverOfferAvailability(offer.id, driverId);
+      if (!avail.available) {
+        setOffers((prev) =>
+          prev.map((o) => (o.id === offer.id ? { ...o, status: 'closed' } : o))
+        );
+        toast.error(
+          lang === 'fr'
+            ? 'Désolé, cette offre vient d’être conclue avec un autre conducteur.'
+            : 'عذراً، تم إغلاق هذه الصفقة مع سائق آخر ولا يمكن التواصل بشأنها.'
+        );
+        return;
+      }
+
       if (!offer.has_applied) {
         await applyToDriverJobOffer({
           offer,
@@ -233,21 +269,47 @@ export const DriverJobOffersPage: React.FC = () => {
         }
       );
 
-      const baseMsg =
-        lang === 'fr'
-          ? `Bonjour, je postule pour votre offre de conducteur (${offer.machine_label_fr}) à ${offer.city}.`
-          : `السلام عليكم، أنا سائق محترف أتقدم لطلب العمل الخاص بـ (${offer.machine_label_ar}) بمدينة ${offer.city}.`;
-
-      await chatStore.sendMessage(
-        conv.id,
-        driverId,
-        `${baseMsg}${buildDriverOfferMarkerSuffix(offer, driverId)}`,
-        offer.owner_id,
-        {
-          senderName: profile?.full_name || 'سائق',
-          recipientRole: 'owner',
-        }
+      // Only send the offer intro card marker once per offer inside the thread
+      const existingLocal = await chatStore.getMessages(conv.id);
+      let hasMarker = existingLocal.some(
+        (m) => parseDriverOfferMessageRow(m)?.offer_id === offer.id
       );
+
+      if (!hasMarker && isSupabaseConfigured) {
+        try {
+          const { data: dbMsgs } = await supabase
+            .from('messages')
+            .select('id, body, content')
+            .eq('conversation_id', conv.id)
+            .order('created_at', { ascending: false })
+            .limit(30);
+          if (Array.isArray(dbMsgs)) {
+            hasMarker = dbMsgs.some(
+              (m: any) => parseDriverOfferMessageRow(m)?.offer_id === offer.id
+            );
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (!hasMarker) {
+        const baseMsg =
+          lang === 'fr'
+            ? `Bonjour, je vous contacte au sujet de votre offre (${offer.machine_label_fr}).`
+            : `السلام عليكم، أتواصل معكم بخصوص عرض العمل الخاص بـ (${offer.machine_label_ar}).`;
+
+        await chatStore.sendMessage(
+          conv.id,
+          driverId,
+          `${baseMsg}${buildDriverOfferMarkerSuffix(offer, driverId)}`,
+          offer.owner_id,
+          {
+            senderName: profile?.full_name || 'سائق',
+            recipientRole: 'owner',
+          }
+        );
+      }
 
       navigate(
         `/driver/messages?conv=${encodeURIComponent(conv.id)}&offer=${encodeURIComponent(offer.id)}`
@@ -258,6 +320,8 @@ export const DriverJobOffersPage: React.FC = () => {
           ? 'Impossible d’ouvrir la messagerie.'
           : 'تعذر فتح المحادثة، يمكنك استخدام الاتصال المباشر.'
       );
+    } finally {
+      setStartingChatId(null);
     }
   };
 
@@ -346,7 +410,10 @@ export const DriverJobOffersPage: React.FC = () => {
             [
               {
                 id: 'all',
-                label: lang === 'fr' ? `Toutes (${offers.length})` : `الكل (${offers.length})`,
+                label:
+                  lang === 'fr'
+                    ? `Toutes (${openOffersCount})`
+                    : `الكل (${openOffersCount})`,
               },
               {
                 id: 'matching',
@@ -441,9 +508,293 @@ export const DriverJobOffersPage: React.FC = () => {
         </div>
       </Card>
 
-      {/* Agreed Jobs / Finalized Deals Section */}
-      {(activeTab === 'agreed' || (activeTab === 'all' && filteredAgreedDeals.length > 0)) && (
-        <div className="space-y-3">
+      {/* Job Offers Cards Feed (Displayed FIRST so new offers are always visible immediately) */}
+      {activeTab === 'agreed' ? null : isLoading ? (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="h-64 rounded-2xl bg-steel-100 animate-pulse" />
+          ))}
+        </div>
+      ) : filteredOffers.length === 0 ? (
+        <Card className="p-10 text-center bg-white border border-steel-200 rounded-2xl space-y-3">
+          <Briefcase className="w-10 h-10 text-steel-300 mx-auto" />
+          <h3 className="text-base font-black text-ink">
+            {offers.filter((o) => o.status === 'open').length === 0
+              ? lang === 'fr'
+                ? 'Aucune offre ouverte pour le moment'
+                : 'لا توجد عروض عمل مفتوحة حالياً'
+              : lang === 'fr'
+              ? 'Aucune offre ne correspond aux filtres'
+              : 'لا توجد عروض مطابقة لاختيارات البحث الحالية'}
+          </h3>
+          <p className="text-xs text-steel-500 max-w-md mx-auto">
+            {offers.filter((o) => o.status === 'open').length === 0
+              ? lang === 'fr'
+                ? 'Dès qu’un propriétaire lance une recherche pour vos engins, elle apparaîtra ici avec alerte instantanée.'
+                : 'فور إطلاق أي مالك لحملة بحث عن سائق لآلية تطابق تخصصك، سيظهر العرض هنا مباشرة مع إشعار فوري.'
+              : lang === 'fr'
+              ? 'Réinitialisez les filtres pour consulter toutes les offres disponibles.'
+              : 'أعد ضبط الفلاتر لعرض جميع عروض العمل المفتوحة في مختلف المدن.'}
+          </p>
+          {(activeTab !== 'all' ||
+            searchQuery !== '' ||
+            selectedCity !== 'all' ||
+            selectedMachine !== 'all') && (
+            <Button
+              type="button"
+              variant="outline"
+              size="md"
+              onClick={() => {
+                setActiveTab('all');
+                setSearchQuery('');
+                setSelectedCity('all');
+                setSelectedMachine('all');
+              }}
+              className="min-h-[44px] text-xs font-bold"
+            >
+              {lang === 'fr' ? 'Afficher toutes les offres' : 'عرض كل العروض'}
+            </Button>
+          )}
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {filteredOffers.map((offer) => {
+            const isMatch = driverMachines.includes(offer.machine_category);
+            const expReq = offer.experience_required
+              ? getDriverExperienceOption(offer.experience_required)
+              : null;
+            const isClosedByOther =
+              offer.status === 'closed' ||
+              (offer.status === 'accepted' && offer.won_driver_id !== driverId);
+            const isFocused = Boolean(focusedOfferId && offer.id === focusedOfferId);
+
+            return (
+              <Card
+                key={offer.id}
+                id={`offer-card-${offer.id}`}
+                className={`p-5 bg-white border-2 rounded-2xl flex flex-col justify-between gap-4 transition-all ${
+                  isFocused
+                    ? 'border-primary ring-2 ring-primary/40 shadow-md'
+                    : isClosedByOther
+                    ? 'border-steel-200 bg-steel-50/60 opacity-85'
+                    : 'border-steel-200 hover:border-primary/70'
+                }`}
+              >
+                <div className="space-y-3.5">
+                  {/* Top Metadata Line */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <div className="flex flex-wrap items-center gap-2 text-steel-500">
+                      {isFocused && (
+                        <span className="px-2 py-0.5 rounded-md bg-primary text-ink font-black text-[10px]">
+                          {lang === 'fr' ? 'Sélectionné' : 'العرض المختار'}
+                        </span>
+                      )}
+                      {offer.is_urgent && !isClosedByOther && (
+                        <span className="inline-flex items-center gap-1 font-black text-rose-600">
+                          <AlertCircle className="w-3.5 h-3.5" />
+                          {lang === 'fr' ? 'Recrutement urgent' : 'طلب عاجل'}
+                        </span>
+                      )}
+                      {offer.is_urgent && !isClosedByOther && <span aria-hidden="true">·</span>}
+                      <span className="tabular-nums">
+                        {formatRelativeTime(offer.created_at, lang)}
+                      </span>
+                      {isMatch && (
+                        <>
+                          <span aria-hidden="true">·</span>
+                          <span className="font-bold text-emerald-700">
+                            {lang === 'fr' ? 'Correspond à vos engins' : 'يطابق تخصصك'}
+                          </span>
+                        </>
+                      )}
+                    </div>
+
+                    {isClosedByOther && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-rose-100 text-rose-800 text-[11px] font-black">
+                        <Lock className="w-3.5 h-3.5" />
+                        {lang === 'fr'
+                          ? 'Conclue avec un autre conducteur'
+                          : 'أُغلقت الصفقة مع سائق آخر'}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Primary Title (Machine Type) & Offered Price (MAD) */}
+                  <div className="flex items-start justify-between gap-3 pb-3 border-b border-steel-100">
+                    <div className="min-w-0">
+                      <h2 className="text-base sm:text-lg font-black text-ink leading-snug">
+                        {lang === 'fr' ? offer.machine_label_fr : offer.machine_label_ar}
+                      </h2>
+                      <span className="text-xs text-steel-500 block mt-0.5">
+                        {lang === 'fr' ? offer.machine_label_ar : offer.machine_label_fr}
+                      </span>
+                    </div>
+
+                    <div className="text-end shrink-0 bg-amber-50 border border-amber-200 px-3 py-2 rounded-xl">
+                      <span className="text-[10px] font-bold text-steel-600 block">
+                        {lang === 'fr' ? 'Rémunération proposée' : 'الأجرة / الثمن'}
+                      </span>
+                      <span className="text-base sm:text-lg font-black text-ink tabular-nums">
+                        {offer.offered_salary.toLocaleString('fr-FR')}{' '}
+                        <span className="text-xs font-bold">
+                          {lang === 'fr'
+                            ? `MAD/${offer.salary_unit === 'month' ? 'mois' : 'jour'}`
+                            : `د.م/${offer.salary_unit === 'month' ? 'شهر' : 'يوم'}`}
+                        </span>
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Structured 2x2 Key Info Grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                    <div className="flex items-start gap-2">
+                      <MapPin className="w-4 h-4 text-primary-dark shrink-0 mt-0.5" />
+                      <div className="min-w-0">
+                        <span className="text-steel-500 block text-[11px]">
+                          {lang === 'fr' ? 'Zone d’intervention' : 'منطقة العمل'}
+                        </span>
+                        <span className="font-bold text-ink block">
+                          {offer.city === 'المغرب (جميع المدن)' || !offer.city
+                            ? lang === 'fr'
+                              ? 'Tout le Maroc · À convenir'
+                              : 'جميع المدن المغربية · حسب الاتفاق'
+                            : offer.city}
+                          {offer.work_location_note ? ` — ${offer.work_location_note}` : ''}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start gap-2">
+                      <Clock className="w-4 h-4 text-primary-dark shrink-0 mt-0.5" />
+                      <div className="min-w-0">
+                        <span className="text-steel-500 block text-[11px]">
+                          {lang === 'fr' ? 'Durée prévue' : 'المدة المتوقعة'}
+                        </span>
+                        <span className="font-bold text-ink block">
+                          {offer.duration_label}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start gap-2">
+                      <Building2 className="w-4 h-4 text-primary-dark shrink-0 mt-0.5" />
+                      <div className="min-w-0">
+                        <span className="text-steel-500 block text-[11px]">
+                          {lang === 'fr' ? 'Propriétaire / Entreprise' : 'المالك / المقاولة'}
+                        </span>
+                        <span className="font-bold text-ink block truncate">
+                          {offer.owner_company || offer.owner_name}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start gap-2">
+                      <Award className="w-4 h-4 text-primary-dark shrink-0 mt-0.5" />
+                      <div className="min-w-0">
+                        <span className="text-steel-500 block text-[11px]">
+                          {lang === 'fr' ? 'Expérience souhaitée' : 'الخبرة المطلوبة'}
+                        </span>
+                        <span className="font-bold text-ink block">
+                          {expReq
+                            ? lang === 'fr'
+                              ? expReq.shortFr
+                              : expReq.shortAr
+                            : lang === 'fr'
+                            ? 'Confirmé'
+                            : 'سائق متمرس'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Description & Perks */}
+                  <div className="space-y-2 pt-1">
+                    {(offer.accommodation_included || offer.meals_included) && (
+                      <div className="flex flex-wrap items-center gap-3 text-xs font-semibold text-emerald-700">
+                        {offer.accommodation_included && (
+                          <span className="inline-flex items-center gap-1">
+                            <Home className="w-3.5 h-3.5" />
+                            {lang === 'fr' ? 'Logement assuré' : 'السكن موفّر'}
+                          </span>
+                        )}
+                        {offer.meals_included && (
+                          <span className="inline-flex items-center gap-1">
+                            <Utensils className="w-3.5 h-3.5" />
+                            {lang === 'fr' ? 'Repas pris en charge' : 'التغذية متوفرة'}
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    <p className="text-xs text-steel-600 leading-relaxed">
+                      {lang === 'fr' ? offer.description_fr : offer.description_ar}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Card Bottom Action Bar */}
+                <div className="pt-3 border-t border-steel-100 flex flex-wrap items-center gap-2">
+                  {isClosedByOther ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="md"
+                      disabled
+                      leftIcon={<Lock className="w-4 h-4 text-rose-600" />}
+                      className="flex-1 min-w-[200px] justify-center font-black text-xs min-h-[44px] bg-rose-50/60 border-rose-200 text-rose-700 opacity-90"
+                    >
+                      {lang === 'fr'
+                        ? 'Affaire conclue avec un autre conducteur'
+                        : 'تم إغلاق الصفقة مع سائق آخر'}
+                    </Button>
+                  ) : (
+                    <>
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="md"
+                        isLoading={startingChatId === offer.id}
+                        onClick={() => handleStartChat(offer)}
+                        leftIcon={<MessageSquare className="w-4 h-4" />}
+                        className="flex-1 min-w-[180px] justify-center font-black text-xs min-h-[44px]"
+                      >
+                        {lang === 'fr'
+                          ? 'Contacter le propriétaire'
+                          : 'تواصل مع المالك'}
+                      </Button>
+
+                      {offer.owner_phone && (
+                        <a
+                          href={`tel:${offer.owner_phone}`}
+                          className="min-h-[44px] px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                        >
+                          <Phone className="w-4 h-4" />
+                          <span>{lang === 'fr' ? 'Appeler' : 'اتصال'}</span>
+                        </a>
+                      )}
+                    </>
+                  )}
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Agreed Jobs / Finalized Deals Section (Shown in 'agreed' tab, or only ACTIVE ongoing deals below open offers in 'all') */}
+      {(() => {
+        const displayedAgreed =
+          activeTab === 'agreed'
+            ? filteredAgreedDeals
+            : activeTab === 'all'
+            ? filteredAgreedDeals.filter(
+                (d) => (d.termination?.work_status || d.contract?.termination?.work_status || 'active') !== 'ended'
+              )
+            : [];
+        if (activeTab !== 'agreed' && displayedAgreed.length === 0) return null;
+
+        return (
+        <div className="space-y-3 pt-2">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-sm sm:text-base font-black text-ink flex items-center gap-2">
               <Handshake className="w-5 h-5 text-emerald-600 shrink-0" />
@@ -454,11 +805,11 @@ export const DriverJobOffersPage: React.FC = () => {
               </span>
             </h2>
             <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-black tabular-nums">
-              {filteredAgreedDeals.length}
+              {displayedAgreed.length}
             </span>
           </div>
 
-          {filteredAgreedDeals.length === 0 ? (
+          {displayedAgreed.length === 0 ? (
             <Card className="p-8 text-center bg-white border border-steel-200 rounded-2xl space-y-2">
               <Handshake className="w-9 h-9 text-steel-300 mx-auto" />
               <p className="text-sm font-black text-ink">
@@ -474,18 +825,22 @@ export const DriverJobOffersPage: React.FC = () => {
             </Card>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {filteredAgreedDeals.map((deal) => {
+              {displayedAgreed.map((deal) => {
                 const wTerm = deal.termination || deal.contract?.termination || null;
                 const wStatus = wTerm?.work_status || 'active';
                 const isDriverPendingConfirm = Boolean(
                   wStatus === 'pending_end' && !wTerm?.driver_confirmed
                 );
+                const isFocusedDeal = Boolean(focusedOfferId && deal.offer_id === focusedOfferId);
 
                 return (
                 <Card
                   key={`agreed_${deal.offer_id}`}
+                  id={`agreed-deal-${deal.offer_id}`}
                   className={`p-4 sm:p-5 rounded-2xl flex flex-col justify-between gap-3.5 border-2 ${
-                    wStatus === 'ended'
+                    isFocusedDeal
+                      ? 'bg-amber-50/40 border-primary ring-2 ring-primary/40'
+                      : wStatus === 'ended'
                       ? 'bg-steel-50/70 border-steel-300'
                       : isDriverPendingConfirm
                       ? 'bg-amber-50/50 border-amber-400'
@@ -663,252 +1018,8 @@ export const DriverJobOffersPage: React.FC = () => {
             </div>
           )}
         </div>
-      )}
-
-      {/* Job Offers Cards Feed */}
-      {activeTab === 'agreed' ? null : isLoading ? (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="h-64 rounded-2xl bg-steel-100 animate-pulse" />
-          ))}
-        </div>
-      ) : filteredOffers.length === 0 ? (
-        <Card className="p-10 text-center bg-white border border-steel-200 rounded-2xl space-y-3">
-          <Briefcase className="w-10 h-10 text-steel-300 mx-auto" />
-          <h3 className="text-base font-black text-ink">
-            {lang === 'fr'
-              ? 'Aucune offre ne correspond aux filtres'
-              : 'لا توجد عروض مطابقة لاختيارات البحث الحالية'}
-          </h3>
-          <p className="text-xs text-steel-500 max-w-md mx-auto">
-            {lang === 'fr'
-              ? 'Réinitialisez les filtres pour consulter toutes les offres disponibles.'
-              : 'أعد ضبط الفلاتر لعرض جميع عروض العمل المفتوحة في مختلف المدن.'}
-          </p>
-          <Button
-            type="button"
-            variant="outline"
-            size="md"
-            onClick={() => {
-              setActiveTab('all');
-              setSearchQuery('');
-              setSelectedCity('all');
-              setSelectedMachine('all');
-            }}
-            className="min-h-[44px] text-xs font-bold"
-          >
-            {lang === 'fr' ? 'Afficher toutes les offres' : 'عرض كل العروض'}
-          </Button>
-        </Card>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {filteredOffers.map((offer) => {
-            const isMatch = driverMachines.includes(offer.machine_category);
-            const expReq = offer.experience_required
-              ? getDriverExperienceOption(offer.experience_required)
-              : null;
-
-            return (
-              <Card
-                key={offer.id}
-                className="p-5 bg-white border border-steel-200 rounded-2xl flex flex-col justify-between gap-4 hover:border-primary/70 transition-colors"
-              >
-                <div className="space-y-3.5">
-                  {/* Top Metadata Line (clean unboxed typography with separators) */}
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                    <div className="flex flex-wrap items-center gap-2 text-steel-500">
-                      {offer.is_urgent && (
-                        <span className="inline-flex items-center gap-1 font-black text-rose-600">
-                          <AlertCircle className="w-3.5 h-3.5" />
-                          {lang === 'fr' ? 'Recrutement urgent' : 'طلب عاجل'}
-                        </span>
-                      )}
-                      {offer.is_urgent && <span aria-hidden="true">·</span>}
-                      <span className="tabular-nums">
-                        {formatRelativeTime(offer.created_at, lang)}
-                      </span>
-                      {isMatch && (
-                        <>
-                          <span aria-hidden="true">·</span>
-                          <span className="font-bold text-emerald-700">
-                            {lang === 'fr' ? 'Correspond à vos engins' : 'يطابق تخصصك'}
-                          </span>
-                        </>
-                      )}
-                    </div>
-
-                    {offer.has_applied && (
-                      <span className="inline-flex items-center gap-1 text-xs font-black text-emerald-700">
-                        <CheckCircle2 className="w-4 h-4" />
-                        {lang === 'fr' ? 'Candidature envoyée' : 'تم التقديم'}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Primary Title (Machine Type) & Offered Price (MAD) */}
-                  <div className="flex items-start justify-between gap-3 pb-3 border-b border-steel-100">
-                    <div className="min-w-0">
-                      <h2 className="text-base sm:text-lg font-black text-ink leading-snug">
-                        {lang === 'fr' ? offer.machine_label_fr : offer.machine_label_ar}
-                      </h2>
-                      <span className="text-xs text-steel-500 block mt-0.5">
-                        {lang === 'fr' ? offer.machine_label_ar : offer.machine_label_fr}
-                      </span>
-                    </div>
-
-                    <div className="text-end shrink-0 bg-amber-50 border border-amber-200 px-3 py-2 rounded-xl">
-                      <span className="text-[10px] font-bold text-steel-600 block">
-                        {lang === 'fr' ? 'Rémunération proposée' : 'الأجرة / الثمن'}
-                      </span>
-                      <span className="text-base sm:text-lg font-black text-ink tabular-nums">
-                        {offer.offered_salary.toLocaleString('fr-FR')}{' '}
-                        <span className="text-xs font-bold">
-                          {lang === 'fr'
-                            ? `MAD/${offer.salary_unit === 'month' ? 'mois' : 'jour'}`
-                            : `د.م/${offer.salary_unit === 'month' ? 'شهر' : 'يوم'}`}
-                        </span>
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Structured 2x2 Key Info Grid */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
-                    <div className="flex items-start gap-2">
-                      <MapPin className="w-4 h-4 text-primary-dark shrink-0 mt-0.5" />
-                      <div className="min-w-0">
-                        <span className="text-steel-500 block text-[11px]">
-                          {lang === 'fr' ? 'Zone d’intervention' : 'منطقة العمل'}
-                        </span>
-                        <span className="font-bold text-ink block">
-                          {offer.city === 'المغرب (جميع المدن)' || !offer.city
-                            ? lang === 'fr'
-                              ? 'Tout le Maroc · À convenir'
-                              : 'جميع المدن المغربية · حسب الاتفاق'
-                            : offer.city}
-                          {offer.work_location_note ? ` — ${offer.work_location_note}` : ''}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-start gap-2">
-                      <Clock className="w-4 h-4 text-primary-dark shrink-0 mt-0.5" />
-                      <div className="min-w-0">
-                        <span className="text-steel-500 block text-[11px]">
-                          {lang === 'fr' ? 'Durée prévue' : 'المدة المتوقعة'}
-                        </span>
-                        <span className="font-bold text-ink block">
-                          {offer.duration_label}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-start gap-2">
-                      <Building2 className="w-4 h-4 text-primary-dark shrink-0 mt-0.5" />
-                      <div className="min-w-0">
-                        <span className="text-steel-500 block text-[11px]">
-                          {lang === 'fr' ? 'Propriétaire / Entreprise' : 'المالك / المقاولة'}
-                        </span>
-                        <span className="font-bold text-ink block truncate">
-                          {offer.owner_company || offer.owner_name}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-start gap-2">
-                      <Award className="w-4 h-4 text-primary-dark shrink-0 mt-0.5" />
-                      <div className="min-w-0">
-                        <span className="text-steel-500 block text-[11px]">
-                          {lang === 'fr' ? 'Expérience souhaitée' : 'الخبرة المطلوبة'}
-                        </span>
-                        <span className="font-bold text-ink block">
-                          {expReq
-                            ? lang === 'fr'
-                              ? expReq.shortFr
-                              : expReq.shortAr
-                            : lang === 'fr'
-                            ? 'Confirmé'
-                            : 'سائق متمرس'}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Description & Perks */}
-                  <div className="space-y-2 pt-1">
-                    {(offer.accommodation_included || offer.meals_included) && (
-                      <div className="flex flex-wrap items-center gap-3 text-xs font-semibold text-emerald-700">
-                        {offer.accommodation_included && (
-                          <span className="inline-flex items-center gap-1">
-                            <Home className="w-3.5 h-3.5" />
-                            {lang === 'fr' ? 'Logement assuré' : 'السكن موفّر'}
-                          </span>
-                        )}
-                        {offer.meals_included && (
-                          <span className="inline-flex items-center gap-1">
-                            <Utensils className="w-3.5 h-3.5" />
-                            {lang === 'fr' ? 'Repas pris en charge' : 'التغذية متوفرة'}
-                          </span>
-                        )}
-                      </div>
-                    )}
-
-                    <p className="text-xs text-steel-600 leading-relaxed">
-                      {lang === 'fr' ? offer.description_fr : offer.description_ar}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Card Bottom Action Bar */}
-                <div className="pt-3 border-t border-steel-100 flex flex-wrap items-center gap-2">
-                  <Button
-                    type="button"
-                    variant={offer.has_applied ? 'outline' : 'primary'}
-                    size="md"
-                    isLoading={applyingId === offer.id}
-                    disabled={Boolean(offer.has_applied)}
-                    onClick={() => handleApply(offer)}
-                    className="flex-1 min-w-[160px] justify-center font-black text-xs min-h-[44px]"
-                    leftIcon={
-                      offer.has_applied ? (
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                      ) : (
-                        <Briefcase className="w-4 h-4" />
-                      )
-                    }
-                  >
-                    {offer.has_applied
-                      ? lang === 'fr'
-                        ? 'Intérêt envoyé'
-                        : 'تم إرسال اهتمامك'
-                      : lang === 'fr'
-                      ? 'Postuler à cette offre'
-                      : 'تقديم طلب / مهتم بالعمل'}
-                  </Button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleStartChat(offer)}
-                    className="min-h-[44px] px-3.5 py-2 rounded-xl bg-ink text-white hover:bg-steel-900 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
-                  >
-                    <MessageSquare className="w-4 h-4 text-primary" />
-                    <span>{lang === 'fr' ? 'Discuter' : 'تواصل'}</span>
-                  </button>
-
-                  {offer.owner_phone && (
-                    <a
-                      href={`tel:${offer.owner_phone}`}
-                      className="min-h-[44px] px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
-                    >
-                      <Phone className="w-4 h-4" />
-                      <span>{lang === 'fr' ? 'Appeler' : 'اتصال'}</span>
-                    </a>
-                  )}
-                </div>
-              </Card>
-            );
-          })}
-        </div>
-      )}
+        );
+      })()}
 
       {/* Signed Contract PDF Viewer Modal */}
       {selectedDealForContract && (

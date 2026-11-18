@@ -128,7 +128,7 @@ export const DriverOpportunityAlertListener: React.FC<DriverOpportunityAlertList
           .filter(Boolean)
           .join(' · '),
         tag: alertKey,
-        url: '/driver/joboffer',
+        url: `/driver/joboffer?offer=${encodeURIComponent(offer.id)}`,
       }).catch(() => {});
 
       // 3. Celebratory in-app popup card
@@ -317,7 +317,7 @@ export const DriverOpportunityAlertListener: React.FC<DriverOpportunityAlertList
       }
 
       setActiveOffer(null);
-      navigate('/driver/joboffer');
+      navigate(`/driver/joboffer?offer=${encodeURIComponent(target.id)}`);
     } catch {
       toast.info(
         lang === 'fr'
@@ -325,7 +325,7 @@ export const DriverOpportunityAlertListener: React.FC<DriverOpportunityAlertList
           : 'تم تسجيل اهتمامك بالعرض! يمكنك متابعة التفاصيل في قسم الطلبات.'
       );
       setActiveOffer(null);
-      navigate('/driver/joboffer');
+      navigate(`/driver/joboffer?offer=${encodeURIComponent(target.id)}`);
     } finally {
       setIsApplying(false);
     }
@@ -454,19 +454,20 @@ export const DriverOpportunityAlertListener: React.FC<DriverOpportunityAlertList
               leftIcon={<MessageSquare className="w-4 h-4" />}
               className="flex-1 justify-center font-black text-xs min-h-[44px]"
             >
-              {lang === 'fr' ? 'Postuler & Discuter' : 'أقبل العمل — محادثة المالك'}
+              {lang === 'fr' ? 'Contacter le propriétaire' : 'تواصل مع المالك'}
             </Button>
 
             <button
               type="button"
               onClick={() => {
+                const oid = activeOffer.id;
                 setActiveOffer(null);
-                navigate('/driver/joboffer');
+                navigate(`/driver/joboffer?offer=${encodeURIComponent(oid)}`);
               }}
               className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-white/15 hover:bg-white/25 text-white font-bold text-xs min-h-[44px] transition-colors shrink-0 cursor-pointer"
             >
               <Briefcase className="w-4 h-4 text-primary" />
-              <span>{lang === 'fr' ? 'Voir offres' : 'كل الطلبات'}</span>
+              <span>{lang === 'fr' ? 'Voir l’offre' : 'عرض التفاصيل'}</span>
             </button>
 
             {activeOffer.owner_phone && (

@@ -84,115 +84,6 @@ export interface AgreedDriverDealItem {
   termination?: WorkTerminationRecord | null;
 }
 
-// Starter reference job offers so newly registered drivers immediately see the structured offer format
-// alongside any live owner-launched urgent campaigns from Supabase.
-const STARTER_DRIVER_OFFERS: DriverJobOffer[] = [
-  {
-    id: 'starter-offer-tractopelle-casa',
-    owner_id: 'starter-owner-1',
-    owner_name: 'شركة أطلس للأشغال العمومية',
-    owner_company: 'Atlas Travaux & VRD',
-    owner_phone: '+212661204080',
-    machine_category: 'tractopelle',
-    machine_label_ar: 'تراكتور بيل / كاسكاطور (JCB 3CX)',
-    machine_label_fr: 'Tractopelle JCB 3CX',
-    offered_salary: 350,
-    salary_unit: 'day',
-    city: 'الدار البيضاء',
-    work_location_note: 'ورش التهيئة الطرقية · النواصر / بوسكورة',
-    duration_label: 'شهرين قابل للتمديد',
-    is_urgent: true,
-    accommodation_included: true,
-    meals_included: false,
-    experience_required: '3_5',
-    description_ar:
-      'مطلوب سائق محترف متمرس في الحفر الدقيق وشبكات الماء والتطهير السائل على JCB 3CX. السكن متوفر قرب الورش والدفع أسبوعياً.',
-    description_fr:
-      'Conducteur expérimenté recherché pour tranchées et VRD sur JCB 3CX à Nouaceur. Logement assuré, paiement hebdomadaire.',
-    status: 'open',
-    is_demo: true,
-    created_at: new Date(Date.now() - 1000 * 60 * 35).toISOString(),
-  },
-  {
-    id: 'starter-offer-pelle-tanger',
-    owner_id: 'starter-owner-2',
-    owner_name: 'مقاولة البوغاز للهندسة المدنية',
-    owner_company: 'Boughaz Génie Civil',
-    owner_phone: '+212662309010',
-    machine_category: 'pelle_chenilles',
-    machine_label_ar: 'حفارة مجنزرة (بوكلان 22 طن CAT 320)',
-    machine_label_fr: 'Pelle sur chenilles 22T (CAT 320)',
-    offered_salary: 8500,
-    salary_unit: 'month',
-    city: 'طنجة',
-    work_location_note: 'المنطقة الصناعية طنجة أوتوموتيف سيتي',
-    duration_label: 'عقد 6 أشهر (عمل مستمر)',
-    is_urgent: true,
-    accommodation_included: true,
-    meals_included: true,
-    experience_required: '6_10',
-    description_ar:
-      'عمل مستمر بورش تهيئة منطقة صناعية. أجر شهري مضمون + السكن والتغذية موفرة على حساب المقاولة.',
-    description_fr:
-      'Chantier terrassement industriel longue durée. Salaire mensuel fixe + logement et repas pris en charge.',
-    status: 'open',
-    is_demo: true,
-    created_at: new Date(Date.now() - 1000 * 60 * 140).toISOString(),
-  },
-  {
-    id: 'starter-offer-niveleuse-marrakech',
-    owner_id: 'starter-owner-3',
-    owner_name: 'مجموعة النخيل للطرق',
-    owner_company: 'Palmeraie Routes SARL',
-    owner_phone: '+212668112233',
-    machine_category: 'niveleuse',
-    machine_label_ar: 'نيفيلوز / ممهدة الطرق (Motor Grader)',
-    machine_label_fr: 'Niveleuse (Grader CAT 140)',
-    offered_salary: 500,
-    salary_unit: 'day',
-    city: 'مراكش',
-    work_location_note: 'محور طريق تامنصورت · أشغال التسوية',
-    duration_label: '45 يوماً',
-    is_urgent: false,
-    accommodation_included: true,
-    meals_included: true,
-    experience_required: '6_10',
-    description_ar:
-      'مطلوب سائق نيفيلوز محترف لضبط الميول والمستويات (Reglage fin) قبل وضع طبقة الزفت.',
-    description_fr:
-      'Chauffeur niveleuse confirmé exigé pour réglage de précision avant enrobé.',
-    status: 'open',
-    is_demo: true,
-    created_at: new Date(Date.now() - 1000 * 60 * 320).toISOString(),
-  },
-  {
-    id: 'starter-offer-chargeuse-agadir',
-    owner_id: 'starter-owner-4',
-    owner_name: 'تعاونية ومقالع سوس',
-    owner_company: 'Souss Agrégats',
-    owner_phone: '+212664556677',
-    machine_category: 'chargeuse',
-    machine_label_ar: 'شارجور / جرافة على عجلات (Volvo L120)',
-    machine_label_fr: 'Chargeuse sur pneus (Volvo L120)',
-    offered_salary: 7000,
-    salary_unit: 'month',
-    city: 'أكادير',
-    work_location_note: 'مقلع وتهيئة ضيعات فلاحية · أيت ملول',
-    duration_label: '3 أشهر قابلة للتجديد',
-    is_urgent: false,
-    accommodation_included: false,
-    meals_included: true,
-    experience_required: '3_5',
-    description_ar:
-      'شحن الشاحنات وتسوية الأراضي الفلاحية بمنطقة سوس. توقيت نهاري منتظم.',
-    description_fr:
-      'Chargement camions et nivellement agricole en zone Souss. Horaires réguliers de jour.',
-    status: 'open',
-    is_demo: true,
-    created_at: new Date(Date.now() - 1000 * 60 * 520).toISOString(),
-  },
-];
-
 function getAppliedMap(driverId?: string): Record<string, string> {
   try {
     const raw = localStorage.getItem(LOCAL_APPLIED_MAP_KEY);
@@ -217,12 +108,21 @@ function saveAppliedOffer(driverId: string, offerId: string) {
   }
 }
 
+function isFakeOrDemoOffer(o?: Partial<DriverJobOffer> | null): boolean {
+  if (!o) return true;
+  if (o.is_demo) return true;
+  if (o.id && o.id.startsWith('starter-')) return true;
+  if (o.owner_id && o.owner_id.startsWith('starter-')) return true;
+  return false;
+}
+
 function getLocalCachedOffers(): DriverJobOffer[] {
   try {
     const raw = localStorage.getItem(LOCAL_DRIVER_OFFERS_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((o: any) => !isFakeOrDemoOffer(o));
   } catch {
     return [];
   }
@@ -230,7 +130,8 @@ function getLocalCachedOffers(): DriverJobOffer[] {
 
 function saveLocalCachedOffers(offers: DriverJobOffer[]) {
   try {
-    localStorage.setItem(LOCAL_DRIVER_OFFERS_KEY, JSON.stringify(offers.slice(0, 80)));
+    const clean = offers.filter((o) => !isFakeOrDemoOffer(o)).slice(0, 80);
+    localStorage.setItem(LOCAL_DRIVER_OFFERS_KEY, JSON.stringify(clean));
   } catch {
     // ignore
   }
@@ -514,7 +415,8 @@ export async function launchDriverSearchCampaign(params: {
     meals_included: newOffer.meals_included,
     description_ar: newOffer.description_ar,
     is_urgent: newOffer.is_urgent,
-    url: '/driver/joboffer',
+    db_persisted: persistedToSupabase,
+    url: `/driver/joboffer?offer=${encodeURIComponent(newOffer.id)}`,
   };
 
   if (matchedDrivers.length > 0) {
@@ -565,7 +467,7 @@ export async function launchDriverSearchCampaign(params: {
       title: titleAr,
       body: bodyAr,
       tag: `driver-offer-${newOffer.id}`,
-      url: '/driver/joboffer',
+      url: `/driver/joboffer?offer=${encodeURIComponent(newOffer.id)}`,
     }).catch(() => {});
   }
 
@@ -593,6 +495,7 @@ export async function launchDriverSearchCampaign(params: {
 export async function fetchDriverJobOffers(driverId?: string): Promise<DriverJobOffer[]> {
   const appliedMap = getAppliedMap(driverId);
   let dbOffers: DriverJobOffer[] = [];
+  let offersTableError = false;
   const dbAppliedIds = new Set<string>(Object.keys(appliedMap));
 
   const allLocalOffers = getLocalCachedOffers();
@@ -607,6 +510,8 @@ export async function fetchDriverJobOffers(driverId?: string): Promise<DriverJob
     }
   }
 
+  const knownOfferIds = new Set<string>();
+
   if (isSupabaseConfigured) {
     try {
       const { data, error } = await supabase
@@ -614,23 +519,126 @@ export async function fetchDriverJobOffers(driverId?: string): Promise<DriverJob
         .select('*')
         .eq('status', 'open')
         .order('created_at', { ascending: false })
-        .limit(50);
+        .limit(60);
 
-      if (!error && Array.isArray(data)) {
-        dbOffers = data
-          .map(mapDbRowToDriverOffer)
-          .filter((o) => o.status === 'open' && !localClosedIds.has(o.id));
+      if (error) {
+        offersTableError = true;
+      } else if (Array.isArray(data)) {
+        for (const r of data) {
+          const mapped = mapDbRowToDriverOffer(r);
+          if (isFakeOrDemoOffer(mapped)) continue;
+          knownOfferIds.add(mapped.id);
+          if (mapped.status === 'open' && !localClosedIds.has(mapped.id)) {
+            dbOffers.push(mapped);
+          }
+        }
       }
 
-      if (driverId) {
+      if (driverId && !driverId.startsWith('driver-')) {
         const { data: apps } = await supabase
           .from('driver_job_applications')
           .select('offer_id')
           .eq('driver_id', driverId);
+        const appliedOfferIds: string[] = [];
         if (Array.isArray(apps)) {
           apps.forEach((a: any) => {
-            if (a?.offer_id) dbAppliedIds.add(a.offer_id);
+            if (a?.offer_id) {
+              dbAppliedIds.add(a.offer_id);
+              appliedOfferIds.push(a.offer_id);
+            }
           });
+        }
+
+        // Also check applied offers that may have been closed by another driver
+        const missingApplied = appliedOfferIds.filter((id) => !knownOfferIds.has(id));
+        if (missingApplied.length > 0 && !offersTableError) {
+          const { data: closedAppliedRows } = await supabase
+            .from('driver_job_offers')
+            .select('*')
+            .in('id', missingApplied);
+          if (Array.isArray(closedAppliedRows)) {
+            for (const row of closedAppliedRows) {
+              const mapped = mapDbRowToDriverOffer(row);
+              if (isFakeOrDemoOffer(mapped)) continue;
+              knownOfferIds.add(mapped.id);
+              if (mapped.won_driver_id === driverId && mapped.status === 'accepted') {
+                // Already shown in "أعمالي المتفق عليها"
+                localClosedIds.add(mapped.id);
+              } else if (mapped.status !== 'open') {
+                dbOffers.push(mapped);
+              }
+            }
+          }
+        }
+
+        // Hydrate any real driver_job_offer notifications that didn't appear via driver_job_offers
+        try {
+          const notifOfferRows: any[] = [];
+          const { data: sbNotifs } = await supabase
+            .from('notifications')
+            .select('*')
+            .eq('user_id', driverId)
+            .eq('type', 'driver_job_offer')
+            .order('created_at', { ascending: false })
+            .limit(40);
+          if (Array.isArray(sbNotifs)) notifOfferRows.push(...sbNotifs);
+
+          const srvNotifs = await serverApi.getNotifications({ user_id: driverId, role: 'driver' });
+          if (Array.isArray(srvNotifs?.notifications)) {
+            for (const n of srvNotifs.notifications) {
+              if (n.type === 'driver_job_offer') notifOfferRows.push(n);
+            }
+          }
+
+          const missingFromDb: { offer: DriverJobOffer; dbPersisted?: boolean }[] = [];
+          const seenNotifOfferIds = new Set<string>();
+          for (const n of notifOfferRows) {
+            const mapped = mapNotificationRowToDriverOffer(n);
+            if (!mapped || isFakeOrDemoOffer(mapped)) continue;
+            if (knownOfferIds.has(mapped.id) || seenNotifOfferIds.has(mapped.id)) continue;
+            if (localClosedIds.has(mapped.id)) continue;
+            seenNotifOfferIds.add(mapped.id);
+            missingFromDb.push({
+              offer: mapped,
+              dbPersisted: n?.data?.db_persisted,
+            });
+          }
+
+          if (missingFromDb.length > 0) {
+            if (offersTableError) {
+              missingFromDb.forEach((m) => dbOffers.push(m.offer));
+            } else {
+              const idsToCheck = missingFromDb.map((m) => m.offer.id);
+              const { data: checkRows, error: checkErr } = await supabase
+                .from('driver_job_offers')
+                .select('id, status, won_driver_id, won_driver_name, agreed_at')
+                .in('id', idsToCheck);
+              const checkMap = new Map<string, any>();
+              if (!checkErr && Array.isArray(checkRows)) {
+                checkRows.forEach((r: any) => checkMap.set(r.id, r));
+              }
+              for (const m of missingFromDb) {
+                const found = checkMap.get(m.offer.id);
+                if (found) {
+                  if (found.status === 'open') {
+                    dbOffers.push(m.offer);
+                  } else if (found.won_driver_id !== driverId) {
+                    dbOffers.push({
+                      ...m.offer,
+                      status: found.status,
+                      won_driver_id: found.won_driver_id,
+                    });
+                  }
+                } else if (checkErr || m.dbPersisted === false) {
+                  dbOffers.push(m.offer);
+                }
+                // If checkErr is null, found is absent, and dbPersisted !== false,
+                // RLS hid it because another driver closed the deal -> omit from open feed.
+              }
+            }
+          }
+        } catch {
+          // ignore notification hydration errors
         }
       }
     } catch {
@@ -639,12 +647,13 @@ export async function fetchDriverJobOffers(driverId?: string): Promise<DriverJob
   }
 
   const localOffers = allLocalOffers.filter(
-    (o) => o.status === 'open' && !localClosedIds.has(o.id)
+    (o) => !isFakeOrDemoOffer(o) && o.status === 'open' && !localClosedIds.has(o.id)
   );
   const mergedMap = new Map<string, DriverJobOffer>();
 
-  for (const offer of [...dbOffers, ...localOffers, ...STARTER_DRIVER_OFFERS]) {
-    if (localClosedIds.has(offer.id)) continue;
+  for (const offer of [...dbOffers, ...localOffers]) {
+    if (isFakeOrDemoOffer(offer)) continue;
+    if (offer.status === 'open' && localClosedIds.has(offer.id)) continue;
     if (!mergedMap.has(offer.id)) {
       mergedMap.set(offer.id, {
         ...offer,
@@ -656,6 +665,119 @@ export async function fetchDriverJobOffers(driverId?: string): Promise<DriverJob
   return Array.from(mergedMap.values()).sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   );
+}
+
+/**
+ * Resolves a single offer (from DB, local cache, or driver notifications) when a driver clicks
+ * a notification — even if another driver already closed the deal.
+ */
+export async function fetchSingleDriverOfferById(
+  offerId: string,
+  driverId?: string
+): Promise<DriverJobOffer | null> {
+  if (!offerId || offerId.startsWith('starter-')) return null;
+
+  const localMatch = getLocalCachedOffers().find((o) => o.id === offerId);
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('driver_job_offers')
+        .select('*')
+        .eq('id', offerId)
+        .maybeSingle();
+
+      if (!error && data?.id) {
+        const mapped = mapDbRowToDriverOffer(data);
+        return isFakeOrDemoOffer(mapped) ? null : mapped;
+      }
+
+      if (!error && !data && driverId) {
+        // Check if the offer exists in driver's notifications (meaning RLS hid it after closure by another driver)
+        const { data: notifRow } = await supabase
+          .from('notifications')
+          .select('*')
+          .eq('user_id', driverId)
+          .eq('type', 'driver_job_offer')
+          .contains('data', { offer_id: offerId })
+          .limit(1)
+          .maybeSingle();
+        if (notifRow) {
+          const fromNotif = mapNotificationRowToDriverOffer(notifRow);
+          if (fromNotif && !isFakeOrDemoOffer(fromNotif)) {
+            return {
+              ...fromNotif,
+              status: notifRow?.data?.db_persisted === false ? 'open' : 'closed',
+            };
+          }
+        }
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  return localMatch || null;
+}
+
+/**
+ * Live pre-chat guard: checks whether an offer is still open or already closed by another driver.
+ */
+export async function checkDriverOfferAvailability(
+  offerId: string,
+  driverId: string
+): Promise<{ available: boolean; closedByOther?: boolean }> {
+  if (!offerId || offerId.startsWith('drv_offer_')) {
+    return { available: true };
+  }
+
+  const localOffers = getLocalCachedOffers();
+  const localMatch = localOffers.find((o) => o.id === offerId);
+  if (localMatch && (localMatch.status === 'closed' || (localMatch.status === 'accepted' && localMatch.won_driver_id !== driverId))) {
+    return { available: false, closedByOther: true };
+  }
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('driver_job_offers')
+        .select('id, status, won_driver_id')
+        .eq('id', offerId)
+        .maybeSingle();
+
+      if (error) return { available: true };
+      if (data) {
+        if (data.status === 'open') return { available: true };
+        if (data.status === 'accepted' && data.won_driver_id === driverId) {
+          return { available: true };
+        }
+        return { available: false, closedByOther: true };
+      }
+
+      // Row returned null with no error: verify if table is active (RLS hid closed offer from non-winner)
+      const { data: anyOpen } = await supabase
+        .from('driver_job_offers')
+        .select('id')
+        .limit(1);
+      if (Array.isArray(anyOpen) && anyOpen.length > 0) {
+        return { available: false, closedByOther: true };
+      }
+    } catch {
+      return { available: true };
+    }
+  }
+
+  return { available: true };
+}
+
+export function cacheDriverOfferFromNotification(notifRow: any): DriverJobOffer | null {
+  const mapped = mapNotificationRowToDriverOffer(notifRow);
+  if (!mapped || isFakeOrDemoOffer(mapped)) return null;
+  const existing = getLocalCachedOffers();
+  if (!existing.some((o) => o.id === mapped.id)) {
+    saveLocalCachedOffers([mapped, ...existing]);
+  }
+  return mapped;
 }
 
 export async function fetchOwnerDriverOffers(

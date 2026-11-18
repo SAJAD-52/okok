@@ -492,22 +492,17 @@ export const DriverDashboardPage: React.FC = () => {
 
                       <Button
                         type="button"
-                        variant={offer.has_applied ? 'outline' : 'primary'}
+                        variant="primary"
                         size="sm"
-                        onClick={() => navigate('/driver/joboffer')}
+                        onClick={() =>
+                          navigate(`/driver/joboffer?offer=${encodeURIComponent(offer.id)}`)
+                        }
                         className="min-h-[40px] text-xs font-bold whitespace-nowrap"
                       >
-                        {offer.has_applied ? (
-                          <span className="inline-flex items-center gap-1 text-emerald-700">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            {lang === 'fr' ? 'Postulé' : 'تم التقديم'}
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1">
-                            <Clock className="w-3.5 h-3.5" />
-                            {lang === 'fr' ? 'Voir détails' : 'التفاصيل والتقديم'}
-                          </span>
-                        )}
+                        <span className="inline-flex items-center gap-1">
+                          <Clock className="w-3.5 h-3.5" />
+                          {lang === 'fr' ? 'Voir & Contacter' : 'عرض والتواصل'}
+                        </span>
                       </Button>
                     </div>
                   </div>

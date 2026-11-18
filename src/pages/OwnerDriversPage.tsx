@@ -6,7 +6,7 @@
 // ============================================================================
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   HardHat,
   Search,
@@ -56,6 +56,21 @@ export const OwnerDriversPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
 
   const ownerId = user?.id || profile?.id || '';
+  const [searchParams] = useSearchParams();
+  const focusedOfferId = searchParams.get('offer') || '';
+
+  useEffect(() => {
+    if (!focusedOfferId || isLoading) return;
+    const match = deals.find((d) => d.offer_id === focusedOfferId);
+    if (match) {
+      setWorkFilter('all');
+      setSearchQuery('');
+      setTimeout(() => {
+        const el = document.getElementById(`owner-deal-${focusedOfferId}`);
+        el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 150);
+    }
+  }, [focusedOfferId, deals, isLoading]);
 
   const loadDeals = useCallback(async () => {
     if (!ownerId) {
@@ -348,8 +363,11 @@ export const OwnerDriversPage: React.FC = () => {
             return (
               <Card
                 key={deal.offer_id}
+                id={`owner-deal-${deal.offer_id}`}
                 className={`p-5 bg-white border-2 rounded-2xl flex flex-col justify-between gap-4 transition-colors shadow-xs ${
-                  wStatus === 'ended'
+                  focusedOfferId === deal.offer_id
+                    ? 'border-primary ring-2 ring-primary/40 bg-amber-50/20'
+                    : wStatus === 'ended'
                     ? 'border-steel-300 bg-steel-50/50'
                     : isOwnerPendingConfirm
                     ? 'border-amber-400 bg-amber-50/20'

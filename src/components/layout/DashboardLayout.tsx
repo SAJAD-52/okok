@@ -63,7 +63,11 @@ import {
 import { registerOwnerPushNotifications } from '../../lib/pushService';
 import { formatDistanceKm } from '../../lib/geoUtils';
 import { getClientSegmentOption } from '../../data/clientSegments';
-import { fetchDriverJobOffers, subscribeDriverJobOffers } from '../../lib/driverOfferService';
+import {
+  cacheDriverOfferFromNotification,
+  fetchDriverJobOffers,
+  subscribeDriverJobOffers,
+} from '../../lib/driverOfferService';
 
 export const DashboardLayout: React.FC = () => {
   const { t, isRTL, lang } = useLanguage();
@@ -291,6 +295,16 @@ export const DashboardLayout: React.FC = () => {
                     url: '/entreprise/bookings',
                   });
                 }
+              } else if (
+                row?.type === 'driver_job_offer' ||
+                row?.type === 'driver_deal_closed' ||
+                row?.type === 'driver_work_ended' ||
+                row?.type === 'driver_application'
+              ) {
+                if (row?.type === 'driver_job_offer') {
+                  cacheDriverOfferFromNotification(row);
+                }
+                window.dispatchEvent(new CustomEvent('jadijcb_driver_offers_updated'));
               }
             }
           )
@@ -1252,7 +1266,13 @@ export const DashboardLayout: React.FC = () => {
                                 const isPauseNotif =
                                   notif.type === 'booking_paused' ||
                                   notif.type === 'booking_resumed';
+                                const isDriverOfferNotif =
+                                  notif.type === 'driver_job_offer' ||
+                                  notif.type === 'driver_deal_closed' ||
+                                  notif.type === 'driver_work_ended' ||
+                                  notif.type === 'driver_application';
                                 const chatConvId = notif.data?.conversation_id || '';
+                                const targetOfferId = notif.data?.offer_id || '';
                                 return (
                                   <div
                                     key={notif.id}
@@ -1283,6 +1303,31 @@ export const DashboardLayout: React.FC = () => {
                                             ? `${baseMsgRoute}?conv=${encodeURIComponent(chatConvId)}`
                                             : baseMsgRoute
                                         );
+                                      } else if (notif.type === 'driver_job_offer') {
+                                        cacheDriverOfferFromNotification(notif);
+                                        const targetUrl = targetOfferId
+                                          ? `/driver/joboffer?offer=${encodeURIComponent(targetOfferId)}`
+                                          : '/driver/joboffer';
+                                        navigate(targetUrl);
+                                      } else if (
+                                        notif.type === 'driver_deal_closed' ||
+                                        notif.type === 'driver_work_ended'
+                                      ) {
+                                        if (isDriver) {
+                                          navigate(
+                                            targetOfferId
+                                              ? `/driver/joboffer?tab=agreed&offer=${encodeURIComponent(targetOfferId)}`
+                                              : '/driver/joboffer?tab=agreed'
+                                          );
+                                        } else {
+                                          navigate(
+                                            targetOfferId
+                                              ? `/owner/drivers?offer=${encodeURIComponent(targetOfferId)}`
+                                              : '/owner/drivers'
+                                          );
+                                        }
+                                      } else if (notif.type === 'driver_application') {
+                                        navigate('/owner/machines');
                                       } else if (notif.type === 'booking_breakdown') {
                                         navigate('/owner/bookings?tab=active');
                                       } else if (
@@ -1315,6 +1360,9 @@ export const DashboardLayout: React.FC = () => {
                                       <span className="flex items-center gap-1.5 min-w-0 truncate">
                                         {isChatNotif && (
                                           <MessageSquare className="w-3.5 h-3.5 text-primary-dark shrink-0" />
+                                        )}
+                                        {isDriverOfferNotif && (
+                                          <HardHat className="w-3.5 h-3.5 text-primary-dark shrink-0" />
                                         )}
                                         {isBreakdownNotif && (
                                           <AlertTriangle

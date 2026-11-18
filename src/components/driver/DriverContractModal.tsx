@@ -978,6 +978,37 @@ export const DriverContractModal: React.FC<DriverContractModalProps> = ({
                     </span>
                   </div>
                 )}
+
+                {activeContract.termination?.work_status === 'ended' && (
+                  <div className="p-4 rounded-xl bg-steel-50 border-2 border-steel-400 text-xs space-y-1.5">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="font-black text-ink">
+                        {isDocAr
+                          ? 'محضر إنهاء المهمة وتصفية الحساب (المادتان 72 و 73 من مدونة الشغل)'
+                          : 'Constat de Fin de Mission & Solde de Tout Compte (Art. 72-73)'}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md bg-ink text-white text-[10px] font-black">
+                        {activeContract.termination.unilateral_close
+                          ? isDocAr
+                            ? 'إنهاء مسجّل أحادياً'
+                            : 'Clôture unilatérale'
+                          : isDocAr
+                          ? 'منتهٍ بتوافق الطرفين ✓'
+                          : 'Clôturé d’un commun accord ✓'}
+                      </span>
+                    </div>
+                    {activeContract.termination.ended_at && (
+                      <p className="text-[11px] text-steel-600 font-bold font-mono" dir="ltr">
+                        {new Date(activeContract.termination.ended_at).toLocaleString('fr-FR')}
+                      </p>
+                    )}
+                    {activeContract.termination.note && (
+                      <p className="text-[11px] text-steel-700 font-semibold">
+                        {activeContract.termination.note}
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           ) : (

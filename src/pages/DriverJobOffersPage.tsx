@@ -25,6 +25,7 @@ import {
   HardHat,
   Calendar,
   FileText,
+  Flag,
 } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -43,10 +44,12 @@ import {
   buildFallbackDriverContractFromDeal,
   fetchDriverAgreedDeals,
   fetchDriverJobOffers,
+  submitWorkTerminationAction,
   subscribeDriverJobOffers,
 } from '../lib/driverOfferService';
 import { chatStore } from '../lib/chatStore';
 import { DriverContractModal } from '../components/driver/DriverContractModal';
+import { WorkTerminationModal } from '../components/driver/WorkTerminationModal';
 
 type OfferFilterTab = 'all' | 'matching' | 'urgent' | 'applied' | 'agreed';
 
@@ -75,6 +78,9 @@ export const DriverJobOffersPage: React.FC = () => {
   const [agreedDeals, setAgreedDeals] = useState<AgreedDriverDealItem[]>([]);
   const [selectedDealForContract, setSelectedDealForContract] =
     useState<AgreedDriverDealItem | null>(null);
+  const [selectedDealForEnd, setSelectedDealForEnd] =
+    useState<AgreedDriverDealItem | null>(null);
+  const [isEndingWork, setIsEndingWork] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<OfferFilterTab>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -468,18 +474,49 @@ export const DriverJobOffersPage: React.FC = () => {
             </Card>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {filteredAgreedDeals.map((deal) => (
+              {filteredAgreedDeals.map((deal) => {
+                const wTerm = deal.termination || deal.contract?.termination || null;
+                const wStatus = wTerm?.work_status || 'active';
+                const isDriverPendingConfirm = Boolean(
+                  wStatus === 'pending_end' && !wTerm?.driver_confirmed
+                );
+
+                return (
                 <Card
                   key={`agreed_${deal.offer_id}`}
-                  className="p-4 sm:p-5 bg-emerald-50/60 border-2 border-emerald-400 rounded-2xl flex flex-col justify-between gap-3.5"
+                  className={`p-4 sm:p-5 rounded-2xl flex flex-col justify-between gap-3.5 border-2 ${
+                    wStatus === 'ended'
+                      ? 'bg-steel-50/70 border-steel-300'
+                      : isDriverPendingConfirm
+                      ? 'bg-amber-50/50 border-amber-400'
+                      : 'bg-emerald-50/60 border-emerald-400'
+                  }`}
                 >
                   <div className="space-y-3">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-600 text-white text-[11px] font-black">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          {lang === 'fr' ? 'Accord confirmé' : 'تم الاتفاق على الصفقة'}
-                        </span>
+                        {wStatus === 'ended' ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-steel-800 text-white text-[11px] font-black">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                            {lang === 'fr' ? 'Mission terminée' : 'عمل منتهٍ ✓'}
+                          </span>
+                        ) : wStatus === 'pending_end' ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-100 text-amber-900 text-[11px] font-black">
+                            <Clock className="w-3.5 h-3.5" />
+                            {isDriverPendingConfirm
+                              ? lang === 'fr'
+                                ? 'Propriétaire demande la fin'
+                                : 'المالك يطلب إنهاء العمل'
+                              : lang === 'fr'
+                              ? 'En attente du propriétaire'
+                              : 'بانتظار تأكيد المالك'}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-600 text-white text-[11px] font-black">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            {lang === 'fr' ? 'Mission active' : 'اتفاق جاري العمل'}
+                          </span>
+                        )}
                         {deal.contract && (
                           <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white border border-emerald-300 text-emerald-800 text-[10px] font-black font-mono" dir="ltr">
                             <FileText className="w-3 h-3" />
@@ -571,8 +608,35 @@ export const DriverJobOffersPage: React.FC = () => {
                       className="min-h-[42px] px-3.5 py-2 rounded-xl bg-primary hover:bg-primary-hover text-ink font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
                     >
                       <FileText className="w-4 h-4" />
-                      <span>{lang === 'fr' ? 'Contrat PDF' : 'عرض / تحميل العقد PDF'}</span>
+                      <span>{lang === 'fr' ? 'Contrat PDF' : 'العقد PDF'}</span>
                     </button>
+
+                    {wStatus !== 'ended' && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedDealForEnd(deal)}
+                        className={`min-h-[42px] px-3.5 py-2 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors ${
+                          isDriverPendingConfirm
+                            ? 'bg-amber-500 hover:bg-amber-600 text-ink shadow-xs'
+                            : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
+                        }`}
+                      >
+                        <Flag className="w-3.5 h-3.5" />
+                        <span>
+                          {isDriverPendingConfirm
+                            ? lang === 'fr'
+                              ? 'Confirmer fin'
+                              : 'تأكيد إنهاء العمل'
+                            : wStatus === 'pending_end'
+                            ? lang === 'fr'
+                              ? 'Fin en attente'
+                              : 'تتبع الإنهاء'
+                            : lang === 'fr'
+                            ? 'Terminer'
+                            : 'إنهاء العمل'}
+                        </span>
+                      </button>
+                    )}
 
                     <button
                       type="button"
@@ -594,7 +658,8 @@ export const DriverJobOffersPage: React.FC = () => {
                     )}
                   </div>
                 </Card>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -880,6 +945,38 @@ export const DriverJobOffersPage: React.FC = () => {
           canEdit={false}
         />
       )}
+
+      {/* Work Termination Modal ("إنهاء العمل") */}
+      <WorkTerminationModal
+        isOpen={Boolean(selectedDealForEnd)}
+        onClose={() => setSelectedDealForEnd(null)}
+        deal={selectedDealForEnd}
+        partyRole="driver"
+        isSubmitting={isEndingWork}
+        onConfirmAction={async ({ reason, note, forceUnilateral }) => {
+          if (!selectedDealForEnd) return;
+          setIsEndingWork(true);
+          try {
+            await submitWorkTerminationAction({
+              deal: selectedDealForEnd,
+              partyRole: 'driver',
+              currentUserId: driverId,
+              currentUserName: profile?.full_name || selectedDealForEnd.driver_name,
+              reason,
+              note,
+              forceUnilateral,
+            });
+            await loadOffers();
+            toast.success(
+              lang === 'fr'
+                ? 'Statut de fin de mission mis à jour.'
+                : 'تم تسجيل إجراء إنهاء العمل بنجاح.'
+            );
+          } finally {
+            setIsEndingWork(false);
+          }
+        }}
+      />
     </div>
   );
 };

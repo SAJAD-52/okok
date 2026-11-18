@@ -21,6 +21,7 @@ import {
   Coins,
   UserCheck,
   FileText,
+  Flag,
 } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -31,11 +32,13 @@ import {
   AgreedDriverDealItem,
   buildFallbackDriverContractFromDeal,
   fetchOwnerAgreedDriverDeals,
+  submitWorkTerminationAction,
 } from '../lib/driverOfferService';
 import { getDriverExperienceOption } from '../data/driverMachines';
 import { chatStore } from '../lib/chatStore';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { DriverContractModal } from '../components/driver/DriverContractModal';
+import { WorkTerminationModal } from '../components/driver/WorkTerminationModal';
 
 export const OwnerDriversPage: React.FC = () => {
   const { lang } = useLanguage();
@@ -45,6 +48,10 @@ export const OwnerDriversPage: React.FC = () => {
   const [deals, setDeals] = useState<AgreedDriverDealItem[]>([]);
   const [selectedDealForContract, setSelectedDealForContract] =
     useState<AgreedDriverDealItem | null>(null);
+  const [selectedDealForEnd, setSelectedDealForEnd] =
+    useState<AgreedDriverDealItem | null>(null);
+  const [isEndingWork, setIsEndingWork] = useState(false);
+  const [workFilter, setWorkFilter] = useState<'all' | 'active' | 'ended'>('all');
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -109,8 +116,11 @@ export const OwnerDriversPage: React.FC = () => {
 
   const filteredDeals = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return deals;
     return deals.filter((d) => {
+      const wStatus = d.termination?.work_status || 'active';
+      if (workFilter === 'active' && wStatus === 'ended') return false;
+      if (workFilter === 'ended' && wStatus !== 'ended') return false;
+      if (!q) return true;
       const hay = [
         d.driver_name,
         d.driver_phone,
@@ -125,7 +135,7 @@ export const OwnerDriversPage: React.FC = () => {
         .toLowerCase();
       return hay.includes(q);
     });
-  }, [deals, searchQuery]);
+  }, [deals, searchQuery, workFilter]);
 
   const handleOpenDriverChat = async (deal: AgreedDriverDealItem) => {
     if (!ownerId || !deal.driver_id) return;
@@ -229,8 +239,43 @@ export const OwnerDriversPage: React.FC = () => {
         </Card>
       </div>
 
-      {/* Search Filter */}
-      <Card className="p-3.5 bg-white border border-steel-200 rounded-2xl">
+      {/* Search & Work Status Filter */}
+      <Card className="p-3.5 bg-white border border-steel-200 rounded-2xl space-y-3">
+        <div className="flex items-center gap-1.5 overflow-x-auto">
+          {(
+            [
+              { id: 'all', label: lang === 'fr' ? `Tous (${deals.length})` : `الكل (${deals.length})` },
+              {
+                id: 'active',
+                label:
+                  lang === 'fr'
+                    ? `En cours (${deals.filter((d) => (d.termination?.work_status || 'active') !== 'ended').length})`
+                    : `قيد العمل (${deals.filter((d) => (d.termination?.work_status || 'active') !== 'ended').length})`,
+              },
+              {
+                id: 'ended',
+                label:
+                  lang === 'fr'
+                    ? `Terminés (${deals.filter((d) => d.termination?.work_status === 'ended').length})`
+                    : `منتهية (${deals.filter((d) => d.termination?.work_status === 'ended').length})`,
+              },
+            ] as const
+          ).map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setWorkFilter(tab.id)}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap cursor-pointer transition-colors ${
+                workFilter === tab.id
+                  ? 'bg-ink text-primary'
+                  : 'bg-surface text-steel-600 hover:text-ink border border-steel-200'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
         <div className="relative">
           <Search className="w-4 h-4 text-steel-400 absolute top-1/2 -translate-y-1/2 start-3.5 pointer-events-none" />
           <input
@@ -294,20 +339,49 @@ export const OwnerDriversPage: React.FC = () => {
             const expOpt = deal.driver_experience
               ? getDriverExperienceOption(deal.driver_experience)
               : null;
+            const wTerm = deal.termination || deal.contract?.termination || null;
+            const wStatus = wTerm?.work_status || 'active';
+            const isOwnerPendingConfirm = Boolean(
+              wStatus === 'pending_end' && !wTerm?.owner_confirmed
+            );
 
             return (
               <Card
                 key={deal.offer_id}
-                className="p-5 bg-white border-2 border-emerald-200 hover:border-emerald-400 rounded-2xl flex flex-col justify-between gap-4 transition-colors shadow-xs"
+                className={`p-5 bg-white border-2 rounded-2xl flex flex-col justify-between gap-4 transition-colors shadow-xs ${
+                  wStatus === 'ended'
+                    ? 'border-steel-300 bg-steel-50/50'
+                    : isOwnerPendingConfirm
+                    ? 'border-amber-400 bg-amber-50/20'
+                    : 'border-emerald-200 hover:border-emerald-400'
+                }`}
               >
                 <div className="space-y-4">
                   {/* Top Status & Date */}
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-800 text-[11px] font-black">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                        {lang === 'fr' ? 'Accord validé' : 'صفقة متفق عليها'}
-                      </span>
+                      {wStatus === 'ended' ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-steel-800 text-white text-[11px] font-black">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                          {lang === 'fr' ? 'Mission terminée' : 'عمل منتهٍ ✓'}
+                        </span>
+                      ) : wStatus === 'pending_end' ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-100 text-amber-900 text-[11px] font-black">
+                          <Clock className="w-3.5 h-3.5" />
+                          {isOwnerPendingConfirm
+                            ? lang === 'fr'
+                              ? 'Conducteur demande la fin'
+                              : 'السائق يطلب إنهاء العمل'
+                            : lang === 'fr'
+                            ? 'En attente du conducteur'
+                            : 'بانتظار تأكيد السائق'}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-800 text-[11px] font-black">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                          {lang === 'fr' ? 'Accord actif' : 'صفقة نشطة'}
+                        </span>
+                      )}
                       {deal.contract && (
                         <span
                           className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-surface border border-steel-200 text-ink text-[10px] font-black font-mono"
@@ -433,8 +507,35 @@ export const OwnerDriversPage: React.FC = () => {
                     className="min-h-[42px] px-3.5 py-2 rounded-xl bg-primary hover:bg-primary-hover text-ink font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
                   >
                     <FileText className="w-4 h-4" />
-                    <span>{lang === 'fr' ? 'Contrat PDF' : 'عرض / تحميل العقد PDF'}</span>
+                    <span>{lang === 'fr' ? 'Contrat PDF' : 'العقد PDF'}</span>
                   </button>
+
+                  {wStatus !== 'ended' && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDealForEnd(deal)}
+                      className={`min-h-[42px] px-3.5 py-2 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors ${
+                        isOwnerPendingConfirm
+                          ? 'bg-amber-500 hover:bg-amber-600 text-ink shadow-xs'
+                          : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
+                      }`}
+                    >
+                      <Flag className="w-3.5 h-3.5" />
+                      <span>
+                        {isOwnerPendingConfirm
+                          ? lang === 'fr'
+                            ? 'Confirmer fin'
+                            : 'تأكيد إنهاء العمل'
+                          : wStatus === 'pending_end'
+                          ? lang === 'fr'
+                            ? 'Fin en attente'
+                            : 'تتبع الإنهاء'
+                          : lang === 'fr'
+                          ? 'Terminer'
+                          : 'إنهاء العمل'}
+                      </span>
+                    </button>
+                  )}
 
                   {deal.driver_id && (
                     <button
@@ -443,14 +544,14 @@ export const OwnerDriversPage: React.FC = () => {
                       className="flex-1 min-h-[42px] px-3.5 py-2 rounded-xl bg-ink text-white hover:bg-steel-900 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
                     >
                       <MessageSquare className="w-4 h-4 text-primary" />
-                      <span>{lang === 'fr' ? 'Discussion' : 'محادثة السائق'}</span>
+                      <span>{lang === 'fr' ? 'Discussion' : 'محادثة'}</span>
                     </button>
                   )}
 
                   {deal.driver_phone && (
                     <a
                       href={`tel:${deal.driver_phone}`}
-                      className="min-h-[42px] px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                      className="min-h-[42px] px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
                     >
                       <Phone className="w-4 h-4" />
                       <span>{lang === 'fr' ? 'Appeler' : 'اتصال'}</span>
@@ -498,6 +599,38 @@ export const OwnerDriversPage: React.FC = () => {
           canEdit={false}
         />
       )}
+
+      {/* Work Termination Modal ("إنهاء العمل") */}
+      <WorkTerminationModal
+        isOpen={Boolean(selectedDealForEnd)}
+        onClose={() => setSelectedDealForEnd(null)}
+        deal={selectedDealForEnd}
+        partyRole="owner"
+        isSubmitting={isEndingWork}
+        onConfirmAction={async ({ reason, note, forceUnilateral }) => {
+          if (!selectedDealForEnd || !ownerId) return;
+          setIsEndingWork(true);
+          try {
+            await submitWorkTerminationAction({
+              deal: selectedDealForEnd,
+              partyRole: 'owner',
+              currentUserId: ownerId,
+              currentUserName: profile?.full_name || selectedDealForEnd.owner_name,
+              reason,
+              note,
+              forceUnilateral,
+            });
+            await loadDeals();
+            toast.success(
+              lang === 'fr'
+                ? 'Statut de fin de mission mis à jour.'
+                : 'تم تسجيل إجراء إنهاء العمل بنجاح.'
+            );
+          } finally {
+            setIsEndingWork(false);
+          }
+        }}
+      />
     </div>
   );
 };

@@ -41,6 +41,7 @@ export function stripDispatchMarker(raw?: string | null): string {
     '#DRIVER_DEAL:',
     '#DRIVER_CONTRACT:',
     '#DRIVER_CONTRACT_AGREE:',
+    '#DRIVER_WORK_END:',
   ];
   let cutIdx = -1;
   for (const m of markers) {

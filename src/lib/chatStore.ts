@@ -33,6 +33,7 @@ function stripMarkersInline(text: string): string {
     '#DRIVER_DEAL:',
     '#DRIVER_CONTRACT:',
     '#DRIVER_CONTRACT_AGREE:',
+    '#DRIVER_WORK_END:',
   ];
   let cutIdx = -1;
   for (const m of markers) {

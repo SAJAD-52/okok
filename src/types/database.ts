@@ -521,6 +521,26 @@ export interface DispatchDealContext {
 
 export type DriverJobOfferStatus = 'open' | 'applied' | 'accepted' | 'closed';
 export type DriverSalaryUnit = 'day' | 'month';
+export type WorkLifecycleStatus = 'active' | 'pending_end' | 'ended';
+export type WorkTerminationReason =
+  | 'completed_project'
+  | 'mutual_agreement'
+  | 'driver_resignation'
+  | 'owner_early_stop';
+
+export interface WorkTerminationRecord {
+  work_status: WorkLifecycleStatus;
+  reason?: WorkTerminationReason;
+  note?: string;
+  initiated_by?: 'owner' | 'driver';
+  initiated_at?: string;
+  owner_confirmed: boolean;
+  owner_confirmed_at?: string;
+  driver_confirmed: boolean;
+  driver_confirmed_at?: string;
+  unilateral_close?: boolean;
+  ended_at?: string;
+}
 
 export interface DriverContractData {
   contract_number: string;
@@ -561,6 +581,7 @@ export interface DriverContractData {
   owner_agreed_at?: string;
   driver_agreed: boolean;
   driver_agreed_at?: string;
+  termination?: WorkTerminationRecord | null;
 }
 
 export interface DriverJobOffer {

@@ -5,7 +5,13 @@
 // even when outside the app or when the app is closed.
 // ============================================================================
 
-import { DriverContractData, DriverDealContext, DriverJobOffer } from '../types/database';
+import {
+  DriverContractData,
+  DriverDealContext,
+  DriverJobOffer,
+  WorkTerminationReason,
+  WorkTerminationRecord,
+} from '../types/database';
 import { supabase, isSupabaseConfigured } from './supabase';
 import { serverApi } from './serverApi';
 import { sendWebPushToUsers } from './pushService';
@@ -17,12 +23,14 @@ const LOCAL_DRIVER_OFFERS_KEY = 'jadijcb_driver_job_offers_cache';
 const LOCAL_APPLIED_MAP_KEY = 'jadijcb_driver_applied_offers_v1';
 const LOCAL_DRIVER_DEALS_KEY = 'jadijcb_driver_deals_cache_v1';
 const LOCAL_DRIVER_CONTRACTS_KEY = 'jadijcb_driver_contracts_cache_v1';
+const LOCAL_WORK_TERMINATIONS_KEY = 'jadijcb_driver_work_end_v1';
 const DRIVER_DISPATCH_CHANNEL = 'jadijcb_driver_dispatch';
 
 export const DRIVER_OFFER_MARKER = '\n#DRIVER_OFFER:';
 export const DRIVER_DEAL_MARKER = '\n#DRIVER_DEAL:';
 export const DRIVER_CONTRACT_MARKER = '\n#DRIVER_CONTRACT:';
 export const DRIVER_CONTRACT_AGREE_MARKER = '\n#DRIVER_CONTRACT_AGREE:';
+export const DRIVER_WORK_END_MARKER = '\n#DRIVER_WORK_END:';
 
 export interface MatchedDriverTarget {
   id: string;
@@ -73,6 +81,7 @@ export interface AgreedDriverDealItem {
   city: string;
   agreed_at: string;
   contract?: DriverContractData | null;
+  termination?: WorkTerminationRecord | null;
 }
 
 // Starter reference job offers so newly registered drivers immediately see the structured offer format
@@ -1057,6 +1066,67 @@ export function parseDriverContractAgreeMessageRow(msg: any): {
   return data as any;
 }
 
+function getLocalWorkTerminationsMap(): Record<string, WorkTerminationRecord> {
+  try {
+    const raw = localStorage.getItem(LOCAL_WORK_TERMINATIONS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveLocalWorkTermination(offerId: string, driverId: string, record: WorkTerminationRecord) {
+  try {
+    const map = getLocalWorkTerminationsMap();
+    map[`${offerId}::${driverId}`] = record;
+    localStorage.setItem(LOCAL_WORK_TERMINATIONS_KEY, JSON.stringify(map));
+  } catch {
+    // ignore
+  }
+}
+
+export function parseDriverWorkEndMessageRow(
+  msg: any
+): (WorkTerminationRecord & { offer_id: string; driver_id?: string }) | null {
+  const body = msg?.body || msg?.content || msg?.message || msg?.text || '';
+  const data = parseJsonMarkerFromBody(body, DRIVER_WORK_END_MARKER);
+  if (!data?.offer_id || !data?.work_status) return null;
+  return data as any;
+}
+
+function mergeWorkTerminations(
+  a?: WorkTerminationRecord | null,
+  b?: WorkTerminationRecord | null
+): WorkTerminationRecord | null {
+  if (!a && !b) return null;
+  if (!a) return b || null;
+  if (!b) return a;
+  if (a.work_status === 'ended' && b.work_status !== 'ended') return a;
+  if (b.work_status === 'ended' && a.work_status !== 'ended') return b;
+  const ownerConfirmed = Boolean(a.owner_confirmed || b.owner_confirmed);
+  const driverConfirmed = Boolean(a.driver_confirmed || b.driver_confirmed);
+  const status: WorkTerminationRecord['work_status'] =
+    a.work_status === 'ended' ||
+    b.work_status === 'ended' ||
+    (ownerConfirmed && driverConfirmed)
+      ? 'ended'
+      : a.work_status === 'pending_end' || b.work_status === 'pending_end'
+      ? 'pending_end'
+      : 'active';
+  return {
+    ...a,
+    ...b,
+    work_status: status,
+    owner_confirmed: ownerConfirmed,
+    owner_confirmed_at: a.owner_confirmed_at || b.owner_confirmed_at,
+    driver_confirmed: driverConfirmed,
+    driver_confirmed_at: a.driver_confirmed_at || b.driver_confirmed_at,
+    ended_at: a.ended_at || b.ended_at,
+  };
+}
+
 function mergeDriverContracts(
   a?: DriverContractData | null,
   b?: DriverContractData | null
@@ -1066,8 +1136,18 @@ function mergeDriverContracts(
   if (!b) return a;
   const va = Number(a.version) || 1;
   const vb = Number(b.version) || 1;
-  if (vb > va) return b;
-  if (va > vb) return a;
+  if (vb > va) {
+    return {
+      ...b,
+      termination: mergeWorkTerminations(a.termination, b.termination),
+    };
+  }
+  if (va > vb) {
+    return {
+      ...a,
+      termination: mergeWorkTerminations(a.termination, b.termination),
+    };
+  }
   return {
     ...a,
     ...b,
@@ -1075,6 +1155,7 @@ function mergeDriverContracts(
     owner_agreed_at: a.owner_agreed_at || b.owner_agreed_at,
     driver_agreed: Boolean(a.driver_agreed || b.driver_agreed),
     driver_agreed_at: a.driver_agreed_at || b.driver_agreed_at,
+    termination: mergeWorkTerminations(a.termination, b.termination),
   };
 }
 
@@ -1706,6 +1787,171 @@ export async function agreeToDriverContractParty(params: {
   return updatedContract;
 }
 
+const REASON_LABELS_AR: Record<WorkTerminationReason, string> = {
+  completed_project: 'انتهاء الأشغال والمدة المتفق عليها (المادة 33)',
+  mutual_agreement: 'إنهاء العمل بالتراضي وإبراء الذمة',
+  driver_resignation: 'مغادرة طوعية / استقالة السائق (المادة 34)',
+  owner_early_stop: 'توقف مبكر من طرف المالك / المقاولة',
+};
+
+/**
+ * Initiates, confirms mutually, or performs documented unilateral termination
+ * of a driver work agreement under Moroccan Labor Law safeguards.
+ */
+export async function submitWorkTerminationAction(params: {
+  deal: AgreedDriverDealItem;
+  partyRole: 'owner' | 'driver';
+  currentUserId: string;
+  currentUserName?: string;
+  reason?: WorkTerminationReason;
+  note?: string;
+  forceUnilateral?: boolean;
+}): Promise<WorkTerminationRecord> {
+  const { deal, partyRole, currentUserId, currentUserName, reason, note, forceUnilateral } =
+    params;
+  const nowIso = new Date().toISOString();
+  const prevTerm = deal.termination || deal.contract?.termination || null;
+
+  const ownerConfirmed =
+    partyRole === 'owner' ? true : Boolean(prevTerm?.owner_confirmed);
+  const driverConfirmed =
+    partyRole === 'driver' ? true : Boolean(prevTerm?.driver_confirmed);
+  const isFinalEnded = Boolean(forceUnilateral || (ownerConfirmed && driverConfirmed));
+
+  const nextTerm: WorkTerminationRecord = {
+    work_status: isFinalEnded ? 'ended' : 'pending_end',
+    reason: reason || prevTerm?.reason || 'completed_project',
+    note: note !== undefined ? note : prevTerm?.note || '',
+    initiated_by: prevTerm?.initiated_by || partyRole,
+    initiated_at: prevTerm?.initiated_at || nowIso,
+    owner_confirmed: ownerConfirmed,
+    owner_confirmed_at:
+      partyRole === 'owner' ? prevTerm?.owner_confirmed_at || nowIso : prevTerm?.owner_confirmed_at,
+    driver_confirmed: driverConfirmed,
+    driver_confirmed_at:
+      partyRole === 'driver'
+        ? prevTerm?.driver_confirmed_at || nowIso
+        : prevTerm?.driver_confirmed_at,
+    unilateral_close: Boolean(forceUnilateral && !(ownerConfirmed && driverConfirmed)),
+    ended_at: isFinalEnded ? prevTerm?.ended_at || nowIso : undefined,
+  };
+
+  saveLocalWorkTermination(deal.offer_id, deal.driver_id, nextTerm);
+
+  const baseContract = deal.contract || buildFallbackDriverContractFromDeal(deal);
+  const updatedContract: DriverContractData = {
+    ...baseContract,
+    termination: nextTerm,
+  };
+  saveLocalDriverContract(updatedContract);
+
+  const cachedOffers = getLocalCachedOffers();
+  saveLocalCachedOffers(
+    cachedOffers.map((o) =>
+      o.id === deal.offer_id ? { ...o, contract_data: updatedContract } : o
+    )
+  );
+
+  if (isSupabaseConfigured && deal.offer_id && !deal.offer_id.startsWith('starter-')) {
+    try {
+      await supabase
+        .from('driver_job_offers')
+        .update({ contract_data: updatedContract })
+        .eq('id', deal.offer_id);
+    } catch {
+      // ignore if contract_data column is not migrated yet
+    }
+  }
+
+  const peerId = partyRole === 'owner' ? deal.driver_id : deal.owner_id;
+  const peerRole = partyRole === 'owner' ? 'driver' : 'owner';
+  const reasonLabel = REASON_LABELS_AR[nextTerm.reason || 'completed_project'];
+
+  try {
+    if (peerId && !peerId.startsWith('starter-')) {
+      const conv = await chatStore.getOrCreateConversation(currentUserId, peerId, null, {
+        id: peerId,
+        full_name: peerRole === 'driver' ? deal.driver_name : deal.owner_name,
+        phone: peerRole === 'driver' ? deal.driver_phone : deal.owner_phone,
+        role: peerRole,
+      });
+      const msgText = isFinalEnded
+        ? nextTerm.unilateral_close
+          ? `📋 تم تسجيل إنهاء العمل من طرف ${partyRole === 'owner' ? 'المالك' : 'السائق'} (${deal.machine_title}). السبب: ${reasonLabel}.`
+          : `✅ تم تأكيد إنهاء العمل وتصفية الحساب بين الطرفين لآلية (${deal.machine_title}). السبب: ${reasonLabel}.`
+        : `📋 طلب ${partyRole === 'owner' ? 'المالك' : 'السائق'} إنهاء العمل لآلية (${deal.machine_title}) — السبب: ${reasonLabel}. يرجى التأكيد لتثبيت نهاية المهمة وإبراء الذمة.`;
+
+      await chatStore.sendMessage(
+        conv.id,
+        currentUserId,
+        `${msgText}${DRIVER_WORK_END_MARKER}${JSON.stringify({
+          offer_id: deal.offer_id,
+          driver_id: deal.driver_id,
+          ...nextTerm,
+        })}`,
+        peerId,
+        { senderName: currentUserName, recipientRole: peerRole }
+      );
+    }
+  } catch {
+    // ignore chat sync failure
+  }
+
+  if (isSupabaseConfigured && peerId && !peerId.startsWith('starter-')) {
+    const titleAr = isFinalEnded
+      ? `تم إنهاء العمل وتصفية الحساب: ${deal.machine_title} ✅`
+      : `طلب تأكيد إنهاء العمل: ${deal.machine_title} 📋`;
+    const titleFr = isFinalEnded
+      ? `Fin de mission confirmée : ${deal.machine_label_fr} ✅`
+      : `Demande de fin de mission : ${deal.machine_label_fr} 📋`;
+    const bodyAr = isFinalEnded
+      ? `السبب: ${reasonLabel}`
+      : `يرجى الدخول لتأكيد إنهاء المهمة وتثبيت إبراء الذمة.`;
+    const bodyFr = `Motif : ${reasonLabel}`;
+
+    supabase
+      .from('notifications')
+      .insert({
+        user_id: peerId,
+        title_ar: titleAr,
+        title_fr: titleFr,
+        body_ar: bodyAr,
+        body_fr: bodyFr,
+        type: 'driver_work_ended',
+        data: { offer_id: deal.offer_id, work_status: nextTerm.work_status },
+      })
+      .then(() => {}, () => {});
+
+    sendWebPushToUsers({
+      userIds: [peerId],
+      id: `drv-end-${deal.offer_id}-${nextTerm.work_status}`,
+      type: 'driver_work_ended',
+      title: titleAr,
+      body: bodyAr,
+      tag: `drv-end-${deal.offer_id}`,
+      url: peerRole === 'driver' ? '/driver/joboffer' : '/owner/drivers',
+    }).catch(() => {});
+  }
+
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      const bc = new BroadcastChannel(DRIVER_DISPATCH_CHANNEL);
+      bc.postMessage({ type: 'DRIVER_WORK_END_UPDATED', offerId: deal.offer_id });
+      bc.close();
+    }
+  } catch {
+    // ignore
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('jadijcb_driver_offers_updated', { detail: { offerId: deal.offer_id } })
+    );
+  }
+
+  return nextTerm;
+}
+
 export async function acceptAndCloseDriverDealParty(params: {
   deal: DriverDealContext;
   partyRole: 'owner' | 'driver';
@@ -2098,50 +2344,67 @@ export async function fetchDriverAgreedDeals(driverId: string): Promise<AgreedDr
   }
 
   const localContractsMap = getLocalDriverContractsMap();
+  const localTermsMap = getLocalWorkTerminationsMap();
   for (const [offerId, item] of dealsMap.entries()) {
     const localC = localContractsMap[`${offerId}::${driverId}`];
     if (localC) {
       item.contract = mergeDriverContracts(item.contract, localC);
     }
+    const localT = localTermsMap[`${offerId}::${driverId}`];
+    item.termination = mergeWorkTerminations(
+      item.termination,
+      mergeWorkTerminations(item.contract?.termination || null, localT || null)
+    );
   }
 
-  // Fallback cross-device contract recovery from messages if contract_data isn't populated on DB row
+  // Fallback cross-device contract & termination recovery from messages
   if (isSupabaseConfigured && !driverId.startsWith('driver-')) {
-    const missingContractOffers = Array.from(dealsMap.values()).filter((d) => !d.contract);
-    if (missingContractOffers.length > 0) {
-      try {
-        const { data: cMsgs } = await supabase
-          .from('messages')
-          .select('body, content, created_at')
-          .ilike('body', '%#DRIVER_CONTRACT:%')
-          .order('created_at', { ascending: false })
-          .limit(50);
-        if (Array.isArray(cMsgs)) {
-          for (const msg of cMsgs) {
-            const c = parseDriverContractMessageRow(msg);
-            if (c?.offer_id && dealsMap.has(c.offer_id)) {
-              const target = dealsMap.get(c.offer_id)!;
-              target.contract = mergeDriverContracts(target.contract, {
-                ...c,
-                owner_agreed: true,
-                driver_agreed: true,
-              });
-            }
+    try {
+      const { data: cMsgs } = await supabase
+        .from('messages')
+        .select('body, content, created_at')
+        .or('body.ilike.%#DRIVER_CONTRACT:%,body.ilike.%#DRIVER_WORK_END:%')
+        .order('created_at', { ascending: true })
+        .limit(80);
+      if (Array.isArray(cMsgs)) {
+        for (const msg of cMsgs) {
+          const c = parseDriverContractMessageRow(msg);
+          if (c?.offer_id && dealsMap.has(c.offer_id)) {
+            const target = dealsMap.get(c.offer_id)!;
+            target.contract = mergeDriverContracts(target.contract, {
+              ...c,
+              owner_agreed: true,
+              driver_agreed: true,
+            });
+          }
+          const wEnd = parseDriverWorkEndMessageRow(msg);
+          if (wEnd?.offer_id && dealsMap.has(wEnd.offer_id)) {
+            const target = dealsMap.get(wEnd.offer_id)!;
+            target.termination = mergeWorkTerminations(target.termination, wEnd);
           }
         }
-      } catch {
-        // ignore fallback query errors
       }
+    } catch {
+      // ignore fallback query errors
     }
   }
 
   return Array.from(dealsMap.values())
-    .map((item) => ({
-      ...item,
-      contract:
-        item.contract ||
-        buildFallbackDriverContractFromDeal(item),
-    }))
+    .map((item) => {
+      const finalTerm = mergeWorkTerminations(
+        item.termination,
+        item.contract?.termination || null
+      );
+      const baseContract = item.contract || buildFallbackDriverContractFromDeal(item);
+      return {
+        ...item,
+        termination: finalTerm,
+        contract: {
+          ...baseContract,
+          termination: finalTerm,
+        },
+      };
+    })
     .sort(
       (a, b) => new Date(b.agreed_at).getTime() - new Date(a.agreed_at).getTime()
     );
@@ -2344,49 +2607,66 @@ export async function fetchOwnerAgreedDriverDeals(
   }
 
   const localContractsMap = getLocalDriverContractsMap();
+  const localTermsMap = getLocalWorkTerminationsMap();
   for (const item of dealsMap.values()) {
     const localC = localContractsMap[`${item.offer_id}::${item.driver_id}`];
     if (localC) {
       item.contract = mergeDriverContracts(item.contract, localC);
     }
+    const localT = localTermsMap[`${item.offer_id}::${item.driver_id}`];
+    item.termination = mergeWorkTerminations(
+      item.termination,
+      mergeWorkTerminations(item.contract?.termination || null, localT || null)
+    );
   }
 
   if (isSupabaseConfigured) {
-    const missingContractOffers = Array.from(dealsMap.values()).filter((d) => !d.contract);
-    if (missingContractOffers.length > 0) {
-      try {
-        const { data: cMsgs } = await supabase
-          .from('messages')
-          .select('body, content, created_at')
-          .ilike('body', '%#DRIVER_CONTRACT:%')
-          .order('created_at', { ascending: false })
-          .limit(50);
-        if (Array.isArray(cMsgs)) {
-          for (const msg of cMsgs) {
-            const c = parseDriverContractMessageRow(msg);
-            if (c?.offer_id && dealsMap.has(c.offer_id)) {
-              const target = dealsMap.get(c.offer_id)!;
-              target.contract = mergeDriverContracts(target.contract, {
-                ...c,
-                owner_agreed: true,
-                driver_agreed: true,
-              });
-            }
+    try {
+      const { data: cMsgs } = await supabase
+        .from('messages')
+        .select('body, content, created_at')
+        .or('body.ilike.%#DRIVER_CONTRACT:%,body.ilike.%#DRIVER_WORK_END:%')
+        .order('created_at', { ascending: true })
+        .limit(80);
+      if (Array.isArray(cMsgs)) {
+        for (const msg of cMsgs) {
+          const c = parseDriverContractMessageRow(msg);
+          if (c?.offer_id && dealsMap.has(c.offer_id)) {
+            const target = dealsMap.get(c.offer_id)!;
+            target.contract = mergeDriverContracts(target.contract, {
+              ...c,
+              owner_agreed: true,
+              driver_agreed: true,
+            });
+          }
+          const wEnd = parseDriverWorkEndMessageRow(msg);
+          if (wEnd?.offer_id && dealsMap.has(wEnd.offer_id)) {
+            const target = dealsMap.get(wEnd.offer_id)!;
+            target.termination = mergeWorkTerminations(target.termination, wEnd);
           }
         }
-      } catch {
-        // ignore fallback query errors
       }
+    } catch {
+      // ignore fallback query errors
     }
   }
 
   return Array.from(dealsMap.values())
-    .map((item) => ({
-      ...item,
-      contract:
-        item.contract ||
-        buildFallbackDriverContractFromDeal(item),
-    }))
+    .map((item) => {
+      const finalTerm = mergeWorkTerminations(
+        item.termination,
+        item.contract?.termination || null
+      );
+      const baseContract = item.contract || buildFallbackDriverContractFromDeal(item);
+      return {
+        ...item,
+        termination: finalTerm,
+        contract: {
+          ...baseContract,
+          termination: finalTerm,
+        },
+      };
+    })
     .sort(
       (a, b) => new Date(b.agreed_at).getTime() - new Date(a.agreed_at).getTime()
     );

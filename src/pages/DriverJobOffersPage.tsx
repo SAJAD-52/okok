@@ -24,6 +24,7 @@ import {
   Handshake,
   HardHat,
   Calendar,
+  FileText,
 } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -39,11 +40,13 @@ import {
   AgreedDriverDealItem,
   applyToDriverJobOffer,
   buildDriverOfferMarkerSuffix,
+  buildFallbackDriverContractFromDeal,
   fetchDriverAgreedDeals,
   fetchDriverJobOffers,
   subscribeDriverJobOffers,
 } from '../lib/driverOfferService';
 import { chatStore } from '../lib/chatStore';
+import { DriverContractModal } from '../components/driver/DriverContractModal';
 
 type OfferFilterTab = 'all' | 'matching' | 'urgent' | 'applied' | 'agreed';
 
@@ -70,6 +73,8 @@ export const DriverJobOffersPage: React.FC = () => {
 
   const [offers, setOffers] = useState<DriverJobOffer[]>([]);
   const [agreedDeals, setAgreedDeals] = useState<AgreedDriverDealItem[]>([]);
+  const [selectedDealForContract, setSelectedDealForContract] =
+    useState<AgreedDriverDealItem | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<OfferFilterTab>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -469,11 +474,19 @@ export const DriverJobOffersPage: React.FC = () => {
                   className="p-4 sm:p-5 bg-emerald-50/60 border-2 border-emerald-400 rounded-2xl flex flex-col justify-between gap-3.5"
                 >
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-600 text-white text-[11px] font-black">
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        {lang === 'fr' ? 'Accord confirmé' : 'تم الاتفاق على الصفقة'}
-                      </span>
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-600 text-white text-[11px] font-black">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          {lang === 'fr' ? 'Accord confirmé' : 'تم الاتفاق على الصفقة'}
+                        </span>
+                        {deal.contract && (
+                          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white border border-emerald-300 text-emerald-800 text-[10px] font-black font-mono" dir="ltr">
+                            <FileText className="w-3 h-3" />
+                            {deal.contract.contract_number}
+                          </span>
+                        )}
+                      </div>
                       <span className="text-[11px] font-bold text-steel-500 flex items-center gap-1 tabular-nums">
                         <Calendar className="w-3.5 h-3.5" />
                         {new Date(deal.agreed_at).toLocaleDateString(
@@ -554,11 +567,20 @@ export const DriverJobOffersPage: React.FC = () => {
                   <div className="pt-2 border-t border-emerald-200 flex flex-wrap items-center gap-2">
                     <button
                       type="button"
+                      onClick={() => setSelectedDealForContract(deal)}
+                      className="min-h-[42px] px-3.5 py-2 rounded-xl bg-primary hover:bg-primary-hover text-ink font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
+                    >
+                      <FileText className="w-4 h-4" />
+                      <span>{lang === 'fr' ? 'Contrat PDF' : 'عرض / تحميل العقد PDF'}</span>
+                    </button>
+
+                    <button
+                      type="button"
                       onClick={() => handleOpenAgreedChat(deal)}
                       className="flex-1 min-h-[42px] px-3.5 py-2 rounded-xl bg-ink text-white hover:bg-steel-900 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
                     >
                       <MessageSquare className="w-4 h-4 text-primary" />
-                      <span>{lang === 'fr' ? 'Ouvrir la discussion' : 'متابعة المحادثة'}</span>
+                      <span>{lang === 'fr' ? 'Discussion' : 'متابعة المحادثة'}</span>
                     </button>
 
                     {deal.owner_phone && (
@@ -567,7 +589,7 @@ export const DriverJobOffersPage: React.FC = () => {
                         className="min-h-[42px] px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
                       >
                         <Phone className="w-4 h-4" />
-                        <span>{lang === 'fr' ? 'Appeler' : 'اتصال بالمالك'}</span>
+                        <span>{lang === 'fr' ? 'Appeler' : 'اتصال'}</span>
                       </a>
                     )}
                   </div>
@@ -821,6 +843,42 @@ export const DriverJobOffersPage: React.FC = () => {
             );
           })}
         </div>
+      )}
+
+      {/* Signed Contract PDF Viewer Modal */}
+      {selectedDealForContract && (
+        <DriverContractModal
+          isOpen={Boolean(selectedDealForContract)}
+          onClose={() => setSelectedDealForContract(null)}
+          initialMode="preview"
+          contract={
+            selectedDealForContract.contract ||
+            buildFallbackDriverContractFromDeal(selectedDealForContract)
+          }
+          dealContext={{
+            offer_id: selectedDealForContract.offer_id,
+            owner_id: selectedDealForContract.owner_id,
+            driver_id: selectedDealForContract.driver_id,
+            machine_id: selectedDealForContract.machine_id,
+            machine_title: selectedDealForContract.machine_title,
+            machine_image: selectedDealForContract.machine_image,
+            machine_category: selectedDealForContract.machine_category,
+            machine_label_ar: selectedDealForContract.machine_label_ar,
+            machine_label_fr: selectedDealForContract.machine_label_fr,
+            offered_salary: selectedDealForContract.offered_salary,
+            salary_unit: selectedDealForContract.salary_unit,
+            duration_label: selectedDealForContract.duration_label,
+            owner_accepted: true,
+            driver_accepted: true,
+            deal_status: 'accepted',
+            won_driver_name: selectedDealForContract.driver_name,
+            won_driver_phone: selectedDealForContract.driver_phone,
+            agreed_at: selectedDealForContract.agreed_at,
+            contract: selectedDealForContract.contract,
+          }}
+          partyRole="driver"
+          canEdit={false}
+        />
       )}
     </div>
   );

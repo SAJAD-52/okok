@@ -24,9 +24,10 @@ import {
   Loader2,
   HardHat,
   Briefcase,
+  FileText,
 } from 'lucide-react';
 import { ChatConversationItem } from '../../types/chat';
-import { DispatchDealContext, DriverDealContext } from '../../types/database';
+import { BusinessProfile, DispatchDealContext, DriverContractData, DriverDealContext } from '../../types/database';
 import { useLanguage } from '../../hooks/useLanguage';
 import { useAuth } from '../../hooks/useAuth';
 import { useChatRealtime } from './useChatRealtime';
@@ -42,12 +43,17 @@ import {
 } from '../../lib/dispatchService';
 import {
   acceptAndCloseDriverDealParty,
+  agreeToDriverContractParty,
   fetchDriverDealContextForConversation,
+  generateAndSendDriverContract,
   markOfferAcceptedAndClosed,
+  parseDriverContractMessageRow,
   parseDriverOfferMessageRow,
 } from '../../lib/driverOfferService';
+import { businessService } from '../../lib/businessService';
 import { machineStore } from '../../lib/machineStore';
 import { unlockAudioContextNow } from '../../lib/opportunityAudio';
+import { DriverContractModal, DriverContractFormValues } from '../../components/driver/DriverContractModal';
 
 interface ChatThreadProps {
   conversation: ChatConversationItem;
@@ -66,8 +72,13 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
   const [inputMessage, setInputMessage] = useState('');
   const [dispatchDeal, setDispatchDeal] = useState<DispatchDealContext | null>(null);
   const [driverDeal, setDriverDeal] = useState<DriverDealContext | null>(null);
+  const [ownerBizProfile, setOwnerBizProfile] = useState<BusinessProfile | null>(null);
   const [isAcceptingDeal, setIsAcceptingDeal] = useState(false);
   const [isClosingDriverDeal, setIsClosingDriverDeal] = useState(false);
+  const [isContractActionSubmitting, setIsContractActionSubmitting] = useState(false);
+  const [contractModalOpen, setContractModalOpen] = useState(false);
+  const [contractModalMode, setContractModalMode] = useState<'builder' | 'preview'>('builder');
+  const [viewedInlineContract, setViewedInlineContract] = useState<DriverContractData | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const relocatedCampaignRef = useRef<string | null>(null);
   const syncedClosedOfferRef = useRef<string | null>(null);
@@ -287,6 +298,21 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
     messages,
   ]);
 
+  // Load owner's BusinessProfile for contract header/ICE prefill
+  useEffect(() => {
+    if (!isDriverChat || !driverDeal?.owner_id) return;
+    let cancelled = false;
+    businessService
+      .getProfile(driverDeal.owner_id)
+      .then((bp) => {
+        if (!cancelled) setOwnerBizProfile(bp);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isDriverChat, driverDeal?.owner_id]);
+
   // Quick Moroccan Construction Phrases
   const quickChips = isDriverChat
     ? driverPartyRole === 'driver'
@@ -440,6 +466,81 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
       );
     } finally {
       setIsClosingDriverDeal(false);
+    }
+  };
+
+  const handleGenerateContract = async (values: DriverContractFormValues) => {
+    if (!driverDeal || isContractActionSubmitting) return;
+    setIsContractActionSubmitting(true);
+    try {
+      const created = await generateAndSendDriverContract({
+        deal: driverDeal,
+        contractInput: values,
+        partyRole: driverPartyRole,
+        currentUserId,
+        currentUserName: profile?.full_name || '',
+        conversationId: conversation.id,
+      });
+      setDriverDeal((prev) =>
+        prev
+          ? {
+              ...prev,
+              offered_salary: created.offered_salary,
+              salary_unit: created.salary_unit,
+              duration_label: created.duration_label,
+              contract: created,
+            }
+          : prev
+      );
+      setViewedInlineContract(created);
+      toast.success(
+        lang === 'fr'
+          ? 'Contrat PDF envoyé dans la discussion ! Les deux parties peuvent maintenant le valider.'
+          : 'تم توليد وإرسال عقد العمل (PDF) في المحادثة! يمكن للطرفين مراجعته والموافقة عليه.'
+      );
+    } catch {
+      toast.error(
+        lang === 'fr'
+          ? 'Impossible de générer le contrat actuellement'
+          : 'تعذر توليد العقد حالياً، يرجى المحاولة مرة أخرى'
+      );
+    } finally {
+      setIsContractActionSubmitting(false);
+    }
+  };
+
+  const handleAgreeToContract = async () => {
+    const activeC = viewedInlineContract || driverDeal?.contract;
+    if (!driverDeal || !activeC || isContractActionSubmitting) return;
+    setIsContractActionSubmitting(true);
+    try {
+      const updated = await agreeToDriverContractParty({
+        deal: driverDeal,
+        contract: activeC,
+        partyRole: driverPartyRole,
+        currentUserId,
+        currentUserName: profile?.full_name || '',
+        conversationId: conversation.id,
+      });
+      setDriverDeal((prev) => (prev ? { ...prev, contract: updated } : prev));
+      setViewedInlineContract(updated);
+      toast.success(
+        updated.owner_agreed && updated.driver_agreed
+          ? lang === 'fr'
+            ? 'Les deux parties ont approuvé le contrat ! Vous pouvez clôturer l’accord.'
+            : 'وافق الطرفان على العقد! يمكنكم الآن الضغط على «إغلاق الصفقة» لتثبيت العمل.'
+          : lang === 'fr'
+          ? 'Votre approbation du contrat est enregistrée.'
+          : 'تم تسجيل موافقتك على العقد! في انتظار موافقة الطرف الآخر.'
+      );
+    } catch {
+      toast.error(
+        lang === 'fr'
+          ? 'Impossible d’enregistrer votre approbation'
+          : 'تعذر تسجيل الموافقة على العقد حالياً'
+      );
+    } finally {
+      setIsContractActionSubmitting(false);
     }
   };
 
@@ -608,6 +709,14 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
               inlineOfferMeta?.offer_id === driverDeal.offer_id &&
               driverDeal.deal_status === 'accepted'
           );
+          const rawInlineContract = parseDriverContractMessageRow(msg);
+          const inlineContract =
+            rawInlineContract &&
+            driverDeal?.contract &&
+            driverDeal.contract.contract_number === rawInlineContract.contract_number &&
+            Number(driverDeal.contract.version) === Number(rawInlineContract.version)
+              ? driverDeal.contract
+              : rawInlineContract;
 
           return (
             <React.Fragment key={msg.id}>
@@ -670,6 +779,105 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
                         {inlineOfferMeta.duration_label || ''}
                       </p>
                     </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Interactive Driver Work Contract PDF Card in Chat Stream */}
+              {inlineContract && (
+                <div className="flex justify-center my-2.5">
+                  <div className="w-full max-w-md bg-white border-2 border-amber-400 rounded-2xl p-3.5 shadow-sm space-y-2.5 text-start">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="w-8 h-8 rounded-xl bg-ink text-primary flex items-center justify-center shrink-0">
+                          <FileText className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-[11px] font-black text-ink block truncate">
+                            {lang === 'fr' ? 'Contrat de travail PDF' : 'عقد تشغيل الآلية (PDF)'}
+                          </span>
+                          <span className="text-[10px] font-mono text-steel-500 block" dir="ltr">
+                            {inlineContract.contract_number} · v{inlineContract.version}
+                          </span>
+                        </div>
+                      </div>
+
+                      <span
+                        className={`px-2 py-0.5 rounded-lg text-[10px] font-black shrink-0 ${
+                          inlineContract.owner_agreed && inlineContract.driver_agreed
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-amber-100 text-amber-900'
+                        }`}
+                      >
+                        {inlineContract.owner_agreed && inlineContract.driver_agreed
+                          ? lang === 'fr'
+                            ? 'Approuvé par les 2'
+                            : 'معتمد من الطرفين'
+                          : lang === 'fr'
+                          ? 'En révision'
+                          : 'قيد المراجعة'}
+                      </span>
+                    </div>
+
+                    <div className="p-2.5 rounded-xl bg-surface border border-steel-200/80 text-[11px] space-y-1">
+                      <p className="font-black text-ink truncate">{inlineContract.machine_title}</p>
+                      <p className="text-steel-600 font-bold">
+                        {inlineContract.offered_salary.toLocaleString('fr-FR')}{' '}
+                        {lang === 'fr' ? 'MAD' : 'د.م'}/
+                        {inlineContract.salary_unit === 'month'
+                          ? lang === 'fr'
+                            ? 'mois'
+                            : 'شهر'
+                          : lang === 'fr'
+                          ? 'jour'
+                          : 'يوم'}{' '}
+                        · {inlineContract.duration_label}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 text-[10px] font-bold">
+                      <span
+                        className={`inline-flex items-center gap-1 ${
+                          inlineContract.owner_agreed ? 'text-emerald-700' : 'text-steel-500'
+                        }`}
+                      >
+                        {inlineContract.owner_agreed ? (
+                          <Check className="w-3 h-3" />
+                        ) : (
+                          <Clock className="w-3 h-3" />
+                        )}
+                        {lang === 'fr' ? 'Propriétaire' : 'موافقة المالك'}
+                      </span>
+                      <span
+                        className={`inline-flex items-center gap-1 ${
+                          inlineContract.driver_agreed ? 'text-emerald-700' : 'text-steel-500'
+                        }`}
+                      >
+                        {inlineContract.driver_agreed ? (
+                          <Check className="w-3 h-3" />
+                        ) : (
+                          <Clock className="w-3 h-3" />
+                        )}
+                        {lang === 'fr' ? 'Conducteur' : 'موافقة السائق'}
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setViewedInlineContract(inlineContract);
+                        setContractModalMode('preview');
+                        setContractModalOpen(true);
+                      }}
+                      className="w-full min-h-[38px] px-3 py-2 rounded-xl bg-ink hover:bg-steel-900 text-primary font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      <span>
+                        {lang === 'fr'
+                          ? 'Voir & Télécharger le Contrat PDF'
+                          : 'معاينة وتحميل العقد PDF'}
+                      </span>
+                    </button>
                   </div>
                 </div>
               )}
@@ -859,7 +1067,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
         </div>
       )}
 
-      {/* 4B. Mutual "إغلاق الصفقة" Bar for Driver Job Offers */}
+      {/* 4B. Mutual Pre-Deal PDF Contract + "إغلاق الصفقة" Bar for Driver Job Offers */}
       {driverDeal && !dispatchDeal && (
         <div className="shrink-0 z-10">
           {driverDeal.deal_status === 'accepted' ? (
@@ -881,6 +1089,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
                       : `تم الاتفاق على الصفقة (${driverDeal.machine_title || driverDeal.machine_label_ar}) 🤝`}
                   </span>
                   <span className="text-[10px] font-bold text-emerald-700 truncate block">
+                    {driverDeal.contract ? `${driverDeal.contract.contract_number} · ` : ''}
                     {driverDeal.offered_salary > 0
                       ? `${driverDeal.offered_salary.toLocaleString('fr-FR')} ${
                           lang === 'fr' ? 'MAD' : 'د.م'
@@ -898,24 +1107,40 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
                   </span>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() =>
-                  navigate(profile?.role === 'driver' ? '/driver/joboffer' : '/owner/drivers')
-                }
-                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] flex items-center gap-1.5 cursor-pointer shrink-0 transition-colors"
-              >
-                <Briefcase className="w-3.5 h-3.5" />
-                <span>
-                  {profile?.role === 'driver'
-                    ? lang === 'fr'
-                      ? 'Voir mes missions'
-                      : 'عروض العمل'
-                    : lang === 'fr'
-                    ? 'Voir dans Chauffeurs'
-                    : 'قسم السائقون'}
-                </span>
-              </button>
+              <div className="flex items-center gap-2 flex-wrap shrink-0">
+                {driverDeal.contract && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setViewedInlineContract(driverDeal.contract || null);
+                      setContractModalMode('preview');
+                      setContractModalOpen(true);
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-white hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-black text-[11px] flex items-center gap-1.5 cursor-pointer transition-colors"
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>{lang === 'fr' ? 'Contrat PDF' : 'العقد PDF'}</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() =>
+                    navigate(profile?.role === 'driver' ? '/driver/joboffer' : '/owner/drivers')
+                  }
+                  className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] flex items-center gap-1.5 cursor-pointer transition-colors"
+                >
+                  <Briefcase className="w-3.5 h-3.5" />
+                  <span>
+                    {profile?.role === 'driver'
+                      ? lang === 'fr'
+                        ? 'Voir mes missions'
+                        : 'عروض العمل'
+                      : lang === 'fr'
+                      ? 'Voir dans Chauffeurs'
+                      : 'قسم السائقون'}
+                  </span>
+                </button>
+              </div>
             </div>
           ) : driverDeal.deal_status === 'closed' ? (
             <div className="px-3.5 py-2.5 bg-steel-100 border-t border-steel-300 flex items-center gap-2 text-xs text-steel-700 font-bold">
@@ -926,102 +1151,234 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
                   : 'تم إغلاق عرض العمل هذا وإزالته من لائحة عروض العمل.'}
               </span>
             </div>
-          ) : (
-            <div className="px-3.5 py-2.5 bg-ink text-white border-t-2 border-primary flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-              <div className="min-w-0 flex items-center gap-2.5 text-start">
-                {driverDeal.machine_image ? (
-                  <img
-                    src={driverDeal.machine_image}
-                    alt={driverDeal.machine_title || driverDeal.machine_label_ar}
-                    className="w-10 h-10 rounded-xl object-cover border border-primary/40 shrink-0 bg-steel-800"
-                  />
-                ) : (
-                  <div className="w-9 h-9 rounded-xl bg-white/10 border border-primary/40 flex items-center justify-center shrink-0">
-                    <HardHat className="w-4 h-4 text-primary" />
-                  </div>
-                )}
-                <div className="min-w-0 space-y-1">
-                  <div className="flex items-center gap-1.5 text-[11px] font-black text-primary truncate">
-                    <span className="truncate">
-                      {driverDeal.machine_title ||
-                        (lang === 'fr' ? driverDeal.machine_label_fr : driverDeal.machine_label_ar)}
-                      {driverDeal.offered_salary > 0
-                        ? ` · ${driverDeal.offered_salary.toLocaleString('fr-FR')} ${
-                            lang === 'fr' ? 'MAD' : 'د.م'
-                          }/${
-                            driverDeal.salary_unit === 'month'
-                              ? lang === 'fr'
-                                ? 'mois'
-                                : 'شهر'
-                              : lang === 'fr'
-                              ? 'jour'
-                              : 'يوم'
-                          }`
-                        : ''}
-                      {driverDeal.duration_label ? ` · ${driverDeal.duration_label}` : ''}
-                    </span>
-                  </div>
+          ) : (() => {
+            const activeContract = driverDeal.contract;
+            const bothContractAgreed = Boolean(
+              activeContract && activeContract.owner_agreed && activeContract.driver_agreed
+            );
+            const currentUserContractAgreed = Boolean(
+              activeContract &&
+                (driverPartyRole === 'owner'
+                  ? activeContract.owner_agreed
+                  : activeContract.driver_agreed)
+            );
 
-                <div className="flex items-center gap-2 text-[10px] font-bold flex-wrap">
-                  <span
-                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg ${
-                      driverDeal.owner_accepted
-                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40'
-                        : 'bg-white/10 text-steel-300'
-                    }`}
-                  >
-                    {driverDeal.owner_accepted ? (
-                      <Check className="w-3 h-3" />
-                    ) : (
-                      <Clock className="w-3 h-3" />
-                    )}
-                    <span>{lang === 'fr' ? 'Propriétaire' : 'موافقة المالك'}</span>
-                  </span>
+            return (
+              <div className="px-3.5 py-2.5 bg-ink text-white border-t-2 border-primary flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                <div className="min-w-0 flex items-center gap-2.5 text-start">
+                  {driverDeal.machine_image ? (
+                    <img
+                      src={driverDeal.machine_image}
+                      alt={driverDeal.machine_title || driverDeal.machine_label_ar}
+                      className="w-10 h-10 rounded-xl object-cover border border-primary/40 shrink-0 bg-steel-800"
+                    />
+                  ) : (
+                    <div className="w-9 h-9 rounded-xl bg-white/10 border border-primary/40 flex items-center justify-center shrink-0">
+                      <HardHat className="w-4 h-4 text-primary" />
+                    </div>
+                  )}
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex items-center gap-1.5 text-[11px] font-black text-primary truncate">
+                      <span className="truncate">
+                        {driverDeal.machine_title ||
+                          (lang === 'fr'
+                            ? driverDeal.machine_label_fr
+                            : driverDeal.machine_label_ar)}
+                        {driverDeal.offered_salary > 0
+                          ? ` · ${driverDeal.offered_salary.toLocaleString('fr-FR')} ${
+                              lang === 'fr' ? 'MAD' : 'د.م'
+                            }/${
+                              driverDeal.salary_unit === 'month'
+                                ? lang === 'fr'
+                                  ? 'mois'
+                                  : 'شهر'
+                                : lang === 'fr'
+                                ? 'jour'
+                                : 'يوم'
+                            }`
+                          : ''}
+                        {driverDeal.duration_label ? ` · ${driverDeal.duration_label}` : ''}
+                      </span>
+                    </div>
 
-                  <span
-                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg ${
-                      driverDeal.driver_accepted
-                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40'
-                        : 'bg-white/10 text-steel-300'
-                    }`}
-                  >
-                    {driverDeal.driver_accepted ? (
-                      <Check className="w-3 h-3" />
+                    {!activeContract ? (
+                      <p className="text-[10px] font-bold text-steel-300">
+                        {lang === 'fr'
+                          ? 'Étape 1 : Générez le contrat PDF à valider avant de clôturer l’accord.'
+                          : 'الخطوة 1: ولّد عقد العمل PDF ليراجعه الطرفان ويتفقا عليه قبل إغلاق الصفقة'}
+                      </p>
+                    ) : !bothContractAgreed ? (
+                      <div className="flex items-center gap-2 text-[10px] font-bold flex-wrap">
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg ${
+                            activeContract.owner_agreed
+                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40'
+                              : 'bg-white/10 text-steel-300'
+                          }`}
+                        >
+                          {activeContract.owner_agreed ? (
+                            <Check className="w-3 h-3" />
+                          ) : (
+                            <Clock className="w-3 h-3" />
+                          )}
+                          <span>{lang === 'fr' ? 'Contrat Proprio' : 'موافقة المالك على العقد'}</span>
+                        </span>
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg ${
+                            activeContract.driver_agreed
+                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40'
+                              : 'bg-white/10 text-steel-300'
+                          }`}
+                        >
+                          {activeContract.driver_agreed ? (
+                            <Check className="w-3 h-3" />
+                          ) : (
+                            <Clock className="w-3 h-3" />
+                          )}
+                          <span>{lang === 'fr' ? 'Contrat Chauffeur' : 'موافقة السائق على العقد'}</span>
+                        </span>
+                      </div>
                     ) : (
-                      <Clock className="w-3 h-3" />
+                      <div className="flex items-center gap-2 text-[10px] font-bold flex-wrap">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-400/40">
+                          <CheckCircle2 className="w-3 h-3" />
+                          <span>
+                            {lang === 'fr' ? 'Contrat PDF approuvé ✓' : 'تم الاتفاق على العقد PDF ✓'}
+                          </span>
+                        </span>
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg ${
+                            driverDeal.owner_accepted
+                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40'
+                              : 'bg-white/10 text-steel-300'
+                          }`}
+                        >
+                          {driverDeal.owner_accepted ? (
+                            <Check className="w-3 h-3" />
+                          ) : (
+                            <Clock className="w-3 h-3" />
+                          )}
+                          <span>{lang === 'fr' ? 'Clôture Proprio' : 'إغلاق المالك'}</span>
+                        </span>
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg ${
+                            driverDeal.driver_accepted
+                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40'
+                              : 'bg-white/10 text-steel-300'
+                          }`}
+                        >
+                          {driverDeal.driver_accepted ? (
+                            <Check className="w-3 h-3" />
+                          ) : (
+                            <Clock className="w-3 h-3" />
+                          )}
+                          <span>{lang === 'fr' ? 'Clôture Chauffeur' : 'إغلاق السائق'}</span>
+                        </span>
+                      </div>
                     )}
-                    <span>{lang === 'fr' ? 'Conducteur' : 'موافقة السائق'}</span>
-                  </span>
+                  </div>
                 </div>
+
+                {/* Right Action Buttons */}
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  {!activeContract ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setViewedInlineContract(null);
+                        setContractModalMode('builder');
+                        setContractModalOpen(true);
+                      }}
+                      className="px-4 py-2 rounded-xl bg-primary hover:bg-primary-hover text-ink font-black text-xs flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer min-h-[42px]"
+                    >
+                      <FileText className="w-4 h-4" />
+                      <span>
+                        {lang === 'fr' ? 'Générer le Contrat PDF' : 'توليد عقد الاتفاق PDF'}
+                      </span>
+                    </button>
+                  ) : !bothContractAgreed ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setViewedInlineContract(activeContract);
+                          setContractModalMode('preview');
+                          setContractModalOpen(true);
+                        }}
+                        className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/20 font-bold text-xs flex items-center gap-1.5 cursor-pointer min-h-[40px]"
+                      >
+                        <FileText className="w-3.5 h-3.5 text-primary" />
+                        <span>{lang === 'fr' ? 'Voir PDF' : 'معاينة العقد PDF'}</span>
+                      </button>
+
+                      {currentUserContractAgreed ? (
+                        <div className="px-3 py-2 rounded-xl bg-white/10 border border-primary/50 text-primary text-[11px] font-black flex items-center gap-1.5 min-h-[40px]">
+                          <Clock className="w-3.5 h-3.5 animate-pulse shrink-0" />
+                          <span>
+                            {lang === 'fr' ? 'En attente du partenaire' : 'في انتظار موافقة الطرف الآخر'}
+                          </span>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={handleAgreeToContract}
+                          disabled={isContractActionSubmitting}
+                          className="px-4 py-2 rounded-xl bg-primary hover:bg-primary-hover text-ink font-black text-xs flex items-center gap-1.5 shadow-md cursor-pointer min-h-[40px] disabled:opacity-60"
+                        >
+                          {isContractActionSubmitting ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="w-4 h-4" />
+                          )}
+                          <span>{lang === 'fr' ? 'Approuver le contrat' : 'أوافق على العقد'}</span>
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setViewedInlineContract(activeContract);
+                          setContractModalMode('preview');
+                          setContractModalOpen(true);
+                        }}
+                        className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/20 font-bold text-xs flex items-center gap-1.5 cursor-pointer min-h-[40px]"
+                      >
+                        <FileText className="w-3.5 h-3.5 text-primary" />
+                        <span>{lang === 'fr' ? 'PDF' : 'العقد PDF'}</span>
+                      </button>
+
+                      {hasDriverPartyAccepted ? (
+                        <div className="px-3.5 py-2 rounded-xl bg-white/10 border border-primary/50 text-primary text-xs font-black flex items-center justify-center gap-1.5 shrink-0 min-h-[42px]">
+                          <Clock className="w-4 h-4 animate-pulse shrink-0" />
+                          <span>
+                            {lang === 'fr'
+                              ? 'Confirmé — En attente du partenaire'
+                              : 'تمت موافقتك — في انتظار تأكيد الطرف الآخر لإغلاق الصفقة'}
+                          </span>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={handleCloseDriverDeal}
+                          disabled={isClosingDriverDeal}
+                          className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-ink font-black text-xs flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer shrink-0 min-h-[44px] disabled:opacity-60"
+                        >
+                          {isClosingDriverDeal ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Handshake className="w-4 h-4" />
+                          )}
+                          <span>{lang === 'fr' ? 'Clôturer l’accord' : 'إغلاق الصفقة'}</span>
+                        </button>
+                      )}
+                    </>
+                  )}
                 </div>
               </div>
-
-              {hasDriverPartyAccepted ? (
-                <div className="px-3.5 py-2 rounded-xl bg-white/10 border border-primary/50 text-primary text-xs font-black flex items-center justify-center gap-1.5 shrink-0 min-h-[42px]">
-                  <Clock className="w-4 h-4 animate-pulse shrink-0" />
-                  <span>
-                    {lang === 'fr'
-                      ? 'Confirmé — En attente du partenaire'
-                      : 'تمت موافقتك — في انتظار تأكيد الطرف الآخر لإغلاق الصفقة'}
-                  </span>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleCloseDriverDeal}
-                  disabled={isClosingDriverDeal}
-                  className="px-4 py-2 rounded-xl bg-primary hover:bg-primary-hover text-ink font-black text-xs flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer shrink-0 min-h-[44px] disabled:opacity-60"
-                >
-                  {isClosingDriverDeal ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Handshake className="w-4 h-4" />
-                  )}
-                  <span>{lang === 'fr' ? 'Clôturer l’accord' : 'إغلاق الصفقة'}</span>
-                </button>
-              )}
-            </div>
-          )}
+            );
+          })()}
         </div>
       )}
 
@@ -1093,6 +1450,47 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
           </form>
         )}
       </footer>
+
+      {/* Driver Work Contract Builder & PDF Preview Modal */}
+      {isDriverChat && (
+        <DriverContractModal
+          isOpen={contractModalOpen}
+          onClose={() => setContractModalOpen(false)}
+          initialMode={contractModalMode}
+          contract={viewedInlineContract || driverDeal?.contract || null}
+          dealContext={driverDeal}
+          partyRole={driverPartyRole}
+          prefillOwner={{
+            name:
+              driverPartyRole === 'owner'
+                ? profile?.full_name || other.full_name
+                : other.full_name,
+            company:
+              ownerBizProfile?.company_name ||
+              (driverPartyRole === 'owner'
+                ? profile?.company_name || profile?.full_name
+                : other.company_name || other.full_name),
+            phone:
+              ownerBizProfile?.phone ||
+              (driverPartyRole === 'owner' ? profile?.phone : other.phone),
+            ice: ownerBizProfile?.ice || '',
+            city: driverPartyRole === 'owner' ? profile?.city : other.city,
+          }}
+          prefillDriver={{
+            name:
+              driverPartyRole === 'driver'
+                ? profile?.full_name || other.full_name
+                : other.full_name,
+            phone: driverPartyRole === 'driver' ? profile?.phone : other.phone,
+            city: driverPartyRole === 'driver' ? profile?.city : other.city,
+          }}
+          canEdit={Boolean(driverDeal && driverDeal.deal_status !== 'accepted')}
+          onGenerateContract={handleGenerateContract}
+          onAgreeContract={handleAgreeToContract}
+          onCloseDeal={handleCloseDriverDeal}
+          isSubmittingAction={isContractActionSubmitting || isClosingDriverDeal}
+        />
+      )}
     </div>
   );
 };

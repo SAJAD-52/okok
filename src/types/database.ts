@@ -522,6 +522,47 @@ export interface DispatchDealContext {
 export type DriverJobOfferStatus = 'open' | 'applied' | 'accepted' | 'closed';
 export type DriverSalaryUnit = 'day' | 'month';
 
+export interface DriverContractData {
+  contract_number: string;
+  version: number;
+  offer_id: string;
+  owner_id: string;
+  owner_name: string;
+  owner_company?: string;
+  owner_phone?: string;
+  owner_ice?: string;
+  owner_city?: string;
+  driver_id: string;
+  driver_name: string;
+  driver_phone?: string;
+  driver_city?: string;
+  driver_cin?: string;
+  driver_license?: string;
+  machine_id?: string;
+  machine_title: string;
+  machine_image?: string;
+  machine_category: string;
+  machine_label_ar: string;
+  machine_label_fr: string;
+  work_city: string;
+  work_location_note?: string;
+  offered_salary: number;
+  salary_unit: DriverSalaryUnit;
+  duration_label: string;
+  start_date?: string;
+  payment_terms: string;
+  accommodation_included: boolean;
+  meals_included: boolean;
+  custom_terms?: string;
+  generated_by_id: string;
+  generated_by_role: 'owner' | 'driver';
+  generated_at: string;
+  owner_agreed: boolean;
+  owner_agreed_at?: string;
+  driver_agreed: boolean;
+  driver_agreed_at?: string;
+}
+
 export interface DriverJobOffer {
   id: string;
   campaign_id?: string;
@@ -554,6 +595,7 @@ export interface DriverJobOffer {
   won_driver_name?: string;
   won_driver_phone?: string;
   agreed_at?: string;
+  contract_data?: DriverContractData | null;
   created_at: string;
 }
 
@@ -570,11 +612,16 @@ export interface DriverDealContext {
   offered_salary: number;
   salary_unit: DriverSalaryUnit;
   duration_label: string;
+  work_city?: string;
+  work_location_note?: string;
+  accommodation_included?: boolean;
+  meals_included?: boolean;
   owner_accepted: boolean;
   driver_accepted: boolean;
   deal_status: 'open' | 'pending_owner' | 'pending_driver' | 'accepted' | 'closed';
   won_driver_name?: string;
   won_driver_phone?: string;
   agreed_at?: string;
+  contract?: DriverContractData | null;
 }
 

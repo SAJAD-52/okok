@@ -26,7 +26,14 @@ export interface LocalChatBroadcastEvent {
 
 function stripMarkersInline(text: string): string {
   const raw = String(text || '');
-  const markers = ['#DISPATCH_DATA:', '#DISPATCH_DEAL:', '#DRIVER_OFFER:', '#DRIVER_DEAL:'];
+  const markers = [
+    '#DISPATCH_DATA:',
+    '#DISPATCH_DEAL:',
+    '#DRIVER_OFFER:',
+    '#DRIVER_DEAL:',
+    '#DRIVER_CONTRACT:',
+    '#DRIVER_CONTRACT_AGREE:',
+  ];
   let cutIdx = -1;
   for (const m of markers) {
     const idx = raw.indexOf(m);

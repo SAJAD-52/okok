@@ -34,7 +34,14 @@ export const DISPATCH_DEAL_MARKER = '\n#DISPATCH_DEAL:';
 
 export function stripDispatchMarker(raw?: string | null): string {
   if (!raw) return '';
-  const markers = ['#DISPATCH_DATA:', '#DISPATCH_DEAL:', '#DRIVER_OFFER:', '#DRIVER_DEAL:'];
+  const markers = [
+    '#DISPATCH_DATA:',
+    '#DISPATCH_DEAL:',
+    '#DRIVER_OFFER:',
+    '#DRIVER_DEAL:',
+    '#DRIVER_CONTRACT:',
+    '#DRIVER_CONTRACT_AGREE:',
+  ];
   let cutIdx = -1;
   for (const m of markers) {
     const idx = raw.indexOf(m);

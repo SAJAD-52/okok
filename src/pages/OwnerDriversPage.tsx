@@ -20,6 +20,7 @@ import {
   CheckCircle2,
   Coins,
   UserCheck,
+  FileText,
 } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -28,11 +29,13 @@ import { useAuth } from '../hooks/useAuth';
 import { useLanguage } from '../hooks/useLanguage';
 import {
   AgreedDriverDealItem,
+  buildFallbackDriverContractFromDeal,
   fetchOwnerAgreedDriverDeals,
 } from '../lib/driverOfferService';
 import { getDriverExperienceOption } from '../data/driverMachines';
 import { chatStore } from '../lib/chatStore';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { DriverContractModal } from '../components/driver/DriverContractModal';
 
 export const OwnerDriversPage: React.FC = () => {
   const { lang } = useLanguage();
@@ -40,6 +43,8 @@ export const OwnerDriversPage: React.FC = () => {
   const navigate = useNavigate();
 
   const [deals, setDeals] = useState<AgreedDriverDealItem[]>([]);
+  const [selectedDealForContract, setSelectedDealForContract] =
+    useState<AgreedDriverDealItem | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -298,10 +303,21 @@ export const OwnerDriversPage: React.FC = () => {
                 <div className="space-y-4">
                   {/* Top Status & Date */}
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-800 text-[11px] font-black">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                      {lang === 'fr' ? 'Accord validé' : 'صفقة متفق عليها'}
-                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-800 text-[11px] font-black">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                        {lang === 'fr' ? 'Accord validé' : 'صفقة متفق عليها'}
+                      </span>
+                      {deal.contract && (
+                        <span
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-surface border border-steel-200 text-ink text-[10px] font-black font-mono"
+                          dir="ltr"
+                        >
+                          <FileText className="w-3 h-3 text-primary-dark" />
+                          {deal.contract.contract_number}
+                        </span>
+                      )}
+                    </div>
 
                     <span className="text-[11px] font-bold text-steel-500 flex items-center gap-1 tabular-nums">
                       <Calendar className="w-3.5 h-3.5" />
@@ -411,6 +427,15 @@ export const OwnerDriversPage: React.FC = () => {
 
                 {/* Actions */}
                 <div className="pt-3 border-t border-steel-100 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDealForContract(deal)}
+                    className="min-h-[42px] px-3.5 py-2 rounded-xl bg-primary hover:bg-primary-hover text-ink font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
+                  >
+                    <FileText className="w-4 h-4" />
+                    <span>{lang === 'fr' ? 'Contrat PDF' : 'عرض / تحميل العقد PDF'}</span>
+                  </button>
+
                   {deal.driver_id && (
                     <button
                       type="button"
@@ -436,6 +461,42 @@ export const OwnerDriversPage: React.FC = () => {
             );
           })}
         </div>
+      )}
+
+      {/* Signed Contract PDF Viewer Modal */}
+      {selectedDealForContract && (
+        <DriverContractModal
+          isOpen={Boolean(selectedDealForContract)}
+          onClose={() => setSelectedDealForContract(null)}
+          initialMode="preview"
+          contract={
+            selectedDealForContract.contract ||
+            buildFallbackDriverContractFromDeal(selectedDealForContract)
+          }
+          dealContext={{
+            offer_id: selectedDealForContract.offer_id,
+            owner_id: selectedDealForContract.owner_id,
+            driver_id: selectedDealForContract.driver_id,
+            machine_id: selectedDealForContract.machine_id,
+            machine_title: selectedDealForContract.machine_title,
+            machine_image: selectedDealForContract.machine_image,
+            machine_category: selectedDealForContract.machine_category,
+            machine_label_ar: selectedDealForContract.machine_label_ar,
+            machine_label_fr: selectedDealForContract.machine_label_fr,
+            offered_salary: selectedDealForContract.offered_salary,
+            salary_unit: selectedDealForContract.salary_unit,
+            duration_label: selectedDealForContract.duration_label,
+            owner_accepted: true,
+            driver_accepted: true,
+            deal_status: 'accepted',
+            won_driver_name: selectedDealForContract.driver_name,
+            won_driver_phone: selectedDealForContract.driver_phone,
+            agreed_at: selectedDealForContract.agreed_at,
+            contract: selectedDealForContract.contract,
+          }}
+          partyRole="owner"
+          canEdit={false}
+        />
       )}
     </div>
   );

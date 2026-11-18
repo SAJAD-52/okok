@@ -5,7 +5,7 @@
 // even when outside the app or when the app is closed.
 // ============================================================================
 
-import { DriverDealContext, DriverJobOffer } from '../types/database';
+import { DriverContractData, DriverDealContext, DriverJobOffer } from '../types/database';
 import { supabase, isSupabaseConfigured } from './supabase';
 import { serverApi } from './serverApi';
 import { sendWebPushToUsers } from './pushService';
@@ -16,10 +16,13 @@ import { machineStore } from './machineStore';
 const LOCAL_DRIVER_OFFERS_KEY = 'jadijcb_driver_job_offers_cache';
 const LOCAL_APPLIED_MAP_KEY = 'jadijcb_driver_applied_offers_v1';
 const LOCAL_DRIVER_DEALS_KEY = 'jadijcb_driver_deals_cache_v1';
+const LOCAL_DRIVER_CONTRACTS_KEY = 'jadijcb_driver_contracts_cache_v1';
 const DRIVER_DISPATCH_CHANNEL = 'jadijcb_driver_dispatch';
 
 export const DRIVER_OFFER_MARKER = '\n#DRIVER_OFFER:';
 export const DRIVER_DEAL_MARKER = '\n#DRIVER_DEAL:';
+export const DRIVER_CONTRACT_MARKER = '\n#DRIVER_CONTRACT:';
+export const DRIVER_CONTRACT_AGREE_MARKER = '\n#DRIVER_CONTRACT_AGREE:';
 
 export interface MatchedDriverTarget {
   id: string;
@@ -69,6 +72,7 @@ export interface AgreedDriverDealItem {
   duration_label: string;
   city: string;
   agreed_at: string;
+  contract?: DriverContractData | null;
 }
 
 // Starter reference job offers so newly registered drivers immediately see the structured offer format
@@ -254,6 +258,7 @@ function mapDbRowToDriverOffer(row: any): DriverJobOffer {
     won_driver_name: row.won_driver_name || undefined,
     won_driver_phone: row.won_driver_phone || undefined,
     agreed_at: row.agreed_at || undefined,
+    contract_data: row.contract_data || null,
     created_at: row.created_at,
   };
 }
@@ -1010,6 +1015,109 @@ export function parseDriverDealMessageRow(msg: any): {
   return data as any;
 }
 
+function getLocalDriverContractsMap(): Record<string, DriverContractData> {
+  try {
+    const raw = localStorage.getItem(LOCAL_DRIVER_CONTRACTS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveLocalDriverContract(contract: DriverContractData) {
+  try {
+    const map = getLocalDriverContractsMap();
+    const key = `${contract.offer_id}::${contract.driver_id}`;
+    map[key] = contract;
+    localStorage.setItem(LOCAL_DRIVER_CONTRACTS_KEY, JSON.stringify(map));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function parseDriverContractMessageRow(msg: any): DriverContractData | null {
+  const body = msg?.body || msg?.content || msg?.message || msg?.text || '';
+  const data = parseJsonMarkerFromBody(body, DRIVER_CONTRACT_MARKER);
+  if (!data?.offer_id || !data?.contract_number) return null;
+  return data as DriverContractData;
+}
+
+export function parseDriverContractAgreeMessageRow(msg: any): {
+  offer_id: string;
+  contract_number: string;
+  version: number;
+  party_role: 'owner' | 'driver';
+  agreed_at: string;
+} | null {
+  const body = msg?.body || msg?.content || msg?.message || msg?.text || '';
+  const data = parseJsonMarkerFromBody(body, DRIVER_CONTRACT_AGREE_MARKER);
+  if (!data?.offer_id || !data?.contract_number) return null;
+  return data as any;
+}
+
+function mergeDriverContracts(
+  a?: DriverContractData | null,
+  b?: DriverContractData | null
+): DriverContractData | null {
+  if (!a && !b) return null;
+  if (!a) return b || null;
+  if (!b) return a;
+  const va = Number(a.version) || 1;
+  const vb = Number(b.version) || 1;
+  if (vb > va) return b;
+  if (va > vb) return a;
+  return {
+    ...a,
+    ...b,
+    owner_agreed: Boolean(a.owner_agreed || b.owner_agreed),
+    owner_agreed_at: a.owner_agreed_at || b.owner_agreed_at,
+    driver_agreed: Boolean(a.driver_agreed || b.driver_agreed),
+    driver_agreed_at: a.driver_agreed_at || b.driver_agreed_at,
+  };
+}
+
+export function buildFallbackDriverContractFromDeal(
+  deal: AgreedDriverDealItem
+): DriverContractData {
+  const year = new Date(deal.agreed_at || Date.now()).getFullYear();
+  const suffix = (deal.offer_id || '0000').replace(/[^a-zA-Z0-9]/g, '').slice(-4).toUpperCase() || '2026';
+  return {
+    contract_number: `CTR-DRV-${year}-${suffix}`,
+    version: 1,
+    offer_id: deal.offer_id,
+    owner_id: deal.owner_id,
+    owner_name: deal.owner_name || 'مالك الآلية',
+    owner_company: deal.owner_company || deal.owner_name || '',
+    owner_phone: deal.owner_phone || '',
+    driver_id: deal.driver_id,
+    driver_name: deal.driver_name || 'سائق مهني',
+    driver_phone: deal.driver_phone || '',
+    driver_city: deal.driver_city || deal.city || 'المغرب',
+    machine_id: deal.machine_id,
+    machine_title: deal.machine_title || deal.machine_label_ar,
+    machine_image: deal.machine_image || '',
+    machine_category: deal.machine_category,
+    machine_label_ar: deal.machine_label_ar,
+    machine_label_fr: deal.machine_label_fr,
+    work_city: deal.city || 'المغرب',
+    offered_salary: deal.offered_salary,
+    salary_unit: deal.salary_unit,
+    duration_label: deal.duration_label || 'حسب الاتفاق',
+    payment_terms: deal.salary_unit === 'month' ? 'أداء شهري منتظم' : 'أداء أسبوعي منتظم',
+    accommodation_included: false,
+    meals_included: false,
+    generated_by_id: deal.owner_id,
+    generated_by_role: 'owner',
+    generated_at: deal.agreed_at || new Date().toISOString(),
+    owner_agreed: true,
+    owner_agreed_at: deal.agreed_at,
+    driver_agreed: true,
+    driver_agreed_at: deal.agreed_at,
+  };
+}
+
 export async function markOfferAcceptedAndClosed(params: {
   offerId: string;
   driverId: string;
@@ -1119,6 +1227,7 @@ export async function fetchDriverDealContextForConversation(params: {
   let markerStatus: DriverDealContext['deal_status'] | null = null;
   let markerDriverName: string | undefined;
   let markerDriverPhone: string | undefined;
+  const contractsByOffer = new Map<string, DriverContractData>();
 
   // Walk oldest -> newest so markerOfferMeta holds the LATEST offer introduced in this thread
   if (Array.isArray(messages)) {
@@ -1146,6 +1255,29 @@ export async function fetchDriverDealContextForConversation(params: {
         if (dealPayload.won_driver_name) prev.won_driver_name = dealPayload.won_driver_name;
         if (dealPayload.won_driver_phone) prev.won_driver_phone = dealPayload.won_driver_phone;
         dealStatesByOffer.set(dealPayload.offer_id, prev);
+      }
+
+      const contractPayload = parseDriverContractMessageRow(msg);
+      if (contractPayload?.offer_id) {
+        contractsByOffer.set(contractPayload.offer_id, contractPayload);
+      }
+
+      const agreePayload = parseDriverContractAgreeMessageRow(msg);
+      if (agreePayload?.offer_id) {
+        const existingC = contractsByOffer.get(agreePayload.offer_id);
+        if (
+          existingC &&
+          existingC.contract_number === agreePayload.contract_number &&
+          Number(existingC.version) === Number(agreePayload.version)
+        ) {
+          if (agreePayload.party_role === 'owner') {
+            existingC.owner_agreed = true;
+            existingC.owner_agreed_at = agreePayload.agreed_at || existingC.owner_agreed_at;
+          } else {
+            existingC.driver_agreed = true;
+            existingC.driver_agreed_at = agreePayload.agreed_at || existingC.driver_agreed_at;
+          }
+        }
       }
     }
 
@@ -1306,13 +1438,29 @@ export async function fetchDriverDealContextForConversation(params: {
     dealStatus = 'pending_owner';
   }
 
+  const localContractsMap = getLocalDriverContractsMap();
+  const markerContract = contractsByOffer.get(resolvedOfferId) || null;
+  const localContract = localContractsMap[`${resolvedOfferId}::${driverId}`] || null;
+  let resolvedContract = mergeDriverContracts(
+    mergeDriverContracts(markerContract, localContract),
+    dbOffer?.contract_data || null
+  );
+  if (resolvedContract) {
+    if (!resolvedContract.machine_image && resolvedMachineImage) {
+      resolvedContract = { ...resolvedContract, machine_image: resolvedMachineImage };
+    }
+    if (!resolvedContract.machine_title && resolvedMachineTitle) {
+      resolvedContract = { ...resolvedContract, machine_title: resolvedMachineTitle };
+    }
+  }
+
   return {
     offer_id: resolvedOfferId,
     owner_id: ownerId,
     driver_id: driverId,
     machine_id: resolvedMachineId,
-    machine_title: resolvedMachineTitle || undefined,
-    machine_image: resolvedMachineImage || undefined,
+    machine_title: resolvedMachineTitle || resolvedContract?.machine_title || undefined,
+    machine_image: resolvedMachineImage || resolvedContract?.machine_image || undefined,
     machine_category:
       dbOffer?.machine_category || markerOfferMeta?.machine_category || localDeal?.machine_category || 'tractopelle',
     machine_label_ar:
@@ -1326,12 +1474,29 @@ export async function fetchDriverDealContextForConversation(params: {
       localDeal?.machine_label_fr ||
       'Engin BTP',
     offered_salary: Number(
-      dbOffer?.offered_salary ?? markerOfferMeta?.offered_salary ?? localDeal?.offered_salary ?? 0
+      resolvedContract?.offered_salary ??
+        dbOffer?.offered_salary ??
+        markerOfferMeta?.offered_salary ??
+        localDeal?.offered_salary ??
+        0
     ),
     salary_unit:
-      dbOffer?.salary_unit || markerOfferMeta?.salary_unit || localDeal?.salary_unit || 'day',
+      resolvedContract?.salary_unit ||
+      dbOffer?.salary_unit ||
+      markerOfferMeta?.salary_unit ||
+      localDeal?.salary_unit ||
+      'day',
     duration_label:
-      dbOffer?.duration_label || markerOfferMeta?.duration_label || localDeal?.duration_label || '',
+      resolvedContract?.duration_label ||
+      dbOffer?.duration_label ||
+      markerOfferMeta?.duration_label ||
+      localDeal?.duration_label ||
+      '',
+    work_city: resolvedContract?.work_city || dbOffer?.city || (markerOfferMeta as any)?.city || '',
+    work_location_note: resolvedContract?.work_location_note || dbOffer?.work_location_note || '',
+    accommodation_included:
+      resolvedContract?.accommodation_included ?? Boolean(dbOffer?.accommodation_included),
+    meals_included: resolvedContract?.meals_included ?? Boolean(dbOffer?.meals_included),
     owner_accepted: dealStatus === 'accepted' ? true : ownerAccepted,
     driver_accepted: dealStatus === 'accepted' ? true : driverAccepted,
     deal_status: dealStatus,
@@ -1340,7 +1505,205 @@ export async function fetchDriverDealContextForConversation(params: {
     won_driver_phone:
       markerDriverPhone || dbOffer?.won_driver_phone || appRow?.driver_phone || localDeal?.won_driver_phone,
     agreed_at: dbOffer?.agreed_at || localDeal?.agreed_at,
+    contract: resolvedContract,
   };
+}
+
+/**
+ * Generates or updates a structured PDF work contract draft inside the conversation
+ * so BOTH Owner & Driver review and agree on it before closing the deal ("إغلاق الصفقة").
+ */
+export async function generateAndSendDriverContract(params: {
+  deal: DriverDealContext;
+  contractInput: Omit<
+    DriverContractData,
+    | 'contract_number'
+    | 'version'
+    | 'offer_id'
+    | 'owner_id'
+    | 'driver_id'
+    | 'generated_by_id'
+    | 'generated_by_role'
+    | 'generated_at'
+    | 'owner_agreed'
+    | 'owner_agreed_at'
+    | 'driver_agreed'
+    | 'driver_agreed_at'
+  >;
+  partyRole: 'owner' | 'driver';
+  currentUserId: string;
+  currentUserName?: string;
+  conversationId: string;
+}): Promise<DriverContractData> {
+  const { deal, contractInput, partyRole, currentUserId, currentUserName, conversationId } = params;
+  const nowIso = new Date().toISOString();
+  const prevContract = deal.contract;
+  const year = new Date().getFullYear();
+  const randomCode = Math.floor(1000 + Math.random() * 9000);
+  const contractNumber = prevContract?.contract_number || `CTR-DRV-${year}-${randomCode}`;
+  const nextVersion = prevContract ? (Number(prevContract.version) || 1) + 1 : 1;
+
+  const contract: DriverContractData = {
+    ...contractInput,
+    contract_number: contractNumber,
+    version: nextVersion,
+    offer_id: deal.offer_id,
+    owner_id: deal.owner_id,
+    driver_id: deal.driver_id,
+    generated_by_id: currentUserId,
+    generated_by_role: partyRole,
+    generated_at: nowIso,
+    owner_agreed: partyRole === 'owner',
+    owner_agreed_at: partyRole === 'owner' ? nowIso : undefined,
+    driver_agreed: partyRole === 'driver',
+    driver_agreed_at: partyRole === 'driver' ? nowIso : undefined,
+  };
+
+  saveLocalDriverContract(contract);
+
+  // Sync updated terms onto local deal & cached offer too
+  const updatedDeal: DriverDealContext = {
+    ...deal,
+    offered_salary: contract.offered_salary,
+    salary_unit: contract.salary_unit,
+    duration_label: contract.duration_label,
+    contract,
+  };
+  saveLocalDriverDeal(updatedDeal);
+
+  const existingOffers = getLocalCachedOffers();
+  saveLocalCachedOffers(
+    existingOffers.map((o) =>
+      o.id === deal.offer_id
+        ? {
+            ...o,
+            offered_salary: contract.offered_salary,
+            salary_unit: contract.salary_unit,
+            duration_label: contract.duration_label,
+            contract_data: contract,
+          }
+        : o
+    )
+  );
+
+  if (isSupabaseConfigured && deal.offer_id && !deal.offer_id.startsWith('starter-')) {
+    try {
+      await supabase
+        .from('driver_job_offers')
+        .update({
+          contract_data: contract,
+          offered_salary: contract.offered_salary,
+          salary_unit: contract.salary_unit,
+          duration_label: contract.duration_label,
+        })
+        .eq('id', deal.offer_id);
+    } catch {
+      // ignore if contract_data column is not migrated yet; message stream preserves full JSON
+    }
+  }
+
+  const unitLabel = contract.salary_unit === 'month' ? 'شهر' : 'يوم';
+  const humanMsg = `📄 تم توليد عقد العمل (${contract.contract_number} · نسخة v${nextVersion}) للآلية: ${contract.machine_title} بأجر ${contract.offered_salary.toLocaleString('fr-FR')} د.م/${unitLabel} (${contract.duration_label}). يرجى مراجعة العقد والموافقة عليه قبل إغلاق الصفقة.`;
+
+  const recipientId = partyRole === 'owner' ? deal.driver_id : deal.owner_id;
+  const recipientRole = partyRole === 'owner' ? 'driver' : 'owner';
+
+  await chatStore.sendMessage(
+    conversationId,
+    currentUserId,
+    `${humanMsg}${DRIVER_CONTRACT_MARKER}${JSON.stringify(contract)}`,
+    recipientId,
+    {
+      senderName: currentUserName,
+      recipientRole,
+    }
+  );
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('jadijcb_driver_offers_updated', { detail: { offerId: deal.offer_id } }));
+  }
+
+  return contract;
+}
+
+/**
+ * Records either party's explicit approval of the generated PDF contract terms
+ * before unlocking mutual deal closure ("إغلاق الصفقة").
+ */
+export async function agreeToDriverContractParty(params: {
+  deal: DriverDealContext;
+  contract: DriverContractData;
+  partyRole: 'owner' | 'driver';
+  currentUserId: string;
+  currentUserName?: string;
+  conversationId: string;
+}): Promise<DriverContractData> {
+  const { deal, contract, partyRole, currentUserId, currentUserName, conversationId } = params;
+  const nowIso = new Date().toISOString();
+
+  const updatedContract: DriverContractData = {
+    ...contract,
+    owner_agreed: partyRole === 'owner' ? true : contract.owner_agreed,
+    owner_agreed_at:
+      partyRole === 'owner' ? contract.owner_agreed_at || nowIso : contract.owner_agreed_at,
+    driver_agreed: partyRole === 'driver' ? true : contract.driver_agreed,
+    driver_agreed_at:
+      partyRole === 'driver' ? contract.driver_agreed_at || nowIso : contract.driver_agreed_at,
+  };
+
+  saveLocalDriverContract(updatedContract);
+  saveLocalDriverDeal({ ...deal, contract: updatedContract });
+
+  const existingOffers = getLocalCachedOffers();
+  saveLocalCachedOffers(
+    existingOffers.map((o) =>
+      o.id === deal.offer_id ? { ...o, contract_data: updatedContract } : o
+    )
+  );
+
+  if (isSupabaseConfigured && deal.offer_id && !deal.offer_id.startsWith('starter-')) {
+    try {
+      await supabase
+        .from('driver_job_offers')
+        .update({ contract_data: updatedContract })
+        .eq('id', deal.offer_id);
+    } catch {
+      // ignore if column not migrated yet
+    }
+  }
+
+  const bothAgreed = updatedContract.owner_agreed && updatedContract.driver_agreed;
+  const humanMsg = bothAgreed
+    ? `✅ وافق الطرفان على عقد العمل رقم ${updatedContract.contract_number}! يمكنكم الآن الضغط على «إغلاق الصفقة» لتثبيت العمل نهائياً.`
+    : partyRole === 'owner'
+    ? `✅ وافق المالك على بنود عقد العمل رقم ${updatedContract.contract_number} — في انتظار موافقة السائق على العقد.`
+    : `✅ وافق السائق على بنود عقد العمل رقم ${updatedContract.contract_number} — في انتظار موافقة المالك على العقد.`;
+
+  const recipientId = partyRole === 'owner' ? deal.driver_id : deal.owner_id;
+  const recipientRole = partyRole === 'owner' ? 'driver' : 'owner';
+
+  await chatStore.sendMessage(
+    conversationId,
+    currentUserId,
+    `${humanMsg}${DRIVER_CONTRACT_AGREE_MARKER}${JSON.stringify({
+      offer_id: deal.offer_id,
+      contract_number: updatedContract.contract_number,
+      version: updatedContract.version,
+      party_role: partyRole,
+      agreed_at: nowIso,
+    })}`,
+    recipientId,
+    {
+      senderName: currentUserName,
+      recipientRole,
+    }
+  );
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('jadijcb_driver_offers_updated', { detail: { offerId: deal.offer_id } }));
+  }
+
+  return updatedContract;
 }
 
 export async function acceptAndCloseDriverDealParty(params: {
@@ -1734,9 +2097,54 @@ export async function fetchDriverAgreedDeals(driverId: string): Promise<AgreedDr
     }
   }
 
-  return Array.from(dealsMap.values()).sort(
-    (a, b) => new Date(b.agreed_at).getTime() - new Date(a.agreed_at).getTime()
-  );
+  const localContractsMap = getLocalDriverContractsMap();
+  for (const [offerId, item] of dealsMap.entries()) {
+    const localC = localContractsMap[`${offerId}::${driverId}`];
+    if (localC) {
+      item.contract = mergeDriverContracts(item.contract, localC);
+    }
+  }
+
+  // Fallback cross-device contract recovery from messages if contract_data isn't populated on DB row
+  if (isSupabaseConfigured && !driverId.startsWith('driver-')) {
+    const missingContractOffers = Array.from(dealsMap.values()).filter((d) => !d.contract);
+    if (missingContractOffers.length > 0) {
+      try {
+        const { data: cMsgs } = await supabase
+          .from('messages')
+          .select('body, content, created_at')
+          .ilike('body', '%#DRIVER_CONTRACT:%')
+          .order('created_at', { ascending: false })
+          .limit(50);
+        if (Array.isArray(cMsgs)) {
+          for (const msg of cMsgs) {
+            const c = parseDriverContractMessageRow(msg);
+            if (c?.offer_id && dealsMap.has(c.offer_id)) {
+              const target = dealsMap.get(c.offer_id)!;
+              target.contract = mergeDriverContracts(target.contract, {
+                ...c,
+                owner_agreed: true,
+                driver_agreed: true,
+              });
+            }
+          }
+        }
+      } catch {
+        // ignore fallback query errors
+      }
+    }
+  }
+
+  return Array.from(dealsMap.values())
+    .map((item) => ({
+      ...item,
+      contract:
+        item.contract ||
+        buildFallbackDriverContractFromDeal(item),
+    }))
+    .sort(
+      (a, b) => new Date(b.agreed_at).getTime() - new Date(a.agreed_at).getTime()
+    );
 }
 
 /**
@@ -1926,6 +2334,7 @@ export async function fetchOwnerAgreedDriverDeals(
             duration_label: offer.duration_label || prev?.duration_label || '',
             city: offer.city || 'المغرب',
             agreed_at: offer.agreed_at || wonApp?.created_at || offer.created_at,
+            contract: mergeDriverContracts(offer.contract_data || null, prev?.contract || null),
           });
         }
       }
@@ -1934,9 +2343,53 @@ export async function fetchOwnerAgreedDriverDeals(
     }
   }
 
-  return Array.from(dealsMap.values()).sort(
-    (a, b) => new Date(b.agreed_at).getTime() - new Date(a.agreed_at).getTime()
-  );
+  const localContractsMap = getLocalDriverContractsMap();
+  for (const item of dealsMap.values()) {
+    const localC = localContractsMap[`${item.offer_id}::${item.driver_id}`];
+    if (localC) {
+      item.contract = mergeDriverContracts(item.contract, localC);
+    }
+  }
+
+  if (isSupabaseConfigured) {
+    const missingContractOffers = Array.from(dealsMap.values()).filter((d) => !d.contract);
+    if (missingContractOffers.length > 0) {
+      try {
+        const { data: cMsgs } = await supabase
+          .from('messages')
+          .select('body, content, created_at')
+          .ilike('body', '%#DRIVER_CONTRACT:%')
+          .order('created_at', { ascending: false })
+          .limit(50);
+        if (Array.isArray(cMsgs)) {
+          for (const msg of cMsgs) {
+            const c = parseDriverContractMessageRow(msg);
+            if (c?.offer_id && dealsMap.has(c.offer_id)) {
+              const target = dealsMap.get(c.offer_id)!;
+              target.contract = mergeDriverContracts(target.contract, {
+                ...c,
+                owner_agreed: true,
+                driver_agreed: true,
+              });
+            }
+          }
+        }
+      } catch {
+        // ignore fallback query errors
+      }
+    }
+  }
+
+  return Array.from(dealsMap.values())
+    .map((item) => ({
+      ...item,
+      contract:
+        item.contract ||
+        buildFallbackDriverContractFromDeal(item),
+    }))
+    .sort(
+      (a, b) => new Date(b.agreed_at).getTime() - new Date(a.agreed_at).getTime()
+    );
 }
 
 

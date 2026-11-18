@@ -210,7 +210,7 @@ function createFleetMarkerIcon(item: MachineTelemetry, lang: 'ar' | 'fr') {
           border: 2px solid ${palette.border};
           border-radius: 14px;
           padding: 4px 8px;
-          font-family: 'Cairo', 'Plus Jakarta Sans', sans-serif;
+          font-family: 'beIN Black', 'Plus Jakarta Sans', sans-serif;
           white-space: nowrap;
           box-shadow: 0 6px 16px rgba(15,23,42,0.38);
         ">

@@ -2,6 +2,15 @@
 @tailwind components;
 @tailwind utilities;
 
+@font-face {
+  font-family: 'beIN Black';
+  src: url('/fonts/beIN-Black.woff2') format('woff2'),
+       url('/fonts/beIN-Black.ttf') format('truetype');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 @layer base {
   html {
     -webkit-tap-highlight-color: transparent;
@@ -14,6 +23,27 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     overflow-x: hidden;
+  }
+
+  html[lang="ar"],
+  html[lang="ar"] body,
+  html[lang="ar"] .font-sans,
+  html[lang="ar"] .font-display,
+  html[lang="ar"] .font-arabic,
+  html[lang="ar"] .font-cairo,
+  html[lang="ar"] input:not(.font-mono),
+  html[lang="ar"] textarea:not(.font-mono),
+  html[lang="ar"] select,
+  html[lang="ar"] button,
+  html[lang="ar"] .leaflet-container {
+    font-family: 'beIN Black', 'IBM Plex Sans Arabic', system-ui, sans-serif;
+  }
+
+  html[lang="fr"],
+  html[lang="fr"] body,
+  html[lang="fr"] .font-sans,
+  html[lang="fr"] .font-display {
+    font-family: 'Plus Jakarta Sans', 'IBM Plex Sans Arabic', system-ui, sans-serif;
   }
 }
 

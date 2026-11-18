@@ -57,7 +57,7 @@ export const MarketplaceMap: React.FC<MarketplaceMapProps> = ({
           border-radius: 9999px;
           font-weight: 800;
           font-size: 11px;
-          font-family: 'Plus Jakarta Sans', 'Cairo', sans-serif;
+          font-family: 'beIN Black', 'Plus Jakarta Sans', sans-serif;
           white-space: nowrap;
           box-shadow: 0 4px 12px rgba(0,0,0,0.25);
           border: 2px solid #FFFFFF;

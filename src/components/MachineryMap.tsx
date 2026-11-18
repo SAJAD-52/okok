@@ -93,7 +93,7 @@ export const MachineryMap: React.FC<MachineryMapProps> = ({ listings }) => {
       const formattedPrice = `${new Intl.NumberFormat('fr-FR').format(item.price)} MAD`;
 
       const popupContent = `
-        <div style="min-width: 200px; max-width: 240px; font-family: 'Plus Jakarta Sans', 'Cairo', sans-serif; text-align: ${language === 'ar' ? 'right' : 'left'}; direction: ${language === 'ar' ? 'rtl' : 'ltr'};">
+        <div style="min-width: 200px; max-width: 240px; font-family: ${language === 'ar' ? "'beIN Black', 'IBM Plex Sans Arabic', sans-serif" : "'Plus Jakarta Sans', sans-serif"}; text-align: ${language === 'ar' ? 'right' : 'left'}; direction: ${language === 'ar' ? 'rtl' : 'ltr'};">
           <div style="position: relative; border-radius: 8px; overflow: hidden; margin-bottom: 8px; height: 110px;">
             <img src="${item.images[0]}" alt="${title}" style="width: 100%; height: 100%; object-fit: cover;" />
             <span style="position: absolute; top: 6px; left: 6px; background: #FFB400; color: #0B1220; font-weight: 800; font-size: 10px; padding: 2px 6px; border-radius: 4px;">

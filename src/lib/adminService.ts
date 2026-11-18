@@ -210,7 +210,31 @@ class AdminService {
       throw new Error(`تعذر تغيير حالة التجميد (${errCode})`);
     }
 
-    // 2. Fallback if latest SQL migration isn't applied yet: direct update with row verification
+    // 2. Try server-side admin endpoint (if SUPABASE_SERVICE_ROLE_KEY is set on server)
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (accessToken && targetSuspend !== null) {
+        const apiResp = await fetch('/api/admin/toggle-suspend', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ userId, suspend: targetSuspend }),
+        });
+        if (apiResp.ok) {
+          const apiJson = await apiResp.json();
+          if (apiJson?.success) {
+            return Boolean(apiJson.is_suspended);
+          }
+        }
+      }
+    } catch {
+      // Ignore server fallback if running static SPA
+    }
+
+    // 3. Fallback if latest SQL migration isn't applied yet: direct update with row verification
     let nextSuspended = targetSuspend;
     if (nextSuspended === null) {
       const { data: row } = await supabase
@@ -331,7 +355,31 @@ class AdminService {
       throw new Error(`تعذر حذف الحساب (${errCode})`);
     }
 
-    // 2. Fallback if latest SQL migration isn't applied yet: direct delete with row verification
+    // 2. Try server-side admin endpoint (if SUPABASE_SERVICE_ROLE_KEY is set on server)
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (accessToken) {
+        const apiResp = await fetch('/api/admin/delete-account', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ userId }),
+        });
+        if (apiResp.ok) {
+          const apiJson = await apiResp.json();
+          if (apiJson?.success) {
+            return;
+          }
+        }
+      }
+    } catch {
+      // Ignore server fallback if running static SPA
+    }
+
+    // 3. Fallback if latest SQL migration isn't applied yet: direct delete with row verification
     const { data: deletedRows, error } = await supabase
       .from('profiles')
       .delete()

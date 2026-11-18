@@ -2118,6 +2118,115 @@ app.post('/api/auth/whatsapp-otp/reset-password', apiMutationLimiter, async (req
   }
 });
 
+// Super Admin: Permanently delete user account via Supabase Service Role API
+app.post('/api/admin/delete-account', apiMutationLimiter, async (req, res) => {
+  try {
+    const authHeader = String(req.headers.authorization || '');
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+    const caller = await resolveVerifiedUser(token);
+    if (!caller || !caller.isAdmin) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+
+    const userId = String(req.body?.userId || '').trim();
+    if (!userId) {
+      return res.status(400).json({ success: false, error: 'INVALID_USER_ID' });
+    }
+    if (userId === caller.id) {
+      return res.status(400).json({ success: false, error: 'CANNOT_DELETE_SELF' });
+    }
+
+    if (!isSupabaseAuthEnabled || !SUPABASE_SERVICE_ROLE_KEY) {
+      return res.status(501).json({ success: false, error: 'SERVICE_ROLE_NOT_CONFIGURED' });
+    }
+
+    // 1. Delete profile row first (cascades machines, bookings, etc.)
+    await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}`, {
+      method: 'DELETE',
+      headers: {
+        apikey: SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      },
+    });
+
+    // 2. Delete auth.users record so phone number is completely freed
+    const authDelResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${encodeURIComponent(userId)}`, {
+      method: 'DELETE',
+      headers: {
+        apikey: SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      },
+    });
+
+    if (!authDelResp.ok && authDelResp.status !== 404) {
+      const errTxt = await authDelResp.text();
+      return res.status(500).json({ success: false, error: errTxt || 'AUTH_DELETE_FAILED' });
+    }
+
+    return res.json({ success: true, userId });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'INTERNAL_ERROR' });
+  }
+});
+
+// Super Admin: Toggle user suspension via Supabase Service Role API
+app.post('/api/admin/toggle-suspend', apiMutationLimiter, async (req, res) => {
+  try {
+    const authHeader = String(req.headers.authorization || '');
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+    const caller = await resolveVerifiedUser(token);
+    if (!caller || !caller.isAdmin) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+
+    const userId = String(req.body?.userId || '').trim();
+    const suspend = Boolean(req.body?.suspend);
+    if (!userId) {
+      return res.status(400).json({ success: false, error: 'INVALID_USER_ID' });
+    }
+    if (userId === caller.id) {
+      return res.status(400).json({ success: false, error: 'CANNOT_SUSPEND_SELF' });
+    }
+
+    if (!isSupabaseAuthEnabled || !SUPABASE_SERVICE_ROLE_KEY) {
+      return res.status(501).json({ success: false, error: 'SERVICE_ROLE_NOT_CONFIGURED' });
+    }
+
+    const nextStatus = suspend ? 'suspended' : 'active';
+    const updResp = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}`, {
+      method: 'PATCH',
+      headers: {
+        apikey: SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=representation',
+      },
+      body: JSON.stringify({ subscription_status: nextStatus }),
+    });
+
+    if (!updResp.ok) {
+      const errTxt = await updResp.text();
+      return res.status(500).json({ success: false, error: errTxt || 'SUSPEND_FAILED' });
+    }
+
+    if (suspend) {
+      await fetch(`${SUPABASE_URL}/rest/v1/machines?owner_id=eq.${encodeURIComponent(userId)}`, {
+        method: 'PATCH',
+        headers: {
+          apikey: SUPABASE_SERVICE_ROLE_KEY,
+          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ is_published: false }),
+      }).catch(() => {});
+    }
+
+    return res.json({ success: true, is_suspended: suspend, subscription_status: nextStatus });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'INTERNAL_ERROR' });
+  }
+});
+
 // ============================================================================
 // FRONTEND SERVING (Vite Middleware in Dev, Static in Prod)
 // ============================================================================

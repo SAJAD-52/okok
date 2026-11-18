@@ -1028,16 +1028,18 @@ export const AdminPage: React.FC = () => {
                           </Button>
 
                           {/* Delete */}
-                          <button
+                          <Button
                             type="button"
+                            variant="outline"
+                            size="sm"
                             disabled={processingAccountId === acc.id}
                             onClick={() => handleOpenDeleteAccount(acc)}
-                            className="p-2 rounded-xl text-steel-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer disabled:opacity-50"
+                            leftIcon={<Trash2 className="w-3.5 h-3.5" />}
+                            className="text-xs font-black border-rose-200 text-rose-600 hover:bg-rose-600 hover:text-white hover:border-rose-600"
                             title="حذف الحساب نهائياً"
-                            aria-label="حذف الحساب"
                           >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                            احذف
+                          </Button>
                         </>
                       )}
                     </div>

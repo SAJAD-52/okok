@@ -87,7 +87,7 @@ export const MachineDetailPage: React.FC = () => {
 
   // Rental Booking Simulation State
   const [selectedTerm, setSelectedTerm] = useState<'hourly' | 'daily' | 'weekly'>('daily');
-  const [selectedDuration, setSelectedDuration] = useState(3);
+  const [selectedDuration, setSelectedDuration] = useState(1);
   const [startDate, setStartDate] = useState('2026-03-10');
 
   // Load machine from Supabase with machineStore cache fallback
@@ -999,58 +999,184 @@ export const MachineDetailPage: React.FC = () => {
             {/* Price Box */}
             <Card className="p-6 bg-white border border-steel-200 shadow-elevated rounded-3xl space-y-5">
               {/* Header Price */}
-              <div>
-                <span className="text-xs font-bold text-steel-500 block">
-                  {isRent ? t('machine_detail.rate_daily') : t('machines.sale_price_label')}
-                </span>
-                <div className="flex items-baseline gap-2 mt-1">
-                  <span className="text-2xl sm:text-3xl font-black text-ink font-mono latin-nums">
-                    {formatPriceMAD(isRent ? resolveMachineRates(machine).rateDaily : resolveMachineRates(machine).salePrice)}
-                  </span>
-                  {isRent && (
-                    <span className="text-xs font-bold text-steel-500">
-                      /{t('marketplace.per_day')}
-                    </span>
-                  )}
-                </div>
-              </div>
+              {(() => {
+                const rates = resolveMachineRates(machine);
+                const activeUnitRate =
+                  !isRent
+                    ? rates.salePrice
+                    : selectedTerm === 'hourly'
+                    ? rates.rateHourly
+                    : selectedTerm === 'weekly'
+                    ? rates.rateWeekly
+                    : rates.rateDaily;
 
-              {/* Rental Simulation Controls */}
-              {isRent && (
-                <div className="space-y-3 pt-3 border-t border-steel-200">
-                  <div className="flex items-center justify-between text-xs font-bold text-steel-700">
-                    <span>{t('bookings.dates')}</span>
-                    <div className="flex items-center gap-1 bg-steel-100 p-1 rounded-lg">
-                      {(['hourly', 'daily', 'weekly'] as const).map((term) => (
-                        <button
-                          key={term}
-                          type="button"
-                          onClick={() => setSelectedTerm(term)}
-                          className={`px-2 py-0.5 text-[10px] font-bold rounded cursor-pointer transition-all ${
-                            selectedTerm === term
-                              ? 'bg-primary text-ink shadow-xs'
-                              : 'text-steel-600'
-                          }`}
-                        >
-                          {term === 'hourly'
-                            ? t('marketplace.per_hour')
-                            : term === 'daily'
-                            ? t('marketplace.per_day')
-                            : 'أسبوعي'}
-                        </button>
-                      ))}
+                const headerRateLabel = !isRent
+                  ? t('machines.sale_price_label')
+                  : selectedTerm === 'hourly'
+                  ? t('machine_detail.rate_hourly')
+                  : selectedTerm === 'weekly'
+                  ? t('machine_detail.rate_weekly')
+                  : t('machine_detail.rate_daily');
+
+                const headerUnitSuffix =
+                  selectedTerm === 'hourly'
+                    ? t('marketplace.per_hour')
+                    : selectedTerm === 'weekly'
+                    ? (lang === 'fr' ? 'semaine' : 'أسبوعياً')
+                    : t('marketplace.per_day');
+
+                const durationUnitLabel =
+                  selectedTerm === 'hourly'
+                    ? (lang === 'fr' ? (selectedDuration > 1 ? 'heures' : 'heure') : (selectedDuration > 1 && selectedDuration <= 10 ? 'ساعات' : 'ساعة'))
+                    : selectedTerm === 'weekly'
+                    ? (lang === 'fr' ? (selectedDuration > 1 ? 'semaines' : 'semaine') : (selectedDuration > 1 && selectedDuration <= 10 ? 'أسابيع' : 'أسبوع'))
+                    : (lang === 'fr' ? (selectedDuration > 1 ? 'jours' : 'jour') : (selectedDuration > 1 && selectedDuration <= 10 ? 'أيام' : 'يوم'));
+
+                return (
+                  <>
+                    <div>
+                      <span className="text-xs font-bold text-steel-500 block">
+                        {headerRateLabel}
+                      </span>
+                      <div className="flex items-baseline gap-2 mt-1">
+                        <span className="text-2xl sm:text-3xl font-black text-ink font-mono latin-nums">
+                          {formatPriceMAD(activeUnitRate)}
+                        </span>
+                        {isRent && (
+                          <span className="text-xs font-bold text-steel-500">
+                            /{headerUnitSuffix}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
 
-                  {/* Estimation summary */}
-                  <div className="p-3 rounded-xl bg-amber-50/60 border border-amber-200 flex items-center justify-between text-xs font-bold text-amber-900">
-                    <span>{lang === 'fr' ? 'Estimation indicative :' : 'التقدير المبدئي:'}</span>
-                    <span className="font-mono text-sm latin-nums">
-                      {formatPriceMAD(calculateEstimate())}
-                    </span>
-                  </div>
-                </div>
-              )}
+                    {/* Rental Simulation Controls */}
+                    {isRent && (
+                      <div className="space-y-3 pt-3 border-t border-steel-200">
+                        <div className="flex items-center justify-between text-xs font-bold text-steel-700">
+                          <span>{t('bookings.dates')}</span>
+                          <div className="flex items-center gap-1 bg-steel-100 p-1 rounded-lg">
+                            {(['hourly', 'daily', 'weekly'] as const).map((term) => (
+                              <button
+                                key={term}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedTerm(term);
+                                  setSelectedDuration(1);
+                                }}
+                                className={`px-2 py-0.5 text-[10px] font-bold rounded cursor-pointer transition-all ${
+                                  selectedTerm === term
+                                    ? 'bg-primary text-ink shadow-xs'
+                                    : 'text-steel-600'
+                                }`}
+                              >
+                                {term === 'hourly'
+                                  ? t('marketplace.per_hour')
+                                  : term === 'daily'
+                                  ? t('marketplace.per_day')
+                                  : (lang === 'fr' ? 'Hebdo' : 'أسبوعي')}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Interactive Duration Stepper */}
+                        <div className="flex items-center justify-between text-xs font-bold text-steel-700">
+                          <span>{lang === 'fr' ? 'Durée estimée' : 'المدة المطلوبة'}</span>
+                          <div className="flex items-center gap-2 bg-surface border border-steel-200 rounded-lg px-1.5 py-1">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedDuration((d) => Math.max(1, d - 1))}
+                              className="w-6 h-6 rounded bg-white border border-steel-200 hover:bg-steel-100 text-ink font-black flex items-center justify-center cursor-pointer"
+                              aria-label="Decrease duration"
+                            >
+                              -
+                            </button>
+                            <span className="font-mono text-xs font-black text-ink min-w-[60px] text-center latin-nums">
+                              {selectedDuration} {durationUnitLabel}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedDuration((d) => Math.min(90, d + 1))}
+                              className="w-6 h-6 rounded bg-white border border-steel-200 hover:bg-steel-100 text-ink font-black flex items-center justify-center cursor-pointer"
+                              aria-label="Increase duration"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Exact entered tariff breakdown */}
+                        <div className="grid grid-cols-3 gap-1.5 text-center">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedTerm('hourly');
+                              setSelectedDuration(1);
+                            }}
+                            className={`p-2 rounded-xl border text-[10px] transition-all cursor-pointer ${
+                              selectedTerm === 'hourly'
+                                ? 'border-primary bg-amber-50/70 text-ink'
+                                : 'border-steel-200 bg-surface text-steel-600 hover:border-steel-300'
+                            }`}
+                          >
+                            <span className="block font-bold opacity-80">{t('marketplace.per_hour')}</span>
+                            <span className="font-mono font-black text-xs text-ink latin-nums">
+                              {formatPriceMAD(rates.rateHourly)}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedTerm('daily');
+                              setSelectedDuration(1);
+                            }}
+                            className={`p-2 rounded-xl border text-[10px] transition-all cursor-pointer ${
+                              selectedTerm === 'daily'
+                                ? 'border-primary bg-amber-50/70 text-ink'
+                                : 'border-steel-200 bg-surface text-steel-600 hover:border-steel-300'
+                            }`}
+                          >
+                            <span className="block font-bold opacity-80">{t('marketplace.per_day')}</span>
+                            <span className="font-mono font-black text-xs text-ink latin-nums">
+                              {formatPriceMAD(rates.rateDaily)}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedTerm('weekly');
+                              setSelectedDuration(1);
+                            }}
+                            className={`p-2 rounded-xl border text-[10px] transition-all cursor-pointer ${
+                              selectedTerm === 'weekly'
+                                ? 'border-primary bg-amber-50/70 text-ink'
+                                : 'border-steel-200 bg-surface text-steel-600 hover:border-steel-300'
+                            }`}
+                          >
+                            <span className="block font-bold opacity-80">{lang === 'fr' ? 'Hebdo' : 'أسبوعي'}</span>
+                            <span className="font-mono font-black text-xs text-ink latin-nums">
+                              {formatPriceMAD(rates.rateWeekly)}
+                            </span>
+                          </button>
+                        </div>
+
+                        {/* Estimation summary */}
+                        <div className="p-3 rounded-xl bg-amber-50/60 border border-amber-200 flex items-center justify-between text-xs font-bold text-amber-900">
+                          <span>
+                            {lang === 'fr'
+                              ? `Estimation (${selectedDuration} ${durationUnitLabel}) :`
+                              : `التقدير المبدئي (${selectedDuration} ${durationUnitLabel}):`}
+                          </span>
+                          <span className="font-mono text-sm latin-nums">
+                            {formatPriceMAD(calculateEstimate())}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
 
               {/* Inclusion Badges */}
               <div className="space-y-2 pt-2 border-t border-steel-200 text-xs">

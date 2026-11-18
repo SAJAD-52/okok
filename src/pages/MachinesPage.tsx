@@ -728,10 +728,13 @@ export const MachinesPage: React.FC = () => {
                               {t('machines.daily_rate_label')}
                             </span>
                             <span className="font-black text-sm sm:text-base text-ink font-mono latin-nums">
-                              {formatPriceMAD(machine.rate_daily || machine.daily_rate || 0)}
+                              {formatPriceMAD(resolveMachineRates(machine).rateDaily)}
                               <span className="text-xs font-normal text-steel-500">
                                 /{t('marketplace.per_day')}
                               </span>
+                            </span>
+                            <span className="text-[10px] text-steel-500 font-mono block mt-0.5 latin-nums">
+                              {formatPriceMAD(resolveMachineRates(machine).rateHourly)}/{t('marketplace.per_hour')} · {formatPriceMAD(resolveMachineRates(machine).rateWeekly)}/{lang === 'fr' ? 'sem' : 'أسبوع'}
                             </span>
                           </>
                         )}

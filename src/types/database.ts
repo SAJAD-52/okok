@@ -529,6 +529,9 @@ export interface DriverJobOffer {
   owner_name: string;
   owner_company?: string;
   owner_phone?: string;
+  machine_id?: string;
+  machine_title?: string;
+  machine_image?: string;
   machine_category: string;
   machine_label_ar: string;
   machine_label_fr: string;
@@ -547,6 +550,10 @@ export interface DriverJobOffer {
   has_applied?: boolean;
   is_demo?: boolean;
   matched_drivers_count?: number;
+  won_driver_id?: string;
+  won_driver_name?: string;
+  won_driver_phone?: string;
+  agreed_at?: string;
   created_at: string;
 }
 
@@ -554,6 +561,9 @@ export interface DriverDealContext {
   offer_id: string;
   owner_id: string;
   driver_id: string;
+  machine_id?: string;
+  machine_title?: string;
+  machine_image?: string;
   machine_category: string;
   machine_label_ar: string;
   machine_label_fr: string;
@@ -564,5 +574,7 @@ export interface DriverDealContext {
   driver_accepted: boolean;
   deal_status: 'open' | 'pending_owner' | 'pending_driver' | 'accepted' | 'closed';
   won_driver_name?: string;
+  won_driver_phone?: string;
+  agreed_at?: string;
 }
 

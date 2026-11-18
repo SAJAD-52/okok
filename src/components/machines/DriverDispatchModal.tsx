@@ -174,6 +174,8 @@ export const DriverDispatchModal: React.FC<DriverDispatchModalProps> = ({
         ownerName,
         ownerCompany,
         ownerPhone,
+        machineId: machine.id,
+        machineImage: machine.images?.[0] || '',
         machineCategory,
         machineTitle,
         offeredSalary: numericSalary,

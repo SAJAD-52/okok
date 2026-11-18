@@ -363,16 +363,26 @@ class ChatStore {
 
     // 1. Check in-memory list
     const wantedMachineId = machine?.id || null;
-    const existing = this.conversations.find(
-      (c) =>
-        !c.id.includes('seed') &&
-        (c.machine_id || null) === wantedMachineId &&
-        ((c.participant_a === userAId && c.participant_b === userBId) ||
-          (c.participant_a === userBId && c.participant_b === userAId))
-    );
+    const isDriverThread = !wantedMachineId || targetProfile?.role === 'driver';
+    const existing =
+      this.conversations.find(
+        (c) =>
+          !c.id.includes('seed') &&
+          (c.machine_id || null) === wantedMachineId &&
+          ((c.participant_a === userAId && c.participant_b === userBId) ||
+            (c.participant_a === userBId && c.participant_b === userAId))
+      ) ||
+      (isDriverThread
+        ? this.conversations.find(
+            (c) =>
+              !c.id.includes('seed') &&
+              ((c.participant_a === userAId && c.participant_b === userBId) ||
+                (c.participant_a === userBId && c.participant_b === userAId))
+          )
+        : undefined);
 
     if (existing) {
-      if (machine && !existing.machine) {
+      if (machine && !existing.machine && !isDriverThread) {
         existing.machine = machine as Machine;
         this.saveConvsSilently();
       }
@@ -382,20 +392,27 @@ class ChatStore {
     // 2. Query Supabase (supports participant_a/b AND participant_one/two)
     if (isSupabaseConfigured) {
       try {
-        // One conversation per machine: filter on machine_id too
+        const pairFilter = `and(participant_a.eq.${userAId},participant_b.eq.${userBId}),and(participant_a.eq.${userBId},participant_b.eq.${userAId}),and(participant_one.eq.${userAId},participant_two.eq.${userBId}),and(participant_one.eq.${userBId},participant_two.eq.${userAId})`;
         let convQuery = supabase
           .from('conversations')
           .select('id, machine_id, participant_a, participant_b, participant_one, participant_two, last_message_at')
-          .or(
-            `and(participant_a.eq.${userAId},participant_b.eq.${userBId}),and(participant_a.eq.${userBId},participant_b.eq.${userAId}),and(participant_one.eq.${userAId},participant_two.eq.${userBId}),and(participant_one.eq.${userBId},participant_two.eq.${userAId})`
-          );
-        convQuery = wantedMachineId
-          ? convQuery.eq('machine_id', wantedMachineId)
-          : convQuery.is('machine_id', null);
+          .or(pairFilter);
+
+        if (wantedMachineId && !isDriverThread) {
+          convQuery = convQuery.eq('machine_id', wantedMachineId);
+        } else if (!isDriverThread) {
+          convQuery = convQuery.is('machine_id', null);
+        }
+
         const { data: dbConvRows } = await convQuery
           .order('last_message_at', { ascending: false })
-          .limit(1);
-        const dbConv = dbConvRows && dbConvRows.length > 0 ? dbConvRows[0] : null;
+          .limit(5);
+        const dbConv =
+          isDriverThread && Array.isArray(dbConvRows) && dbConvRows.length > 0
+            ? dbConvRows.find((r: any) => !r.machine_id) || dbConvRows[0]
+            : dbConvRows && dbConvRows.length > 0
+            ? dbConvRows[0]
+            : null;
 
         if (dbConv) {
           const item: ChatConversationItem = {
@@ -415,7 +432,7 @@ class ChatStore {
               city: targetProfile?.city || 'المغرب',
               avatar_url: targetProfile?.avatar_url,
             },
-            machine: machine as Machine,
+            machine: isDriverThread ? undefined : (machine as Machine),
           };
 
           this.conversations.unshift(item);

@@ -51,10 +51,12 @@ import {
   subscribeLocalDispatchEvents,
 } from '../lib/dispatchService';
 import {
+  buildDriverOfferMarkerSuffix,
   closeDriverJobOffer,
   fetchOwnerDriverOffers,
   finalizeDriverJobOfferDirect,
   OwnerDriverOfferWithApps,
+  parseDriverOfferMessageRow,
 } from '../lib/driverOfferService';
 import { getDriverExperienceOption } from '../data/driverMachines';
 import { chatStore } from '../lib/chatStore';
@@ -1168,7 +1170,13 @@ export const MachinesPage: React.FC = () => {
                       </div>
 
                       <h3 className="text-sm font-black text-ink mt-1.5">
-                        {lang === 'fr' ? camp.machine_label_fr : camp.machine_label_ar}
+                        {camp.machine_title
+                          ? `${camp.machine_title} · ${
+                              lang === 'fr' ? camp.machine_label_fr : camp.machine_label_ar
+                            }`
+                          : lang === 'fr'
+                          ? camp.machine_label_fr
+                          : camp.machine_label_ar}
                       </h3>
                       <p className="text-[11px] text-steel-500 font-bold flex items-center gap-1 mt-0.5">
                         <Users className="w-3 h-3 shrink-0" />
@@ -1308,6 +1316,55 @@ export const MachinesPage: React.FC = () => {
                                       role: 'driver',
                                     }
                                   );
+
+                                  const localMsgs = await chatStore.getMessages(conv.id);
+                                  let hasOfferMarker = localMsgs.some(
+                                    (m) => parseDriverOfferMessageRow(m)?.offer_id === camp.id
+                                  );
+
+                                  if (!hasOfferMarker && isSupabaseConfigured) {
+                                    try {
+                                      const { data: dbMsgs } = await supabase
+                                        .from('messages')
+                                        .select('id, body, content')
+                                        .eq('conversation_id', conv.id)
+                                        .order('created_at', { ascending: false })
+                                        .limit(40);
+                                      if (
+                                        Array.isArray(dbMsgs) &&
+                                        dbMsgs.some(
+                                          (m) => parseDriverOfferMessageRow(m)?.offer_id === camp.id
+                                        )
+                                      ) {
+                                        hasOfferMarker = true;
+                                      }
+                                    } catch {
+                                      // ignore
+                                    }
+                                  }
+
+                                  if (!hasOfferMarker) {
+                                    const machineTitleDisplay =
+                                      camp.machine_title ||
+                                      (lang === 'fr'
+                                        ? camp.machine_label_fr
+                                        : camp.machine_label_ar);
+                                    const openerText =
+                                      lang === 'fr'
+                                        ? `Bonjour ${app.driver_name}, concernant notre offre de conduite (${machineTitleDisplay}) :`
+                                        : `السلام عليكم ${app.driver_name}، بخصوص طلب سائق لآلية (${machineTitleDisplay}):`;
+                                    await chatStore.sendMessage(
+                                      conv.id,
+                                      ownerUid,
+                                      `${openerText}${buildDriverOfferMarkerSuffix(camp, app.driver_id)}`,
+                                      app.driver_id,
+                                      {
+                                        senderName: profile?.full_name || camp.owner_name,
+                                        recipientRole: 'driver',
+                                      }
+                                    );
+                                  }
+
                                   navigate(
                                     `/owner/messages?conv=${encodeURIComponent(
                                       conv.id

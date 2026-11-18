@@ -21,6 +21,9 @@ import {
   Utensils,
   BellRing,
   AlertCircle,
+  Handshake,
+  HardHat,
+  Calendar,
 } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -33,14 +36,16 @@ import {
   getDriverExperienceOption,
 } from '../data/driverMachines';
 import {
+  AgreedDriverDealItem,
   applyToDriverJobOffer,
   buildDriverOfferMarkerSuffix,
+  fetchDriverAgreedDeals,
   fetchDriverJobOffers,
   subscribeDriverJobOffers,
 } from '../lib/driverOfferService';
 import { chatStore } from '../lib/chatStore';
 
-type OfferFilterTab = 'all' | 'matching' | 'urgent' | 'applied';
+type OfferFilterTab = 'all' | 'matching' | 'urgent' | 'applied' | 'agreed';
 
 function formatRelativeTime(iso: string, lang: 'ar' | 'fr'): string {
   const diffMin = Math.max(
@@ -64,6 +69,7 @@ export const DriverJobOffersPage: React.FC = () => {
   const navigate = useNavigate();
 
   const [offers, setOffers] = useState<DriverJobOffer[]>([]);
+  const [agreedDeals, setAgreedDeals] = useState<AgreedDriverDealItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<OfferFilterTab>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -79,8 +85,12 @@ export const DriverJobOffersPage: React.FC = () => {
 
   const loadOffers = useCallback(async () => {
     try {
-      const list = await fetchDriverJobOffers(driverId);
+      const [list, agreed] = await Promise.all([
+        fetchDriverJobOffers(driverId),
+        fetchDriverAgreedDeals(driverId),
+      ]);
       setOffers(list.filter((o) => o.status === 'open'));
+      setAgreedDeals(agreed);
     } finally {
       setIsLoading(false);
     }
@@ -240,6 +250,58 @@ export const DriverJobOffersPage: React.FC = () => {
     }
   };
 
+  const handleOpenAgreedChat = async (deal: AgreedDriverDealItem) => {
+    try {
+      const conv = await chatStore.getOrCreateConversation(
+        driverId,
+        deal.owner_id,
+        null,
+        {
+          id: deal.owner_id,
+          full_name: deal.owner_name,
+          company_name: deal.owner_company,
+          phone: deal.owner_phone || '',
+          role: 'owner',
+        }
+      );
+      navigate(
+        `/driver/messages?conv=${encodeURIComponent(conv.id)}&offer=${encodeURIComponent(
+          deal.offer_id
+        )}`
+      );
+    } catch {
+      toast.error(
+        lang === 'fr'
+          ? 'Impossible d’ouvrir la discussion.'
+          : 'تعذر فتح المحادثة حالياً.'
+      );
+    }
+  };
+
+  const filteredAgreedDeals = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return agreedDeals.filter((d) => {
+      if (selectedCity !== 'all' && d.city !== selectedCity) return false;
+      if (selectedMachine !== 'all' && d.machine_category !== selectedMachine) return false;
+      if (q) {
+        const hay = [
+          d.machine_title,
+          d.machine_label_ar,
+          d.machine_label_fr,
+          d.owner_name,
+          d.owner_company,
+          d.city,
+          d.duration_label,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [agreedDeals, searchQuery, selectedCity, selectedMachine]);
+
   return (
     <div className="space-y-5 text-start">
       {/* Page Header */}
@@ -295,6 +357,13 @@ export const DriverJobOffersPage: React.FC = () => {
                   lang === 'fr'
                     ? 'Mes candidatures'
                     : 'طلبات قدّمتها',
+              },
+              {
+                id: 'agreed',
+                label:
+                  lang === 'fr'
+                    ? `Accords conclus (${agreedDeals.length})`
+                    : `اتفاقات العمل (${agreedDeals.length})`,
               },
             ] as { id: OfferFilterTab; label: string }[]
           ).map((tab) => (
@@ -361,8 +430,156 @@ export const DriverJobOffersPage: React.FC = () => {
         </div>
       </Card>
 
+      {/* Agreed Jobs / Finalized Deals Section */}
+      {(activeTab === 'agreed' || (activeTab === 'all' && filteredAgreedDeals.length > 0)) && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-sm sm:text-base font-black text-ink flex items-center gap-2">
+              <Handshake className="w-5 h-5 text-emerald-600 shrink-0" />
+              <span>
+                {lang === 'fr'
+                  ? 'Mes missions et accords conclus'
+                  : 'أعمالي المتفق عليها (الصفقات المبرمة)'}
+              </span>
+            </h2>
+            <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-black tabular-nums">
+              {filteredAgreedDeals.length}
+            </span>
+          </div>
+
+          {filteredAgreedDeals.length === 0 ? (
+            <Card className="p-8 text-center bg-white border border-steel-200 rounded-2xl space-y-2">
+              <Handshake className="w-9 h-9 text-steel-300 mx-auto" />
+              <p className="text-sm font-black text-ink">
+                {lang === 'fr'
+                  ? 'Aucun accord conclu pour le moment'
+                  : 'لا توجد صفقات متفق عليها بعد'}
+              </p>
+              <p className="text-xs text-steel-500">
+                {lang === 'fr'
+                  ? 'Lorsqu’un accord est confirmé dans la discussion avec un propriétaire, votre mission apparaît ici.'
+                  : 'عندما تتفق مع مالك الآلية وتغلقان الصفقة في المحادثة، سيظهر العمل هنا بكل تفاصيله.'}
+              </p>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {filteredAgreedDeals.map((deal) => (
+                <Card
+                  key={`agreed_${deal.offer_id}`}
+                  className="p-4 sm:p-5 bg-emerald-50/60 border-2 border-emerald-400 rounded-2xl flex flex-col justify-between gap-3.5"
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-600 text-white text-[11px] font-black">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        {lang === 'fr' ? 'Accord confirmé' : 'تم الاتفاق على الصفقة'}
+                      </span>
+                      <span className="text-[11px] font-bold text-steel-500 flex items-center gap-1 tabular-nums">
+                        <Calendar className="w-3.5 h-3.5" />
+                        {new Date(deal.agreed_at).toLocaleDateString(
+                          lang === 'fr' ? 'fr-FR' : 'ar-MA'
+                        )}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-3 pb-3 border-b border-emerald-200">
+                      {deal.machine_image ? (
+                        <img
+                          src={deal.machine_image}
+                          alt={deal.machine_title}
+                          className="w-16 h-16 rounded-xl object-cover border border-emerald-300 shrink-0 bg-white"
+                        />
+                      ) : (
+                        <div className="w-16 h-16 rounded-xl bg-white border border-emerald-300 flex items-center justify-center shrink-0">
+                          <HardHat className="w-7 h-7 text-emerald-700" />
+                        </div>
+                      )}
+
+                      <div className="min-w-0 flex-1">
+                        <span className="text-[10px] font-bold text-emerald-700 block">
+                          {lang === 'fr' ? 'Engin attribué' : 'الآلية المتفق عليها'}
+                        </span>
+                        <h3 className="text-sm sm:text-base font-black text-ink truncate">
+                          {deal.machine_title ||
+                            (lang === 'fr' ? deal.machine_label_fr : deal.machine_label_ar)}
+                        </h3>
+                        <p className="text-xs font-bold text-steel-600 truncate">
+                          {deal.owner_company || deal.owner_name}
+                        </p>
+                      </div>
+
+                      <div className="text-end shrink-0 bg-white border border-emerald-300 px-3 py-2 rounded-xl">
+                        <span className="text-[10px] font-bold text-steel-500 block">
+                          {lang === 'fr' ? 'Salaire convenu' : 'الأجر المتفق عليه'}
+                        </span>
+                        <span className="text-sm sm:text-base font-black text-emerald-700 tabular-nums">
+                          {deal.offered_salary.toLocaleString('fr-FR')}{' '}
+                          <span className="text-[11px]">
+                            {lang === 'fr'
+                              ? `MAD/${deal.salary_unit === 'month' ? 'mois' : 'jour'}`
+                              : `د.م/${deal.salary_unit === 'month' ? 'شهر' : 'يوم'}`}
+                          </span>
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                      <div className="flex items-center gap-2 bg-white/80 rounded-xl px-3 py-2 border border-emerald-200/70">
+                        <Clock className="w-4 h-4 text-emerald-700 shrink-0" />
+                        <div className="min-w-0">
+                          <span className="text-[10px] text-steel-500 block">
+                            {lang === 'fr' ? 'Durée' : 'المدة'}
+                          </span>
+                          <span className="font-black text-ink block truncate">
+                            {deal.duration_label ||
+                              (lang === 'fr' ? 'À convenir' : 'حسب الاتفاق')}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 bg-white/80 rounded-xl px-3 py-2 border border-emerald-200/70">
+                        <MapPin className="w-4 h-4 text-emerald-700 shrink-0" />
+                        <div className="min-w-0">
+                          <span className="text-[10px] text-steel-500 block">
+                            {lang === 'fr' ? 'Ville' : 'المدينة'}
+                          </span>
+                          <span className="font-black text-ink block truncate">
+                            {deal.city}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-emerald-200 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenAgreedChat(deal)}
+                      className="flex-1 min-h-[42px] px-3.5 py-2 rounded-xl bg-ink text-white hover:bg-steel-900 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                    >
+                      <MessageSquare className="w-4 h-4 text-primary" />
+                      <span>{lang === 'fr' ? 'Ouvrir la discussion' : 'متابعة المحادثة'}</span>
+                    </button>
+
+                    {deal.owner_phone && (
+                      <a
+                        href={`tel:${deal.owner_phone}`}
+                        className="min-h-[42px] px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                      >
+                        <Phone className="w-4 h-4" />
+                        <span>{lang === 'fr' ? 'Appeler' : 'اتصال بالمالك'}</span>
+                      </a>
+                    )}
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Job Offers Cards Feed */}
-      {isLoading ? (
+      {activeTab === 'agreed' ? null : isLoading ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {[1, 2, 3, 4].map((i) => (
             <div key={i} className="h-64 rounded-2xl bg-steel-100 animate-pulse" />

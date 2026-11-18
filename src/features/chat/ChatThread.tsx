@@ -44,7 +44,9 @@ import {
   acceptAndCloseDriverDealParty,
   fetchDriverDealContextForConversation,
   markOfferAcceptedAndClosed,
+  parseDriverOfferMessageRow,
 } from '../../lib/driverOfferService';
+import { machineStore } from '../../lib/machineStore';
 import { unlockAudioContextNow } from '../../lib/opportunityAudio';
 
 interface ChatThreadProps {
@@ -411,6 +413,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
         partyRole: driverPartyRole,
         currentUserId,
         currentUserName: profile?.full_name || '',
+        currentUserPhone: profile?.phone || '',
         conversationId: conversation.id,
       });
 
@@ -582,6 +585,29 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
               new Date(messages[index - 1].created_at).toDateString();
 
           const isRead = Boolean(msg.read_at);
+          const inlineOfferMeta = parseDriverOfferMessageRow(msg);
+          const cachedInlineMachine = inlineOfferMeta?.machine_id
+            ? machineStore.getCachedMachines().find((m) => m.id === inlineOfferMeta.machine_id)
+            : undefined;
+          const inlineThumb =
+            inlineOfferMeta?.machine_image ||
+            cachedInlineMachine?.images?.[0] ||
+            (driverDeal && inlineOfferMeta?.offer_id === driverDeal.offer_id
+              ? driverDeal.machine_image
+              : '') ||
+            '';
+          const inlineMachineTitle =
+            inlineOfferMeta?.machine_title ||
+            cachedInlineMachine?.title_ar ||
+            (lang === 'fr'
+              ? inlineOfferMeta?.machine_label_fr
+              : inlineOfferMeta?.machine_label_ar) ||
+            '';
+          const isInlineOfferAccepted = Boolean(
+            driverDeal &&
+              inlineOfferMeta?.offer_id === driverDeal.offer_id &&
+              driverDeal.deal_status === 'accepted'
+          );
 
           return (
             <React.Fragment key={msg.id}>
@@ -591,6 +617,60 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
                   <span className="px-3 py-1 rounded-full bg-white/80 border border-steel-200 text-steel-600 text-[10px] font-bold shadow-xs">
                     {formatDateSeparator(msg.created_at)}
                   </span>
+                </div>
+              )}
+
+              {/* Compact Machine Thumbnail Card at start of each new driver campaign block */}
+              {inlineOfferMeta && (
+                <div className="flex justify-center my-2">
+                  <div className="w-full max-w-md bg-white/95 border border-primary/40 rounded-2xl p-2.5 shadow-xs flex items-center gap-3">
+                    {inlineThumb ? (
+                      <img
+                        src={inlineThumb}
+                        alt={inlineMachineTitle}
+                        className="w-12 h-12 rounded-xl object-cover border border-steel-200 shrink-0 bg-steel-100"
+                      />
+                    ) : (
+                      <div className="w-12 h-12 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-center shrink-0">
+                        <HardHat className="w-5 h-5 text-primary-dark" />
+                      </div>
+                    )}
+
+                    <div className="min-w-0 flex-1 text-start">
+                      <div className="flex items-center justify-between gap-1.5">
+                        <span className="text-[10px] font-black text-primary-dark truncate">
+                          {lang === 'fr' ? 'Nouvelle offre · Engin' : 'حملة بحث جديدة · الآلية'}
+                        </span>
+                        {isInlineOfferAccepted && (
+                          <span className="px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 text-[9px] font-black shrink-0">
+                            {lang === 'fr' ? 'Conclue' : 'متفق عليها'}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs font-black text-ink truncate mt-0.5">
+                        {inlineMachineTitle}
+                      </p>
+                      <p className="text-[10px] text-steel-500 font-bold truncate mt-0.5">
+                        {Number(inlineOfferMeta.offered_salary) > 0
+                          ? `${Number(inlineOfferMeta.offered_salary).toLocaleString('fr-FR')} ${
+                              lang === 'fr' ? 'MAD' : 'د.م'
+                            }/${
+                              inlineOfferMeta.salary_unit === 'month'
+                                ? lang === 'fr'
+                                  ? 'mois'
+                                  : 'شهر'
+                                : lang === 'fr'
+                                ? 'jour'
+                                : 'يوم'
+                            }`
+                          : ''}
+                        {Number(inlineOfferMeta.offered_salary) > 0 && inlineOfferMeta.duration_label
+                          ? ' · '
+                          : ''}
+                        {inlineOfferMeta.duration_label || ''}
+                      </p>
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -784,51 +864,25 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
         <div className="shrink-0 z-10">
           {driverDeal.deal_status === 'accepted' ? (
             <div className="px-3.5 py-2.5 bg-emerald-50 border-t-2 border-emerald-400 flex flex-wrap items-center justify-between gap-2 text-xs">
-              <div className="flex items-center gap-2 min-w-0 text-emerald-900 font-black">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span className="truncate">
-                  {lang === 'fr'
-                    ? 'Accord conclu par les deux parties ! L’offre est clôturée dans la liste.'
-                    : 'تم إغلاق الصفقة بنجاح! اتفق الطرفان على شروط العمل وأُغلق العرض في لائحة عروض العمل 🤝'}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() =>
-                  navigate(profile?.role === 'driver' ? '/driver/joboffer' : '/owner/machines')
-                }
-                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] flex items-center gap-1.5 cursor-pointer shrink-0 transition-colors"
-              >
-                <Briefcase className="w-3.5 h-3.5" />
-                <span>
-                  {profile?.role === 'driver'
-                    ? lang === 'fr'
-                      ? 'Voir les offres'
-                      : 'لائحة العروض'
-                    : lang === 'fr'
-                    ? 'Gérer mes offres'
-                    : 'حملات السائقين'}
-                </span>
-              </button>
-            </div>
-          ) : driverDeal.deal_status === 'closed' ? (
-            <div className="px-3.5 py-2.5 bg-steel-100 border-t border-steel-300 flex items-center gap-2 text-xs text-steel-700 font-bold">
-              <Lock className="w-4 h-4 text-steel-600 shrink-0" />
-              <span>
-                {lang === 'fr'
-                  ? 'Cette offre d’emploi a été clôturée par le propriétaire.'
-                  : 'تم إغلاق عرض العمل هذا وإزالته من لائحة عروض العمل.'}
-              </span>
-            </div>
-          ) : (
-            <div className="px-3.5 py-2.5 bg-ink text-white border-t-2 border-primary flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-              <div className="min-w-0 space-y-1 text-start">
-                <div className="flex items-center gap-1.5 text-[11px] font-black text-primary truncate">
-                  <HardHat className="w-3.5 h-3.5 shrink-0" />
-                  <span className="truncate">
-                    {lang === 'fr' ? driverDeal.machine_label_fr : driverDeal.machine_label_ar}
+              <div className="flex items-center gap-2.5 min-w-0 text-emerald-900 font-black">
+                {driverDeal.machine_image ? (
+                  <img
+                    src={driverDeal.machine_image}
+                    alt={driverDeal.machine_title || driverDeal.machine_label_ar}
+                    className="w-9 h-9 rounded-lg object-cover border border-emerald-300 shrink-0"
+                  />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                )}
+                <div className="min-w-0">
+                  <span className="truncate block">
+                    {lang === 'fr'
+                      ? `Accord conclu : ${driverDeal.machine_title || driverDeal.machine_label_fr}`
+                      : `تم الاتفاق على الصفقة (${driverDeal.machine_title || driverDeal.machine_label_ar}) 🤝`}
+                  </span>
+                  <span className="text-[10px] font-bold text-emerald-700 truncate block">
                     {driverDeal.offered_salary > 0
-                      ? ` · ${driverDeal.offered_salary.toLocaleString('fr-FR')} ${
+                      ? `${driverDeal.offered_salary.toLocaleString('fr-FR')} ${
                           lang === 'fr' ? 'MAD' : 'د.م'
                         }/${
                           driverDeal.salary_unit === 'month'
@@ -843,6 +897,70 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
                     {driverDeal.duration_label ? ` · ${driverDeal.duration_label}` : ''}
                   </span>
                 </div>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  navigate(profile?.role === 'driver' ? '/driver/joboffer' : '/owner/drivers')
+                }
+                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] flex items-center gap-1.5 cursor-pointer shrink-0 transition-colors"
+              >
+                <Briefcase className="w-3.5 h-3.5" />
+                <span>
+                  {profile?.role === 'driver'
+                    ? lang === 'fr'
+                      ? 'Voir mes missions'
+                      : 'عروض العمل'
+                    : lang === 'fr'
+                    ? 'Voir dans Chauffeurs'
+                    : 'قسم السائقون'}
+                </span>
+              </button>
+            </div>
+          ) : driverDeal.deal_status === 'closed' ? (
+            <div className="px-3.5 py-2.5 bg-steel-100 border-t border-steel-300 flex items-center gap-2 text-xs text-steel-700 font-bold">
+              <Lock className="w-4 h-4 text-steel-600 shrink-0" />
+              <span>
+                {lang === 'fr'
+                  ? 'Cette offre d’emploi a été clôturée par le propriétaire.'
+                  : 'تم إغلاق عرض العمل هذا وإزالته من لائحة عروض العمل.'}
+              </span>
+            </div>
+          ) : (
+            <div className="px-3.5 py-2.5 bg-ink text-white border-t-2 border-primary flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              <div className="min-w-0 flex items-center gap-2.5 text-start">
+                {driverDeal.machine_image ? (
+                  <img
+                    src={driverDeal.machine_image}
+                    alt={driverDeal.machine_title || driverDeal.machine_label_ar}
+                    className="w-10 h-10 rounded-xl object-cover border border-primary/40 shrink-0 bg-steel-800"
+                  />
+                ) : (
+                  <div className="w-9 h-9 rounded-xl bg-white/10 border border-primary/40 flex items-center justify-center shrink-0">
+                    <HardHat className="w-4 h-4 text-primary" />
+                  </div>
+                )}
+                <div className="min-w-0 space-y-1">
+                  <div className="flex items-center gap-1.5 text-[11px] font-black text-primary truncate">
+                    <span className="truncate">
+                      {driverDeal.machine_title ||
+                        (lang === 'fr' ? driverDeal.machine_label_fr : driverDeal.machine_label_ar)}
+                      {driverDeal.offered_salary > 0
+                        ? ` · ${driverDeal.offered_salary.toLocaleString('fr-FR')} ${
+                            lang === 'fr' ? 'MAD' : 'د.م'
+                          }/${
+                            driverDeal.salary_unit === 'month'
+                              ? lang === 'fr'
+                                ? 'mois'
+                                : 'شهر'
+                              : lang === 'fr'
+                              ? 'jour'
+                              : 'يوم'
+                          }`
+                        : ''}
+                      {driverDeal.duration_label ? ` · ${driverDeal.duration_label}` : ''}
+                    </span>
+                  </div>
 
                 <div className="flex items-center gap-2 text-[10px] font-bold flex-wrap">
                   <span
@@ -874,6 +992,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
                     )}
                     <span>{lang === 'fr' ? 'Conducteur' : 'موافقة السائق'}</span>
                   </span>
+                </div>
                 </div>
               </div>
 

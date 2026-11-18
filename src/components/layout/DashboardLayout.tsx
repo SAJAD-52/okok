@@ -581,6 +581,11 @@ export const DashboardLayout: React.FC = () => {
       icon: <Users className="w-5 h-5" />,
     },
     {
+      to: '/owner/drivers',
+      label: lang === 'fr' ? 'Chauffeurs' : 'السائقون',
+      icon: <HardHat className="w-5 h-5" />,
+    },
+    {
       to: '/owner/analytics',
       label: lang === 'fr' ? 'Finances & Rentabilité' : 'المالية والأرباح',
       icon: <TrendingUp className="w-5 h-5" />,
@@ -722,23 +727,6 @@ export const DashboardLayout: React.FC = () => {
               </NavLink>
             );
           })}
-
-          {/* Admin link (Always accessible to admin or preview) */}
-          <div className="pt-4 mt-4 border-t border-steel-800">
-            <NavLink
-              to="/admin"
-              className={({ isActive: isLinkActive }) =>
-                `flex items-center gap-3 px-3.5 py-3 rounded-xl text-xs font-bold transition-all min-h-[44px] ${
-                  isLinkActive
-                    ? 'bg-steel-800 text-primary'
-                    : 'text-steel-400 hover:text-white hover:bg-steel-800'
-                }`
-              }
-            >
-              <ShieldCheck className="w-5 h-5 text-primary" />
-              <span className="text-start">{t('nav.admin')}</span>
-            </NavLink>
-          </div>
         </nav>
 
         {/* User Status, Subscription Badge & Language */}
@@ -1676,11 +1664,11 @@ export const DashboardLayout: React.FC = () => {
             {/* 5. المزيد (More) */}
             {(() => {
               const isMoreActive =
+                location.pathname.startsWith('/owner/drivers') ||
                 location.pathname.startsWith('/owner/analytics') ||
                 location.pathname.startsWith('/owner/storefront') ||
                 location.pathname.startsWith('/owner/settings/business') ||
-                location.pathname.startsWith('/owner/messages') ||
-                location.pathname.startsWith('/admin');
+                location.pathname.startsWith('/owner/messages');
 
               return (
                 <button
@@ -1748,6 +1736,23 @@ export const DashboardLayout: React.FC = () => {
             </div>
 
             <div className="space-y-1.5">
+              {/* Agreed Drivers ("السائقون") */}
+              <NavLink
+                to="/owner/drivers"
+                onClick={() => setIsMoreMenuOpen(false)}
+                className={({ isActive }) =>
+                  `flex items-center justify-between p-3 rounded-2xl text-xs font-bold transition-colors ${
+                    isActive ? 'bg-primary text-ink font-black' : 'bg-surface hover:bg-steel-100 text-steel-700'
+                  }`
+                }
+              >
+                <div className="flex items-center gap-3">
+                  <HardHat className="w-5 h-5 text-primary-dark" />
+                  <span>{lang === 'fr' ? 'Chauffeurs' : 'السائقون'}</span>
+                </div>
+                <ChevronLeft className="w-4 h-4 rtl:rotate-0 ltr:rotate-180 text-steel-400" />
+              </NavLink>
+
               {/* Financial Economics */}
               <NavLink
                 to="/owner/analytics"
@@ -1840,21 +1845,6 @@ export const DashboardLayout: React.FC = () => {
                 </div>
                 <ChevronLeft className="w-4 h-4 rtl:rotate-0 ltr:rotate-180 text-steel-400" />
               </button>
-
-              {/* Admin Console Link (if admin) */}
-              {(profile?.role === 'admin' || isSuperAdmin) && (
-                <NavLink
-                  to="/admin"
-                  onClick={() => setIsMoreMenuOpen(false)}
-                  className="flex items-center justify-between p-3 rounded-2xl text-xs font-bold bg-amber-50 border border-amber-200 text-ink hover:bg-amber-100 transition-colors"
-                >
-                  <div className="flex items-center gap-3">
-                    <ShieldCheck className="w-5 h-5 text-amber-600" />
-                    <span>{t('nav.admin')}</span>
-                  </div>
-                  <ChevronLeft className="w-4 h-4 rtl:rotate-0 ltr:rotate-180 text-steel-400" />
-                </NavLink>
-              )}
 
               {/* Install App Button inside mobile More menu */}
               <PWAInstallButton

@@ -33,6 +33,7 @@ import { ContractorBookingsPage } from './pages/ContractorBookingsPage';
 import { ContractorProjectsPage } from './pages/ContractorProjectsPage';
 import { DriverDashboardPage } from './pages/DriverDashboardPage';
 import { DriverJobOffersPage } from './pages/DriverJobOffersPage';
+import { OwnerDriversPage } from './pages/OwnerDriversPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -101,6 +102,7 @@ export const App: React.FC = () => {
               <Route path="machines" element={<MachinesPage />} />
               <Route path="bookings" element={<BookingsPage />} />
               <Route path="clients" element={<ClientsPage />} />
+              <Route path="drivers" element={<OwnerDriversPage />} />
               <Route path="analytics" element={<AnalyticsPage />} />
               <Route path="storefront" element={<StorefrontPage />} />
               <Route path="settings/business" element={<BusinessSettingsPage />} />

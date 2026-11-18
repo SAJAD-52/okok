@@ -523,6 +523,7 @@ export const Messages: React.FC = () => {
       newUrl.searchParams.delete('machine');
       newUrl.searchParams.delete('machine_id');
       newUrl.searchParams.delete('campaign');
+      newUrl.searchParams.delete('offer');
       window.history.replaceState({}, '', newUrl.toString());
     } catch {
       // Ignore
@@ -540,6 +541,7 @@ export const Messages: React.FC = () => {
       newUrl.searchParams.delete('conversationId');
       newUrl.searchParams.delete('conv');
       newUrl.searchParams.delete('campaign');
+      newUrl.searchParams.delete('offer');
       window.history.replaceState({}, '', newUrl.toString());
     } catch {
       // Ignore

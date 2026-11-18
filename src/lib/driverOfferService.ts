@@ -11,6 +11,7 @@ import { serverApi } from './serverApi';
 import { sendWebPushToUsers } from './pushService';
 import { getDriverMachineOption } from '../data/driverMachines';
 import { chatStore } from './chatStore';
+import { machineStore } from './machineStore';
 
 const LOCAL_DRIVER_OFFERS_KEY = 'jadijcb_driver_job_offers_cache';
 const LOCAL_APPLIED_MAP_KEY = 'jadijcb_driver_applied_offers_v1';
@@ -44,6 +45,30 @@ export interface DriverJobApplicationItem {
 
 export interface OwnerDriverOfferWithApps extends DriverJobOffer {
   applications: DriverJobApplicationItem[];
+}
+
+export interface AgreedDriverDealItem {
+  offer_id: string;
+  owner_id: string;
+  owner_name: string;
+  owner_company: string;
+  owner_phone: string;
+  driver_id: string;
+  driver_name: string;
+  driver_phone: string;
+  driver_city: string;
+  driver_experience: string;
+  machine_id?: string;
+  machine_title: string;
+  machine_image?: string;
+  machine_category: string;
+  machine_label_ar: string;
+  machine_label_fr: string;
+  offered_salary: number;
+  salary_unit: 'day' | 'month';
+  duration_label: string;
+  city: string;
+  agreed_at: string;
 }
 
 // Starter reference job offers so newly registered drivers immediately see the structured offer format
@@ -206,6 +231,9 @@ function mapDbRowToDriverOffer(row: any): DriverJobOffer {
     owner_name: row.owner_name || '',
     owner_company: row.owner_company || '',
     owner_phone: row.owner_phone || '',
+    machine_id: row.machine_id || undefined,
+    machine_title: row.machine_title || '',
+    machine_image: row.machine_image || '',
     machine_category: row.machine_category,
     machine_label_ar: row.machine_label_ar,
     machine_label_fr: row.machine_label_fr || row.machine_label_ar,
@@ -222,6 +250,10 @@ function mapDbRowToDriverOffer(row: any): DriverJobOffer {
     description_fr: row.description_fr || '',
     status: row.status || 'open',
     is_demo: false,
+    won_driver_id: row.won_driver_id || undefined,
+    won_driver_name: row.won_driver_name || undefined,
+    won_driver_phone: row.won_driver_phone || undefined,
+    agreed_at: row.agreed_at || undefined,
     created_at: row.created_at,
   };
 }
@@ -277,6 +309,8 @@ export async function launchDriverSearchCampaign(params: {
   ownerName: string;
   ownerCompany?: string;
   ownerPhone?: string;
+  machineId?: string;
+  machineImage?: string;
   machineCategory: string;
   machineTitle?: string;
   offeredSalary: number;
@@ -312,6 +346,11 @@ export async function launchDriverSearchCampaign(params: {
     ? `${machineMeta.labelFr} (${params.machineTitle})`
     : machineMeta.labelFr;
 
+  const isMachineUuid = Boolean(
+    params.machineId &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(params.machineId)
+  );
+
   const newOffer: DriverJobOffer = {
     id: offerId,
     campaign_id: campaignId,
@@ -319,6 +358,9 @@ export async function launchDriverSearchCampaign(params: {
     owner_name: params.ownerName,
     owner_company: params.ownerCompany || params.ownerName,
     owner_phone: params.ownerPhone || '',
+    machine_id: params.machineId || undefined,
+    machine_title: params.machineTitle || labelAr,
+    machine_image: params.machineImage || '',
     machine_category: params.machineCategory,
     machine_label_ar: labelAr,
     machine_label_fr: labelFr,
@@ -342,34 +384,56 @@ export async function launchDriverSearchCampaign(params: {
   let persistedToSupabase = false;
 
   if (isSupabaseConfigured) {
+    const baseInsert = {
+      id: newOffer.id,
+      campaign_id: newOffer.campaign_id,
+      owner_id: newOffer.owner_id,
+      owner_name: newOffer.owner_name,
+      owner_company: newOffer.owner_company,
+      owner_phone: newOffer.owner_phone,
+      machine_category: newOffer.machine_category,
+      machine_label_ar: newOffer.machine_label_ar,
+      machine_label_fr: newOffer.machine_label_fr,
+      offered_salary: newOffer.offered_salary,
+      salary_unit: newOffer.salary_unit,
+      city: newOffer.city,
+      work_location_note: newOffer.work_location_note,
+      duration_label: newOffer.duration_label,
+      is_urgent: newOffer.is_urgent,
+      accommodation_included: newOffer.accommodation_included,
+      meals_included: newOffer.meals_included,
+      experience_required: newOffer.experience_required,
+      description_ar: newOffer.description_ar,
+      description_fr: newOffer.description_fr,
+      status: 'open',
+    };
+
     try {
-      const { data, error } = await supabase
+      const extendedInsert: Record<string, any> = {
+        ...baseInsert,
+        machine_title: newOffer.machine_title || '',
+        machine_image: newOffer.machine_image || '',
+      };
+      if (isMachineUuid) {
+        extendedInsert.machine_id = params.machineId;
+      }
+
+      let { data, error } = await supabase
         .from('driver_job_offers')
-        .insert({
-          id: newOffer.id,
-          campaign_id: newOffer.campaign_id,
-          owner_id: newOffer.owner_id,
-          owner_name: newOffer.owner_name,
-          owner_company: newOffer.owner_company,
-          owner_phone: newOffer.owner_phone,
-          machine_category: newOffer.machine_category,
-          machine_label_ar: newOffer.machine_label_ar,
-          machine_label_fr: newOffer.machine_label_fr,
-          offered_salary: newOffer.offered_salary,
-          salary_unit: newOffer.salary_unit,
-          city: newOffer.city,
-          work_location_note: newOffer.work_location_note,
-          duration_label: newOffer.duration_label,
-          is_urgent: newOffer.is_urgent,
-          accommodation_included: newOffer.accommodation_included,
-          meals_included: newOffer.meals_included,
-          experience_required: newOffer.experience_required,
-          description_ar: newOffer.description_ar,
-          description_fr: newOffer.description_fr,
-          status: 'open',
-        })
+        .insert(extendedInsert)
         .select()
         .maybeSingle();
+
+      // Fallback when remote DB has not applied machine_id/machine_image migration yet
+      if (error) {
+        const retry = await supabase
+          .from('driver_job_offers')
+          .insert(baseInsert)
+          .select()
+          .maybeSingle();
+        data = retry.data;
+        error = retry.error;
+      }
 
       if (!error) {
         persistedToSupabase = true;
@@ -421,6 +485,9 @@ export async function launchDriverSearchCampaign(params: {
     owner_name: newOffer.owner_name,
     owner_company: newOffer.owner_company,
     owner_phone: newOffer.owner_phone,
+    machine_id: newOffer.machine_id || '',
+    machine_title: newOffer.machine_title || '',
+    machine_image: newOffer.machine_image || '',
     machine_category: newOffer.machine_category,
     machine_label_ar: newOffer.machine_label_ar,
     machine_label_fr: newOffer.machine_label_fr,
@@ -766,6 +833,9 @@ export function mapNotificationRowToDriverOffer(row: any): DriverJobOffer | null
     owner_name: d.owner_name || 'مالك آليات',
     owner_company: d.owner_company || d.owner_name || '',
     owner_phone: d.owner_phone || '',
+    machine_id: d.machine_id || undefined,
+    machine_title: d.machine_title || '',
+    machine_image: d.machine_image || '',
     machine_category: d.machine_category || 'tractopelle',
     machine_label_ar: d.machine_label_ar || row.title_ar || 'آلية بناء',
     machine_label_fr: d.machine_label_fr || d.machine_label_ar || 'Engin BTP',
@@ -889,12 +959,16 @@ export function buildDriverOfferMarkerSuffix(offer: DriverJobOffer, driverId: st
     offer_id: offer.id,
     owner_id: offer.owner_id,
     driver_id: driverId,
+    machine_id: offer.machine_id || '',
+    machine_title: offer.machine_title || offer.machine_label_ar || '',
+    machine_image: offer.machine_image || '',
     machine_category: offer.machine_category,
     machine_label_ar: offer.machine_label_ar,
     machine_label_fr: offer.machine_label_fr,
     offered_salary: offer.offered_salary,
     salary_unit: offer.salary_unit,
     duration_label: offer.duration_label || '',
+    city: offer.city || '',
   };
   return `${DRIVER_OFFER_MARKER}${JSON.stringify(payload)}`;
 }
@@ -928,6 +1002,7 @@ export function parseDriverDealMessageRow(msg: any): {
   driver_accepted?: boolean;
   status?: DriverDealContext['deal_status'];
   won_driver_name?: string;
+  won_driver_phone?: string;
 } | null {
   const body = msg?.body || msg?.content || msg?.message || msg?.text || '';
   const data = parseJsonMarkerFromBody(body, DRIVER_DEAL_MARKER);
@@ -939,8 +1014,10 @@ export async function markOfferAcceptedAndClosed(params: {
   offerId: string;
   driverId: string;
   driverName?: string;
+  driverPhone?: string;
 }): Promise<void> {
-  const { offerId, driverId, driverName } = params;
+  const { offerId, driverId, driverName, driverPhone } = params;
+  const agreedAtIso = new Date().toISOString();
 
   if (isSupabaseConfigured && offerId && !offerId.startsWith('starter-')) {
     try {
@@ -950,14 +1027,27 @@ export async function markOfferAcceptedAndClosed(params: {
         p_driver_name: driverName || '',
       });
     } catch {
-      // ignore if 20261116020000 migration has not been executed yet
+      // ignore if migration has not been executed yet
     }
 
     try {
-      await supabase
+      const { error } = await supabase
         .from('driver_job_offers')
-        .update({ status: 'accepted' })
+        .update({
+          status: 'accepted',
+          won_driver_id: driverId,
+          won_driver_name: driverName || '',
+          won_driver_phone: driverPhone || '',
+          agreed_at: agreedAtIso,
+        })
         .eq('id', offerId);
+
+      if (error) {
+        await supabase
+          .from('driver_job_offers')
+          .update({ status: 'accepted' })
+          .eq('id', offerId);
+      }
     } catch {
       // ignore if RLS restricts to owner only
     }
@@ -975,7 +1065,18 @@ export async function markOfferAcceptedAndClosed(params: {
 
   const existing = getLocalCachedOffers();
   saveLocalCachedOffers(
-    existing.map((o) => (o.id === offerId ? { ...o, status: 'accepted' } : o))
+    existing.map((o) =>
+      o.id === offerId
+        ? {
+            ...o,
+            status: 'accepted',
+            won_driver_id: driverId,
+            won_driver_name: driverName || o.won_driver_name,
+            won_driver_phone: driverPhone || o.won_driver_phone,
+            agreed_at: o.agreed_at || agreedAtIso,
+          }
+        : o
+    )
   );
 
   try {
@@ -1017,8 +1118,15 @@ export async function fetchDriverDealContextForConversation(params: {
   let markerDriverAccepted = false;
   let markerStatus: DriverDealContext['deal_status'] | null = null;
   let markerDriverName: string | undefined;
+  let markerDriverPhone: string | undefined;
 
+  // Walk oldest -> newest so markerOfferMeta holds the LATEST offer introduced in this thread
   if (Array.isArray(messages)) {
+    const dealStatesByOffer = new Map<
+      string,
+      { owner_accepted: boolean; driver_accepted: boolean; status?: DriverDealContext['deal_status']; won_driver_name?: string; won_driver_phone?: string }
+    >();
+
     for (const msg of messages) {
       const offerPayload = parseDriverOfferMessageRow(msg);
       if (offerPayload?.offer_id) {
@@ -1028,17 +1136,38 @@ export async function fetchDriverDealContextForConversation(params: {
       }
       const dealPayload = parseDriverDealMessageRow(msg);
       if (dealPayload?.offer_id) {
-        const targetId: string = offerIdHint || markerOfferMeta?.offer_id || dealPayload.offer_id;
-        if (dealPayload.offer_id === targetId) {
-          if (!markerOfferMeta) {
-            markerOfferMeta = { offer_id: dealPayload.offer_id };
-          }
-          if (dealPayload.owner_accepted) markerOwnerAccepted = true;
-          if (dealPayload.driver_accepted) markerDriverAccepted = true;
-          if (dealPayload.status) markerStatus = dealPayload.status;
-          if (dealPayload.won_driver_name) markerDriverName = dealPayload.won_driver_name;
-        }
+        const prev = dealStatesByOffer.get(dealPayload.offer_id) || {
+          owner_accepted: false,
+          driver_accepted: false,
+        };
+        if (dealPayload.owner_accepted) prev.owner_accepted = true;
+        if (dealPayload.driver_accepted) prev.driver_accepted = true;
+        if (dealPayload.status) prev.status = dealPayload.status;
+        if (dealPayload.won_driver_name) prev.won_driver_name = dealPayload.won_driver_name;
+        if (dealPayload.won_driver_phone) prev.won_driver_phone = dealPayload.won_driver_phone;
+        dealStatesByOffer.set(dealPayload.offer_id, prev);
       }
+    }
+
+    const activeOfferIdForMarkers = offerIdHint || markerOfferMeta?.offer_id;
+    if (activeOfferIdForMarkers) {
+      const st = dealStatesByOffer.get(activeOfferIdForMarkers);
+      if (st) {
+        markerOwnerAccepted = st.owner_accepted;
+        markerDriverAccepted = st.driver_accepted;
+        markerStatus = st.status || null;
+        markerDriverName = st.won_driver_name;
+        markerDriverPhone = st.won_driver_phone;
+      }
+    } else if (dealStatesByOffer.size > 0) {
+      const entries = Array.from(dealStatesByOffer.entries());
+      const [lastOfferId, st] = entries[entries.length - 1];
+      markerOfferMeta = { offer_id: lastOfferId };
+      markerOwnerAccepted = st.owner_accepted;
+      markerDriverAccepted = st.driver_accepted;
+      markerStatus = st.status || null;
+      markerDriverName = st.won_driver_name;
+      markerDriverPhone = st.won_driver_phone;
     }
   }
 
@@ -1058,7 +1187,7 @@ export async function fetchDriverDealContextForConversation(params: {
           dbOffer = mapDbRowToDriverOffer(data);
         }
       } else {
-        // Auto-discover offer between this owner & driver
+        // Auto-discover latest OPEN offer between this owner & driver first, then latest historical
         const { data: ownerOffers } = await supabase
           .from('driver_job_offers')
           .select('*')
@@ -1075,10 +1204,17 @@ export async function fetchDriverDealContextForConversation(params: {
             .eq('driver_id', driverId);
 
           if (Array.isArray(driverApps) && driverApps.length > 0) {
-            const matchedOffer = ownerOffers.find((o: any) => o.id === driverApps[0].offer_id);
+            // Prefer open offer the driver applied to, otherwise most recent applied offer
+            const openApplied = ownerOffers.find(
+              (o: any) => o.status === 'open' && driverApps.some((a: any) => a.offer_id === o.id)
+            );
+            const fallbackApplied = ownerOffers.find((o: any) =>
+              driverApps.some((a: any) => a.offer_id === o.id)
+            );
+            const matchedOffer = openApplied || fallbackApplied;
             if (matchedOffer) {
               dbOffer = mapDbRowToDriverOffer(matchedOffer);
-              appRow = driverApps[0];
+              appRow = driverApps.find((a: any) => a.offer_id === matchedOffer.id) || driverApps[0];
             }
           }
           if (!dbOffer) {
@@ -1118,6 +1254,28 @@ export async function fetchDriverDealContextForConversation(params: {
   const localDealsMap = getLocalDriverDealsMap();
   const localDeal = localDealsMap[`${resolvedOfferId}::${driverId}`];
 
+  const resolvedMachineId =
+    dbOffer?.machine_id || markerOfferMeta?.machine_id || localDeal?.machine_id || undefined;
+  let resolvedMachineImage =
+    dbOffer?.machine_image || markerOfferMeta?.machine_image || localDeal?.machine_image || '';
+  let resolvedMachineTitle =
+    dbOffer?.machine_title || markerOfferMeta?.machine_title || localDeal?.machine_title || '';
+
+  if ((!resolvedMachineImage || !resolvedMachineTitle) && resolvedMachineId) {
+    const cachedMachine = machineStore
+      .getCachedMachines()
+      .find((m) => m.id === resolvedMachineId);
+    if (cachedMachine) {
+      if (!resolvedMachineImage) resolvedMachineImage = cachedMachine.images?.[0] || '';
+      if (!resolvedMachineTitle) {
+        resolvedMachineTitle =
+          cachedMachine.title_ar ||
+          cachedMachine.title_fr ||
+          `${cachedMachine.brand} ${cachedMachine.model}`.trim();
+      }
+    }
+  }
+
   const ownerAccepted = Boolean(
     markerOwnerAccepted ||
       localDeal?.owner_accepted ||
@@ -1152,6 +1310,9 @@ export async function fetchDriverDealContextForConversation(params: {
     offer_id: resolvedOfferId,
     owner_id: ownerId,
     driver_id: driverId,
+    machine_id: resolvedMachineId,
+    machine_title: resolvedMachineTitle || undefined,
+    machine_image: resolvedMachineImage || undefined,
     machine_category:
       dbOffer?.machine_category || markerOfferMeta?.machine_category || localDeal?.machine_category || 'tractopelle',
     machine_label_ar:
@@ -1174,7 +1335,11 @@ export async function fetchDriverDealContextForConversation(params: {
     owner_accepted: dealStatus === 'accepted' ? true : ownerAccepted,
     driver_accepted: dealStatus === 'accepted' ? true : driverAccepted,
     deal_status: dealStatus,
-    won_driver_name: markerDriverName || appRow?.driver_name || localDeal?.won_driver_name,
+    won_driver_name:
+      markerDriverName || dbOffer?.won_driver_name || appRow?.driver_name || localDeal?.won_driver_name,
+    won_driver_phone:
+      markerDriverPhone || dbOffer?.won_driver_phone || appRow?.driver_phone || localDeal?.won_driver_phone,
+    agreed_at: dbOffer?.agreed_at || localDeal?.agreed_at,
   };
 }
 
@@ -1183,13 +1348,15 @@ export async function acceptAndCloseDriverDealParty(params: {
   partyRole: 'owner' | 'driver';
   currentUserId: string;
   currentUserName?: string;
+  currentUserPhone?: string;
   conversationId: string;
 }): Promise<{ updatedDeal: DriverDealContext; finalized: boolean }> {
-  const { deal, partyRole, currentUserId, currentUserName, conversationId } = params;
+  const { deal, partyRole, currentUserId, currentUserName, currentUserPhone, conversationId } = params;
 
   const nextOwnerAccepted = partyRole === 'owner' ? true : deal.owner_accepted;
   const nextDriverAccepted = partyRole === 'driver' ? true : deal.driver_accepted;
   const finalized = nextOwnerAccepted && nextDriverAccepted;
+  const agreedAt = finalized ? deal.agreed_at || new Date().toISOString() : deal.agreed_at;
 
   const updatedDeal: DriverDealContext = {
     ...deal,
@@ -1202,6 +1369,9 @@ export async function acceptAndCloseDriverDealParty(params: {
       : 'pending_owner',
     won_driver_name:
       partyRole === 'driver' && currentUserName ? currentUserName : deal.won_driver_name,
+    won_driver_phone:
+      partyRole === 'driver' && currentUserPhone ? currentUserPhone : deal.won_driver_phone,
+    agreed_at: agreedAt,
   };
 
   saveLocalDriverDeal(updatedDeal);
@@ -1214,13 +1384,14 @@ export async function acceptAndCloseDriverDealParty(params: {
     driver_accepted: updatedDeal.driver_accepted,
     status: updatedDeal.deal_status,
     won_driver_name: updatedDeal.won_driver_name || '',
+    won_driver_phone: updatedDeal.won_driver_phone || '',
   };
 
   const humanText = finalized
-    ? `🤝 تم إغلاق الصفقة بنجاح! اتفق الطرفان على شروط العمل وتم إغلاق العرض (${updatedDeal.machine_label_ar}).`
+    ? `🤝 تم إغلاق الصفقة بنجاح! اتفق الطرفان على شروط العمل وتم تثبيت الاتفاق (${updatedDeal.machine_title || updatedDeal.machine_label_ar}).`
     : partyRole === 'owner'
-    ? `🤝 أكد المالك اتفاق شروط العمل وإغلاق الصفقة — في انتظار تأكيد السائق لإغلاق العرض نهائياً.`
-    : `🤝 أكد السائق اتفاق شروط العمل وإغلاق الصفقة — في انتظار تأكيد المالك لإغلاق العرض نهائياً.`;
+    ? `🤝 أكد المالك اتفاق شروط العمل وإغلاق الصفقة — في انتظار تأكيد السائق لإتمام الاتفاق.`
+    : `🤝 أكد السائق اتفاق شروط العمل وإغلاق الصفقة — في انتظار تأكيد المالك لإتمام الاتفاق.`;
 
   const recipientId = partyRole === 'owner' ? deal.driver_id : deal.owner_id;
   const recipientRole = partyRole === 'owner' ? 'driver' : 'owner';
@@ -1241,13 +1412,14 @@ export async function acceptAndCloseDriverDealParty(params: {
       offerId: updatedDeal.offer_id,
       driverId: updatedDeal.driver_id,
       driverName: updatedDeal.won_driver_name,
+      driverPhone: updatedDeal.won_driver_phone,
     });
 
     if (isSupabaseConfigured && recipientId && !recipientId.startsWith('starter-')) {
-      const titleAr = `تم إغلاق صفقة العمل: ${updatedDeal.machine_label_ar} 🤝`;
+      const titleAr = `تم إغلاق صفقة العمل: ${updatedDeal.machine_title || updatedDeal.machine_label_ar} 🤝`;
       const titleFr = `Accord conducteur conclu : ${updatedDeal.machine_label_fr} 🤝`;
-      const bodyAr = 'اتفق الطرفان على شروط العمل وتم إغلاق عرض العمل بنجاح.';
-      const bodyFr = 'Les deux parties ont confirmé les conditions de travail. L’offre est clôturée.';
+      const bodyAr = 'اتفق الطرفان على شروط العمل وتم تسجيل الصفقة في قسم عروض العمل والسائقون.';
+      const bodyFr = 'Les deux parties ont confirmé les conditions de travail.';
 
       supabase
         .from('notifications')
@@ -1269,7 +1441,7 @@ export async function acceptAndCloseDriverDealParty(params: {
         title: titleAr,
         body: bodyAr,
         tag: `drv-deal-${updatedDeal.offer_id}`,
-        url: recipientRole === 'driver' ? '/driver/messages' : '/owner/machines',
+        url: recipientRole === 'driver' ? '/driver/joboffer' : '/owner/drivers',
       }).catch(() => {});
     }
   }
@@ -1287,11 +1459,15 @@ export async function finalizeDriverJobOfferDirect(params: {
   driverCity?: string;
 }): Promise<DriverDealContext> {
   const { offer, ownerId, ownerName, driverId, driverName, driverPhone, driverCity } = params;
+  const agreedAt = new Date().toISOString();
 
   const deal: DriverDealContext = {
     offer_id: offer.id,
     owner_id: ownerId,
     driver_id: driverId,
+    machine_id: offer.machine_id,
+    machine_title: offer.machine_title || offer.machine_label_ar,
+    machine_image: offer.machine_image,
     machine_category: offer.machine_category,
     machine_label_ar: offer.machine_label_ar,
     machine_label_fr: offer.machine_label_fr,
@@ -1302,6 +1478,8 @@ export async function finalizeDriverJobOfferDirect(params: {
     driver_accepted: true,
     deal_status: 'accepted',
     won_driver_name: driverName,
+    won_driver_phone: driverPhone,
+    agreed_at: agreedAt,
   };
 
   saveLocalDriverDeal(deal);
@@ -1310,6 +1488,7 @@ export async function finalizeDriverJobOfferDirect(params: {
     offerId: offer.id,
     driverId,
     driverName,
+    driverPhone,
   });
 
   // Also log the deal closure message into their direct conversation so chat reflects it immediately
@@ -1329,11 +1508,12 @@ export async function finalizeDriverJobOfferDirect(params: {
       driver_accepted: true,
       status: 'accepted',
       won_driver_name: driverName,
+      won_driver_phone: driverPhone || '',
     };
     await chatStore.sendMessage(
       conv.id,
       ownerId,
-      `🤝 تم إغلاق الصفقة مع السائق (${driverName}) على شروط العمل وتم إغلاق العرض (${offer.machine_label_ar}).${DRIVER_DEAL_MARKER}${JSON.stringify(markerPayload)}`,
+      `🤝 تم إغلاق الصفقة مع السائق (${driverName}) على شروط العمل وتم تثبيت الاتفاق (${offer.machine_title || offer.machine_label_ar}).${DRIVER_DEAL_MARKER}${JSON.stringify(markerPayload)}`,
       driverId,
       { senderName: ownerName, recipientRole: 'driver' }
     );
@@ -1342,9 +1522,9 @@ export async function finalizeDriverJobOfferDirect(params: {
   }
 
   if (isSupabaseConfigured && driverId && !driverId.startsWith('starter-')) {
-    const titleAr = `تم إغلاق صفقة العمل معك: ${offer.machine_label_ar} 🤝`;
+    const titleAr = `تم إغلاق صفقة العمل معك: ${offer.machine_title || offer.machine_label_ar} 🤝`;
     const titleFr = `Offre conclue avec vous : ${offer.machine_label_fr} 🤝`;
-    const bodyAr = `أكد ${ownerName || offer.owner_name} الاتفاق على العمل وأغلق العرض باسمك.`;
+    const bodyAr = `أكد ${ownerName || offer.owner_name} الاتفاق على العمل وأدرجها في قسم عروض العمل.`;
     const bodyFr = `${ownerName || offer.owner_name} a validé l’accord de travail avec vous.`;
 
     supabase
@@ -1367,10 +1547,396 @@ export async function finalizeDriverJobOfferDirect(params: {
       title: titleAr,
       body: bodyAr,
       tag: `drv-deal-${offer.id}`,
-      url: '/driver/messages',
+      url: '/driver/joboffer',
     }).catch(() => {});
   }
 
   return deal;
 }
+
+/**
+ * Fetches all finalized/agreed driver deals for a specific DRIVER
+ * so agreed jobs show prominently inside /driver/joboffer ("عروض العمل").
+ */
+export async function fetchDriverAgreedDeals(driverId: string): Promise<AgreedDriverDealItem[]> {
+  if (!driverId) return [];
+  const dealsMap = new Map<string, AgreedDriverDealItem>();
+  const cachedOffers = getLocalCachedOffers();
+  const cachedMachines = machineStore.getCachedMachines();
+
+  // 1. Seed from local deal cache + local offer cache
+  const localDeals = getLocalDriverDealsMap();
+  for (const deal of Object.values(localDeals)) {
+    if (deal.driver_id !== driverId || deal.deal_status !== 'accepted') continue;
+    const matchedOffer = cachedOffers.find((o) => o.id === deal.offer_id);
+    const matchedMachine = deal.machine_id
+      ? cachedMachines.find((m) => m.id === deal.machine_id)
+      : undefined;
+    dealsMap.set(deal.offer_id, {
+      offer_id: deal.offer_id,
+      owner_id: deal.owner_id,
+      owner_name: matchedOffer?.owner_name || 'مالك الآلية',
+      owner_company: matchedOffer?.owner_company || matchedOffer?.owner_name || 'مالك الآلية',
+      owner_phone: matchedOffer?.owner_phone || '',
+      driver_id: driverId,
+      driver_name: deal.won_driver_name || 'سائق محترف',
+      driver_phone: deal.won_driver_phone || '',
+      driver_city: matchedOffer?.city || 'المغرب',
+      driver_experience: matchedOffer?.experience_required || '',
+      machine_id: deal.machine_id || matchedOffer?.machine_id,
+      machine_title:
+        deal.machine_title ||
+        matchedOffer?.machine_title ||
+        matchedMachine?.title_ar ||
+        deal.machine_label_ar,
+      machine_image:
+        deal.machine_image || matchedOffer?.machine_image || matchedMachine?.images?.[0] || '',
+      machine_category: deal.machine_category,
+      machine_label_ar: deal.machine_label_ar,
+      machine_label_fr: deal.machine_label_fr,
+      offered_salary: Number(deal.offered_salary) || 0,
+      salary_unit: deal.salary_unit || 'day',
+      duration_label: deal.duration_label || matchedOffer?.duration_label || '',
+      city: matchedOffer?.city || 'المغرب (جميع المدن)',
+      agreed_at: deal.agreed_at || matchedOffer?.agreed_at || matchedOffer?.created_at || new Date().toISOString(),
+    });
+  }
+
+  for (const o of cachedOffers) {
+    if (o.status === 'accepted' && o.won_driver_id === driverId && !dealsMap.has(o.id)) {
+      const matchedMachine = o.machine_id ? cachedMachines.find((m) => m.id === o.machine_id) : undefined;
+      dealsMap.set(o.id, {
+        offer_id: o.id,
+        owner_id: o.owner_id,
+        owner_name: o.owner_name,
+        owner_company: o.owner_company || o.owner_name,
+        owner_phone: o.owner_phone || '',
+        driver_id: driverId,
+        driver_name: o.won_driver_name || 'سائق محترف',
+        driver_phone: o.won_driver_phone || '',
+        driver_city: o.city || 'المغرب',
+        driver_experience: o.experience_required || '',
+        machine_id: o.machine_id,
+        machine_title: o.machine_title || matchedMachine?.title_ar || o.machine_label_ar,
+        machine_image: o.machine_image || matchedMachine?.images?.[0] || '',
+        machine_category: o.machine_category,
+        machine_label_ar: o.machine_label_ar,
+        machine_label_fr: o.machine_label_fr,
+        offered_salary: Number(o.offered_salary) || 0,
+        salary_unit: o.salary_unit,
+        duration_label: o.duration_label || '',
+        city: o.city || 'المغرب (جميع المدن)',
+        agreed_at: o.agreed_at || o.created_at,
+      });
+    }
+  }
+
+  // 2. Query Supabase for authoritative accepted applications & offers
+  if (isSupabaseConfigured && !driverId.startsWith('driver-')) {
+    try {
+      const { data: apps } = await supabase
+        .from('driver_job_applications')
+        .select('*')
+        .eq('driver_id', driverId)
+        .eq('status', 'accepted')
+        .order('created_at', { ascending: false });
+
+      const appOfferIds = Array.isArray(apps) ? apps.map((a: any) => a.offer_id).filter(Boolean) : [];
+      const dbOffersById = new Map<string, DriverJobOffer>();
+
+      if (appOfferIds.length > 0) {
+        const { data: offerRows } = await supabase
+          .from('driver_job_offers')
+          .select('*')
+          .in('id', appOfferIds);
+        if (Array.isArray(offerRows)) {
+          offerRows.forEach((r: any) => dbOffersById.set(r.id, mapDbRowToDriverOffer(r)));
+        }
+      }
+
+      try {
+        const { data: wonRows } = await supabase
+          .from('driver_job_offers')
+          .select('*')
+          .eq('won_driver_id', driverId)
+          .eq('status', 'accepted');
+        if (Array.isArray(wonRows)) {
+          wonRows.forEach((r: any) => dbOffersById.set(r.id, mapDbRowToDriverOffer(r)));
+        }
+      } catch {
+        // ignore if won_driver_id column not yet migrated
+      }
+
+      // Enrich missing machine thumbnails from Supabase machines table
+      const missingImageMachineIds = Array.from(
+        new Set(
+          Array.from(dbOffersById.values())
+            .filter((o) => o.machine_id && !o.machine_image)
+            .map((o) => o.machine_id as string)
+        )
+      );
+      const machineById = new Map<string, any>();
+      if (missingImageMachineIds.length > 0) {
+        const { data: mRows } = await supabase
+          .from('machines')
+          .select('id, title_ar, title_fr, brand, model, images')
+          .in('id', missingImageMachineIds);
+        (mRows || []).forEach((m: any) => machineById.set(m.id, m));
+      }
+
+      for (const offer of dbOffersById.values()) {
+        const matchedApp = (apps || []).find((a: any) => a.offer_id === offer.id);
+        const mInfo = offer.machine_id ? machineById.get(offer.machine_id) : undefined;
+        const cachedM = offer.machine_id
+          ? cachedMachines.find((m) => m.id === offer.machine_id)
+          : undefined;
+        const prev = dealsMap.get(offer.id);
+
+        dealsMap.set(offer.id, {
+          offer_id: offer.id,
+          owner_id: offer.owner_id,
+          owner_name: offer.owner_name || prev?.owner_name || 'مالك الآلية',
+          owner_company: offer.owner_company || offer.owner_name || prev?.owner_company || 'مالك الآلية',
+          owner_phone: offer.owner_phone || prev?.owner_phone || '',
+          driver_id: driverId,
+          driver_name:
+            offer.won_driver_name || matchedApp?.driver_name || prev?.driver_name || 'سائق محترف',
+          driver_phone:
+            offer.won_driver_phone || matchedApp?.driver_phone || prev?.driver_phone || '',
+          driver_city: matchedApp?.driver_city || offer.city || prev?.driver_city || 'المغرب',
+          driver_experience:
+            matchedApp?.driver_experience || offer.experience_required || prev?.driver_experience || '',
+          machine_id: offer.machine_id || prev?.machine_id,
+          machine_title:
+            offer.machine_title ||
+            mInfo?.title_ar ||
+            cachedM?.title_ar ||
+            prev?.machine_title ||
+            offer.machine_label_ar,
+          machine_image:
+            offer.machine_image ||
+            mInfo?.images?.[0] ||
+            cachedM?.images?.[0] ||
+            prev?.machine_image ||
+            '',
+          machine_category: offer.machine_category,
+          machine_label_ar: offer.machine_label_ar,
+          machine_label_fr: offer.machine_label_fr,
+          offered_salary: Number(offer.offered_salary) || prev?.offered_salary || 0,
+          salary_unit: offer.salary_unit || prev?.salary_unit || 'day',
+          duration_label: offer.duration_label || prev?.duration_label || '',
+          city: offer.city || 'المغرب (جميع المدن)',
+          agreed_at: offer.agreed_at || matchedApp?.created_at || offer.created_at,
+        });
+      }
+    } catch {
+      // ignore Supabase errors & use local cache
+    }
+  }
+
+  return Array.from(dealsMap.values()).sort(
+    (a, b) => new Date(b.agreed_at).getTime() - new Date(a.agreed_at).getTime()
+  );
+}
+
+/**
+ * Fetches all finalized/agreed driver deals for a specific OWNER
+ * to populate the new "السائقون" (/owner/drivers) section with full deal details:
+ * Machine, Driver, Duration, and Salary.
+ */
+export async function fetchOwnerAgreedDriverDeals(
+  ownerId: string
+): Promise<AgreedDriverDealItem[]> {
+  if (!ownerId) return [];
+  const dealsMap = new Map<string, AgreedDriverDealItem>();
+  const cachedOffers = getLocalCachedOffers();
+  const cachedMachines = machineStore.getCachedMachines();
+
+  // 1. Seed from local cache
+  const localDeals = getLocalDriverDealsMap();
+  for (const deal of Object.values(localDeals)) {
+    if (deal.owner_id !== ownerId || deal.deal_status !== 'accepted') continue;
+    const matchedOffer = cachedOffers.find((o) => o.id === deal.offer_id);
+    const matchedMachine = deal.machine_id
+      ? cachedMachines.find((m) => m.id === deal.machine_id)
+      : undefined;
+    dealsMap.set(deal.offer_id, {
+      offer_id: deal.offer_id,
+      owner_id: ownerId,
+      owner_name: matchedOffer?.owner_name || '',
+      owner_company: matchedOffer?.owner_company || '',
+      owner_phone: matchedOffer?.owner_phone || '',
+      driver_id: deal.driver_id,
+      driver_name: deal.won_driver_name || 'سائق معتمد',
+      driver_phone: deal.won_driver_phone || '',
+      driver_city: matchedOffer?.city || 'المغرب',
+      driver_experience: matchedOffer?.experience_required || '',
+      machine_id: deal.machine_id || matchedOffer?.machine_id,
+      machine_title:
+        deal.machine_title ||
+        matchedOffer?.machine_title ||
+        matchedMachine?.title_ar ||
+        deal.machine_label_ar,
+      machine_image:
+        deal.machine_image || matchedOffer?.machine_image || matchedMachine?.images?.[0] || '',
+      machine_category: deal.machine_category,
+      machine_label_ar: deal.machine_label_ar,
+      machine_label_fr: deal.machine_label_fr,
+      offered_salary: Number(deal.offered_salary) || 0,
+      salary_unit: deal.salary_unit || 'day',
+      duration_label: deal.duration_label || matchedOffer?.duration_label || '',
+      city: matchedOffer?.city || 'المغرب',
+      agreed_at: deal.agreed_at || matchedOffer?.agreed_at || matchedOffer?.created_at || new Date().toISOString(),
+    });
+  }
+
+  for (const o of cachedOffers) {
+    if (o.owner_id === ownerId && o.status === 'accepted' && !dealsMap.has(o.id)) {
+      const matchedMachine = o.machine_id ? cachedMachines.find((m) => m.id === o.machine_id) : undefined;
+      dealsMap.set(o.id, {
+        offer_id: o.id,
+        owner_id: ownerId,
+        owner_name: o.owner_name,
+        owner_company: o.owner_company || o.owner_name,
+        owner_phone: o.owner_phone || '',
+        driver_id: o.won_driver_id || '',
+        driver_name: o.won_driver_name || 'سائق معتمد',
+        driver_phone: o.won_driver_phone || '',
+        driver_city: o.city || 'المغرب',
+        driver_experience: o.experience_required || '',
+        machine_id: o.machine_id,
+        machine_title: o.machine_title || matchedMachine?.title_ar || o.machine_label_ar,
+        machine_image: o.machine_image || matchedMachine?.images?.[0] || '',
+        machine_category: o.machine_category,
+        machine_label_ar: o.machine_label_ar,
+        machine_label_fr: o.machine_label_fr,
+        offered_salary: Number(o.offered_salary) || 0,
+        salary_unit: o.salary_unit,
+        duration_label: o.duration_label || '',
+        city: o.city || 'المغرب',
+        agreed_at: o.agreed_at || o.created_at,
+      });
+    }
+  }
+
+  // 2. Query Supabase for owner's accepted offers + winning applications + driver profiles + machine photos
+  if (isSupabaseConfigured) {
+    try {
+      const { data: offerRows } = await supabase
+        .from('driver_job_offers')
+        .select('*')
+        .eq('owner_id', ownerId)
+        .eq('status', 'accepted')
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      if (Array.isArray(offerRows) && offerRows.length > 0) {
+        const offerIds = offerRows.map((r: any) => r.id).filter(Boolean);
+        const { data: appRows } = await supabase
+          .from('driver_job_applications')
+          .select('*')
+          .in('offer_id', offerIds);
+
+        const driverIds = Array.from(
+          new Set([
+            ...offerRows.map((r: any) => r.won_driver_id).filter(Boolean),
+            ...(appRows || []).filter((a: any) => a.status === 'accepted').map((a: any) => a.driver_id),
+          ])
+        );
+        const profileMap = new Map<string, any>();
+        if (driverIds.length > 0) {
+          const { data: profs } = await supabase
+            .from('profiles')
+            .select('id, full_name, phone, phone_number, city, driver_experience_years')
+            .in('id', driverIds);
+          (profs || []).forEach((p: any) => profileMap.set(p.id, p));
+        }
+
+        const machineIds = Array.from(
+          new Set(offerRows.map((r: any) => r.machine_id).filter(Boolean))
+        );
+        const machineMap = new Map<string, any>();
+        if (machineIds.length > 0) {
+          const { data: mRows } = await supabase
+            .from('machines')
+            .select('id, title_ar, title_fr, brand, model, images')
+            .in('id', machineIds);
+          (mRows || []).forEach((m: any) => machineMap.set(m.id, m));
+        }
+
+        for (const row of offerRows) {
+          const offer = mapDbRowToDriverOffer(row);
+          const appsForOffer = (appRows || []).filter((a: any) => a.offer_id === offer.id);
+          const wonApp =
+            appsForOffer.find((a: any) => a.status === 'accepted') || appsForOffer[0];
+          const resolvedDriverId = offer.won_driver_id || wonApp?.driver_id || '';
+          const prof = resolvedDriverId ? profileMap.get(resolvedDriverId) : undefined;
+          const mInfo = offer.machine_id ? machineMap.get(offer.machine_id) : undefined;
+          const cachedM = offer.machine_id
+            ? cachedMachines.find((m) => m.id === offer.machine_id)
+            : undefined;
+          const prev = dealsMap.get(offer.id);
+
+          dealsMap.set(offer.id, {
+            offer_id: offer.id,
+            owner_id: ownerId,
+            owner_name: offer.owner_name,
+            owner_company: offer.owner_company || offer.owner_name,
+            owner_phone: offer.owner_phone || '',
+            driver_id: resolvedDriverId || prev?.driver_id || '',
+            driver_name:
+              offer.won_driver_name ||
+              wonApp?.driver_name ||
+              prof?.full_name ||
+              prev?.driver_name ||
+              'سائق معتمد',
+            driver_phone:
+              offer.won_driver_phone ||
+              wonApp?.driver_phone ||
+              prof?.phone ||
+              prof?.phone_number ||
+              prev?.driver_phone ||
+              '',
+            driver_city:
+              wonApp?.driver_city || prof?.city || prev?.driver_city || 'المغرب',
+            driver_experience:
+              wonApp?.driver_experience ||
+              prof?.driver_experience_years ||
+              offer.experience_required ||
+              prev?.driver_experience ||
+              '',
+            machine_id: offer.machine_id || prev?.machine_id,
+            machine_title:
+              offer.machine_title ||
+              mInfo?.title_ar ||
+              cachedM?.title_ar ||
+              prev?.machine_title ||
+              offer.machine_label_ar,
+            machine_image:
+              offer.machine_image ||
+              mInfo?.images?.[0] ||
+              cachedM?.images?.[0] ||
+              prev?.machine_image ||
+              '',
+            machine_category: offer.machine_category,
+            machine_label_ar: offer.machine_label_ar,
+            machine_label_fr: offer.machine_label_fr,
+            offered_salary: Number(offer.offered_salary) || prev?.offered_salary || 0,
+            salary_unit: offer.salary_unit,
+            duration_label: offer.duration_label || prev?.duration_label || '',
+            city: offer.city || 'المغرب',
+            agreed_at: offer.agreed_at || wonApp?.created_at || offer.created_at,
+          });
+        }
+      }
+    } catch {
+      // ignore & return local cache
+    }
+  }
+
+  return Array.from(dealsMap.values()).sort(
+    (a, b) => new Date(b.agreed_at).getTime() - new Date(a.agreed_at).getTime()
+  );
+}
+
 

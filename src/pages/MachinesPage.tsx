@@ -60,7 +60,7 @@ import { getDriverExperienceOption } from '../data/driverMachines';
 import { chatStore } from '../lib/chatStore';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { mapDatabaseError } from '../lib/errorHelpers';
-import { machineStore, resolveMachineRates } from '../lib/machineStore';
+import { machineStore, resolveMachineRates, resolveVolumeDiscounts } from '../lib/machineStore';
 
 export const MachinesPage: React.FC = () => {
   const { t, lang } = useLanguage();
@@ -139,14 +139,20 @@ export const MachinesPage: React.FC = () => {
             location_lng: m.lng,
             ...(() => {
               const rates = resolveMachineRates(m);
+              const volumeDiscounts = resolveVolumeDiscounts(m);
               return {
                 rate_hourly: rates.rateHourly,
                 rate_daily: rates.rateDaily,
                 rate_weekly: rates.rateWeekly,
+                rate_monthly: rates.rateMonthly,
+                rate_yearly: rates.rateYearly,
                 hourly_rate: rates.rateHourly,
                 daily_rate: rates.rateDaily,
                 weekly_rate: rates.rateWeekly,
+                monthly_rate: rates.rateMonthly,
+                yearly_rate: rates.rateYearly,
                 sale_price: rates.salePrice,
+                volume_discounts: volumeDiscounts,
               };
             })(),
             currency: 'MAD',
@@ -735,7 +741,15 @@ export const MachinesPage: React.FC = () => {
                             </span>
                             <span className="text-[10px] text-steel-500 font-mono block mt-0.5 latin-nums">
                               {formatPriceMAD(resolveMachineRates(machine).rateHourly)}/{t('marketplace.per_hour')} · {formatPriceMAD(resolveMachineRates(machine).rateWeekly)}/{lang === 'fr' ? 'sem' : 'أسبوع'}
+                              {resolveMachineRates(machine).rateMonthly > 0 && ` · ${formatPriceMAD(resolveMachineRates(machine).rateMonthly)}/${lang === 'fr' ? 'mois' : 'شهر'}`}
+                              {resolveMachineRates(machine).rateYearly > 0 && ` · ${formatPriceMAD(resolveMachineRates(machine).rateYearly)}/${lang === 'fr' ? 'an' : 'سنة'}`}
                             </span>
+                            {resolveVolumeDiscounts(machine).length > 0 && (
+                              <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-900 text-[10px] font-bold latin-nums">
+                                +{resolveVolumeDiscounts(machine).length}{' '}
+                                {lang === 'fr' ? 'paliers dégressifs' : 'عروض تخفيض بالمدة'}
+                              </span>
+                            )}
                           </>
                         )}
                       </div>

@@ -26,7 +26,28 @@ export type BookingStatus = 'pending' | 'active' | 'confirmed' | 'completed' | '
 export type PaymentStatus = 'pending' | 'approved' | 'rejected';
 export type PaymentMethod = 'rib' | 'wafacash';
 export type SparePartCondition = 'new' | 'used' | 'refurbished';
-export type RentalTermType = 'hourly' | 'daily' | 'weekly';
+export type RentalTermType = 'hourly' | 'daily' | 'weekly' | 'monthly' | 'yearly';
+
+export type UpsellBillingType = 'per_day' | 'one_time' | 'per_month';
+
+export interface MachineUpsellOption {
+  id: string;
+  enabled: boolean;
+  title_ar: string;
+  title_fr: string;
+  desc_ar?: string;
+  desc_fr?: string;
+  price: number;
+  billing_type: UpsellBillingType;
+  icon?: string;
+}
+
+export interface VolumeDiscountTier {
+  id: string;
+  term: RentalTermType;
+  min_quantity: number;
+  discounted_unit_price: number;
+}
 
 export interface UserProfile {
   id: string;
@@ -108,9 +129,13 @@ export interface Machine {
   rate_hourly: number;
   rate_daily: number;
   rate_weekly: number;
+  rate_monthly?: number;
+  rate_yearly?: number;
   hourly_rate?: number;
   daily_rate?: number;
   weekly_rate?: number;
+  monthly_rate?: number;
+  yearly_rate?: number;
   sale_price?: number;
   currency: 'MAD';
   with_operator: boolean;
@@ -122,6 +147,9 @@ export interface Machine {
   is_published?: boolean;
   images: string[];
   specs: EquipmentSpecs;
+  volume_discounts?: VolumeDiscountTier[];
+  upsells?: MachineUpsellOption[];
+  upsell_addons?: MachineUpsellOption[];
   views_count: number;
   rating_avg: number;
   reviews_count: number;
@@ -197,7 +225,8 @@ export interface Booking {
   unit_price?: number;
   total_price: number;
   deposit_amount?: number;
-  rate_type?: 'hourly' | 'daily' | 'weekly';
+  rate_type?: RentalTermType;
+  selected_upsells?: MachineUpsellOption[];
   fuel_included?: boolean;
   delivery_fee?: number;
   client_ref_id?: string;

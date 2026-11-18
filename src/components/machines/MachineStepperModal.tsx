@@ -18,10 +18,13 @@ import {
   Sparkles,
   Layers,
   Tag,
+  Plus,
+  TrendingDown,
 } from 'lucide-react';
-import { Machine, ListingMode, MachineCondition } from '../../types/database';
+import { Machine, ListingMode, MachineCondition, VolumeDiscountTier, RentalTermType } from '../../types/database';
 import { EQUIPMENT_CATEGORIES } from '../../data/categories';
 import { MOROCCAN_CITIES } from '../../data/cities';
+import { formatPriceMAD, formatTermQuantityUnit } from '../../data/rentalTerms';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Select } from '../ui/Select';
@@ -33,7 +36,7 @@ import { MapLocationPicker } from './MapLocationPicker';
 import { compressImage } from '../../lib/imageCompressor';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { mapDatabaseError } from '../../lib/errorHelpers';
-import { machineStore, resolveMachineRates } from '../../lib/machineStore';
+import { machineStore, resolveMachineRates, resolveVolumeDiscounts } from '../../lib/machineStore';
 
 interface MachineStepperModalProps {
   isOpen: boolean;
@@ -80,7 +83,17 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
   const [hourlyRate, setHourlyRate] = useState<number>(initialRates ? initialRates.rateHourly : 350);
   const [dailyRate, setDailyRate] = useState<number>(initialRates ? initialRates.rateDaily : 2200);
   const [weeklyRate, setWeeklyRate] = useState<number>(initialRates ? initialRates.rateWeekly : 12000);
+  const [monthlyRate, setMonthlyRate] = useState<number>(initialRates ? initialRates.rateMonthly : 38000);
+  const [yearlyRate, setYearlyRate] = useState<number>(initialRates ? initialRates.rateYearly : 390000);
   const [salePrice, setSalePrice] = useState<number>(initialRates ? initialRates.salePrice : 480000);
+  const [volumeDiscounts, setVolumeDiscounts] = useState<VolumeDiscountTier[]>(() =>
+    machineToEdit ? resolveVolumeDiscounts(machineToEdit) : []
+  );
+  const [activeDiscountTerm, setActiveDiscountTerm] = useState<RentalTermType>('daily');
+  const [newTierQty, setNewTierQty] = useState<number>(5);
+  const [newTierPrice, setNewTierPrice] = useState<number>(() =>
+    Math.max(1, Math.round((initialRates ? initialRates.rateDaily : 2200) * 0.9))
+  );
   const [withOperator, setWithOperator] = useState<boolean>(
     machineToEdit?.with_operator ?? true
   );
@@ -154,10 +167,17 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
     setListingMode(machineToEdit?.listing_mode || 'rent');
     setCondition(machineToEdit?.condition || 'good');
     const editRates = machineToEdit ? resolveMachineRates(machineToEdit) : null;
+    const initDaily = editRates ? editRates.rateDaily : 2200;
     setHourlyRate(editRates ? editRates.rateHourly : 350);
-    setDailyRate(editRates ? editRates.rateDaily : 2200);
+    setDailyRate(initDaily);
     setWeeklyRate(editRates ? editRates.rateWeekly : 12000);
+    setMonthlyRate(editRates ? editRates.rateMonthly : 38000);
+    setYearlyRate(editRates ? editRates.rateYearly : 390000);
     setSalePrice(editRates ? editRates.salePrice : 480000);
+    setVolumeDiscounts(machineToEdit ? resolveVolumeDiscounts(machineToEdit) : []);
+    setActiveDiscountTerm('daily');
+    setNewTierQty(5);
+    setNewTierPrice(Math.max(1, Math.round(initDaily * 0.9)));
     setWithOperator(machineToEdit?.with_operator ?? true);
     setFuelIncluded(machineToEdit?.fuel_included ?? false);
     setDeliveryAvailable(machineToEdit?.delivery_available ?? true);
@@ -316,10 +336,38 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
     const cleanHourlyRate = isSparePart ? 0 : Math.max(0, Number(hourlyRate) || 0);
     const cleanDailyRate = isSparePart ? 0 : Math.max(0, Number(dailyRate) || 0);
     const cleanWeeklyRate = isSparePart ? 0 : Math.max(0, Number(weeklyRate) || 0);
+    const cleanMonthlyRate = isSparePart ? 0 : Math.max(0, Number(monthlyRate) || 0);
+    const cleanYearlyRate = isSparePart ? 0 : Math.max(0, Number(yearlyRate) || 0);
     const cleanSalePrice = Math.max(0, Number(salePrice) || 0);
+    const cleanVolumeDiscounts: VolumeDiscountTier[] = isSparePart
+      ? []
+      : volumeDiscounts
+          .filter((tier) => Number(tier.min_quantity) >= 2 && Number(tier.discounted_unit_price) > 0)
+          .map((tier) => ({
+            id: tier.id || `${tier.term}_${tier.min_quantity}`,
+            term: tier.term,
+            min_quantity: Math.max(2, Math.round(Number(tier.min_quantity))),
+            discounted_unit_price: Math.max(1, Number(tier.discounted_unit_price)),
+          }))
+          .sort((a, b) => a.min_quantity - b.min_quantity);
 
     const cityName = MOROCCAN_CITIES.find((c) => c.id === cityId)?.name_ar || cityId;
     const catSlug = isSparePart ? 'spare-parts' : categoryId;
+
+    const specsPayload: any = isSparePart
+      ? {
+          part_number: partNumber,
+          compatible_models: compatibleBrands,
+          part_type: sparePartCategory,
+        }
+      : {
+          operating_weight_ton: (machineToEdit?.specs as any)?.operating_weight_ton || 8.5,
+          engine_power_hp: (machineToEdit?.specs as any)?.engine_power_hp || 92,
+          bucket_capacity_m3: (machineToEdit?.specs as any)?.bucket_capacity_m3 || 1.0,
+          rate_monthly: cleanMonthlyRate,
+          rate_yearly: cleanYearlyRate,
+          volume_discounts: cleanVolumeDiscounts,
+        };
 
     const machineData: Machine = {
       id: machineToEdit?.id || 'mac_' + Math.random().toString(36).substring(2, 9),
@@ -344,9 +392,13 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
       rate_hourly: cleanHourlyRate,
       rate_daily: cleanDailyRate,
       rate_weekly: cleanWeeklyRate,
+      rate_monthly: cleanMonthlyRate,
+      rate_yearly: cleanYearlyRate,
       hourly_rate: cleanHourlyRate,
       daily_rate: cleanDailyRate,
       weekly_rate: cleanWeeklyRate,
+      monthly_rate: cleanMonthlyRate,
+      yearly_rate: cleanYearlyRate,
       sale_price: cleanSalePrice,
       currency: 'MAD',
       with_operator: isSparePart ? false : withOperator,
@@ -355,17 +407,8 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
       status: isPublished ? 'available' : 'inactive',
       is_published: isPublished,
       images: finalImageUrls,
-      specs: isSparePart
-        ? ({
-            part_number: partNumber,
-            compatible_models: compatibleBrands,
-            part_type: sparePartCategory,
-          } as any)
-        : {
-            operating_weight_ton: 8.5,
-            engine_power_hp: 92,
-            bucket_capacity_m3: 1.0,
-          },
+      specs: specsPayload,
+      volume_discounts: cleanVolumeDiscounts,
       views_count: machineToEdit?.views_count || 0,
       rating_avg: machineToEdit?.rating_avg || 5.0,
       reviews_count: machineToEdit?.reviews_count || 0,
@@ -401,9 +444,14 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
           hourly_rate: cleanHourlyRate,
           daily_rate: cleanDailyRate,
           weekly_rate: cleanWeeklyRate,
+          monthly_rate: cleanMonthlyRate,
+          yearly_rate: cleanYearlyRate,
           rate_hourly: cleanHourlyRate,
           rate_daily: cleanDailyRate,
           rate_weekly: cleanWeeklyRate,
+          rate_monthly: cleanMonthlyRate,
+          rate_yearly: cleanYearlyRate,
+          volume_discounts: cleanVolumeDiscounts,
           sale_price: cleanSalePrice,
           with_operator: machineData.with_operator,
           fuel_included: machineData.fuel_included,
@@ -416,8 +464,8 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
         let savedData: any = null;
         let lastError: any = null;
 
-        // Perform adaptive insert/update (up to 12 adaptive attempts for schema cache mismatches)
-        for (let attempt = 0; attempt < 12; attempt++) {
+        // Perform adaptive insert/update (up to 18 adaptive attempts for schema cache mismatches)
+        for (let attempt = 0; attempt < 18; attempt++) {
           const req = machineToEdit?.id
             ? supabase.from('machines').update(payload).eq('id', machineToEdit.id).select().maybeSingle()
             : supabase.from('machines').insert(payload).select().maybeSingle();
@@ -976,6 +1024,25 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
                         />
                       </div>
 
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <Input
+                          type="number"
+                          min={0}
+                          label={t('machines.monthly_rate_label')}
+                          value={monthlyRate > 0 ? monthlyRate : ''}
+                          placeholder="0"
+                          onChange={(e) => setMonthlyRate(e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
+                        />
+                        <Input
+                          type="number"
+                          min={0}
+                          label={t('machines.yearly_rate_label')}
+                          value={yearlyRate > 0 ? yearlyRate : ''}
+                          placeholder="0"
+                          onChange={(e) => setYearlyRate(e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
+                        />
+                      </div>
+
                       {/* Toggles */}
                       <div className="space-y-2.5 pt-2 border-t border-steel-200">
                         <label className="flex items-center justify-between p-3 rounded-xl border border-steel-200 bg-surface cursor-pointer">
@@ -1014,6 +1081,340 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
                           />
                         </label>
                       </div>
+
+                      {/* Tiered / Volume Duration Pricing Discounts (Tarification dégressive - Upsell) */}
+                      {(() => {
+                        const termTabs: {
+                          key: RentalTermType;
+                          label: string;
+                          baseRate: number;
+                          defaultQty: number;
+                          presets: { qty: number; pct: number }[];
+                        }[] = [
+                          {
+                            key: 'hourly',
+                            label: lang === 'fr' ? 'Heure' : 'ساعة',
+                            baseRate: Number(hourlyRate) || 0,
+                            defaultQty: 5,
+                            presets: [
+                              { qty: 5, pct: 10 },
+                              { qty: 10, pct: 20 },
+                            ],
+                          },
+                          {
+                            key: 'daily',
+                            label: lang === 'fr' ? 'Jour' : 'يوم',
+                            baseRate: Number(dailyRate) || 0,
+                            defaultQty: 5,
+                            presets: [
+                              { qty: 5, pct: 10 },
+                              { qty: 15, pct: 15 },
+                            ],
+                          },
+                          {
+                            key: 'weekly',
+                            label: lang === 'fr' ? 'Semaine' : 'أسبوع',
+                            baseRate: Number(weeklyRate) || 0,
+                            defaultQty: 2,
+                            presets: [
+                              { qty: 2, pct: 10 },
+                              { qty: 4, pct: 15 },
+                            ],
+                          },
+                          {
+                            key: 'monthly',
+                            label: lang === 'fr' ? 'Mois' : 'شهر',
+                            baseRate: Number(monthlyRate) || 0,
+                            defaultQty: 3,
+                            presets: [
+                              { qty: 3, pct: 10 },
+                              { qty: 6, pct: 15 },
+                            ],
+                          },
+                          {
+                            key: 'yearly',
+                            label: lang === 'fr' ? 'An' : 'سنة',
+                            baseRate: Number(yearlyRate) || 0,
+                            defaultQty: 2,
+                            presets: [{ qty: 2, pct: 10 }],
+                          },
+                        ];
+
+                        const currentTab = termTabs.find((tItem) => tItem.key === activeDiscountTerm) || termTabs[1];
+                        const tiersForActiveTerm = volumeDiscounts
+                          .filter((tier) => tier.term === activeDiscountTerm)
+                          .sort((a, b) => a.min_quantity - b.min_quantity);
+
+                        const upsertTier = (term: RentalTermType, qty: number, price: number) => {
+                          const cleanQty = Math.max(2, Math.round(Number(qty) || 2));
+                          const cleanPrice = Math.max(1, Math.round(Number(price) || 1));
+                          setVolumeDiscounts((prev) => {
+                            const existingIdx = prev.findIndex(
+                              (item) => item.term === term && item.min_quantity === cleanQty
+                            );
+                            if (existingIdx >= 0) {
+                              return prev.map((item, i) =>
+                                i === existingIdx ? { ...item, discounted_unit_price: cleanPrice } : item
+                              );
+                            }
+                            return [
+                              ...prev,
+                              {
+                                id: `${term}_${cleanQty}_${Date.now()}`,
+                                term,
+                                min_quantity: cleanQty,
+                                discounted_unit_price: cleanPrice,
+                              },
+                            ];
+                          });
+                        };
+
+                        return (
+                          <div className="pt-4 border-t border-steel-200 space-y-3">
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <h4 className="text-xs font-black text-ink flex items-center gap-1.5">
+                                  <TrendingDown className="w-4 h-4 text-primary-dark shrink-0" />
+                                  <span>
+                                    {lang === 'fr'
+                                      ? 'Tarification dégressive selon la durée (Upsell Volume)'
+                                      : 'التسعيرة التنازلية حسب المدة (تخفيض تلقائي عند الكراء المطول)'}
+                                  </span>
+                                </h4>
+                                <p className="text-[11px] text-steel-500 mt-0.5 leading-relaxed">
+                                  {lang === 'fr'
+                                    ? 'Réduisez automatiquement le prix unitaire pour encourager les longues durées (ex: 1 000 MAD/j -> 900 MAD/j dès 5 jours).'
+                                    : 'شجّع الزبناء على الكراء لمدة أطول بتخفيض ثمن الوحدة تلقائياً (مثلاً: اليوم بـ 1000 د.م، وعند طلب 5 أيام فأكثر يصبح بـ 900 د.م).'}
+                                </p>
+                              </div>
+                              <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 font-black text-[10px] shrink-0 latin-nums">
+                                {volumeDiscounts.length} {lang === 'fr' ? 'paliers' : 'عروض'}
+                              </span>
+                            </div>
+
+                            {/* 5 Period Tabs */}
+                            <div className="grid grid-cols-5 gap-1 bg-steel-100 p-1 rounded-xl">
+                              {termTabs.map((tab) => {
+                                const count = volumeDiscounts.filter((d) => d.term === tab.key).length;
+                                const isActive = activeDiscountTerm === tab.key;
+                                return (
+                                  <button
+                                    key={tab.key}
+                                    type="button"
+                                    onClick={() => {
+                                      setActiveDiscountTerm(tab.key);
+                                      setNewTierQty(tab.defaultQty);
+                                      setNewTierPrice(
+                                        tab.baseRate > 0 ? Math.max(1, Math.round(tab.baseRate * 0.9)) : 100
+                                      );
+                                    }}
+                                    className={`py-1.5 px-1 rounded-lg text-[10px] font-black transition-all cursor-pointer text-center ${
+                                      isActive
+                                        ? 'bg-primary text-ink shadow-xs'
+                                        : 'text-steel-600 hover:text-ink'
+                                    }`}
+                                  >
+                                    <span className="block truncate">{tab.label}</span>
+                                    <span className="text-[9px] font-mono opacity-80 block truncate latin-nums">
+                                      {count > 0 ? `(${count})` : tab.baseRate > 0 ? formatPriceMAD(tab.baseRate, lang) : '—'}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+
+                            {/* Base Rate + Quick 1-Click Presets */}
+                            <div className="p-2.5 rounded-xl bg-steel-50 border border-steel-200 flex flex-wrap items-center justify-between gap-2">
+                              <span className="text-[11px] font-bold text-steel-700 latin-nums">
+                                {lang === 'fr' ? 'Tarif de base :' : 'الثمن العادي للوحدة :'}{' '}
+                                <strong className="text-ink font-mono">
+                                  {currentTab.baseRate > 0
+                                    ? `${formatPriceMAD(currentTab.baseRate, lang)}/${currentTab.label}`
+                                    : lang === 'fr'
+                                    ? 'Non défini'
+                                    : 'غير محدد'}
+                                </strong>
+                              </span>
+
+                              {currentTab.baseRate > 0 && (
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <span className="text-[10px] font-bold text-steel-500">
+                                    {lang === 'fr' ? 'Raccourcis :' : 'أمثلة سريعة:'}
+                                  </span>
+                                  {currentTab.presets.map((p) => {
+                                    const suggestedPrice = Math.max(
+                                      1,
+                                      Math.round((currentTab.baseRate * (100 - p.pct)) / 100)
+                                    );
+                                    return (
+                                      <button
+                                        key={p.qty}
+                                        type="button"
+                                        onClick={() => upsertTier(activeDiscountTerm, p.qty, suggestedPrice)}
+                                        className="px-2 py-1 rounded-lg bg-white hover:bg-amber-50 border border-steel-300 hover:border-primary text-[10px] font-black text-ink transition-colors cursor-pointer latin-nums"
+                                      >
+                                        +{p.qty} {formatTermQuantityUnit(activeDiscountTerm, p.qty, lang)} (-{p.pct}%)
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Configured Discount Tiers for Selected Period */}
+                            {tiersForActiveTerm.length > 0 && (
+                              <div className="space-y-2 max-h-52 overflow-y-auto pe-0.5">
+                                {tiersForActiveTerm.map((tier) => {
+                                  const base = currentTab.baseRate;
+                                  const discountPct =
+                                    base > 0 && tier.discounted_unit_price < base
+                                      ? Math.round(((base - tier.discounted_unit_price) / base) * 100)
+                                      : 0;
+                                  const invalidHigh = base > 0 && tier.discounted_unit_price >= base;
+
+                                  return (
+                                    <div
+                                      key={tier.id}
+                                      className={`p-2.5 rounded-xl border flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 ${
+                                        invalidHigh
+                                          ? 'border-amber-400 bg-amber-50/70'
+                                          : 'border-emerald-200 bg-emerald-50/40'
+                                      }`}
+                                    >
+                                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                                        <span className="text-[11px] font-bold text-steel-600 shrink-0">
+                                          {lang === 'fr' ? 'Dès' : 'ابتداءً من'}
+                                        </span>
+                                        <input
+                                          type="number"
+                                          min={2}
+                                          value={tier.min_quantity}
+                                          onChange={(e) => {
+                                            const val = Math.max(2, Math.round(Number(e.target.value) || 2));
+                                            setVolumeDiscounts((prev) =>
+                                              prev.map((d) => (d.id === tier.id ? { ...d, min_quantity: val } : d))
+                                            );
+                                          }}
+                                          className="w-16 px-2 py-1 rounded-lg border border-steel-300 bg-white text-xs font-mono font-black text-center text-ink"
+                                          dir="ltr"
+                                        />
+                                        <span className="text-[11px] font-bold text-steel-700 shrink-0">
+                                          {formatTermQuantityUnit(activeDiscountTerm, tier.min_quantity, lang)} ⟵
+                                        </span>
+                                        <input
+                                          type="number"
+                                          min={1}
+                                          value={tier.discounted_unit_price}
+                                          onChange={(e) => {
+                                            const val = Math.max(1, Math.round(Number(e.target.value) || 1));
+                                            setVolumeDiscounts((prev) =>
+                                              prev.map((d) =>
+                                                d.id === tier.id ? { ...d, discounted_unit_price: val } : d
+                                              )
+                                            );
+                                          }}
+                                          className="w-24 px-2 py-1 rounded-lg border border-steel-300 bg-white text-xs font-mono font-black text-center text-ink"
+                                          dir="ltr"
+                                        />
+                                        <span className="text-[10px] font-bold text-steel-500 shrink-0">
+                                          {lang === 'fr' ? `MAD/${currentTab.label}` : `د.م/${currentTab.label}`}
+                                        </span>
+                                      </div>
+
+                                      <div className="flex items-center gap-1.5 shrink-0">
+                                        {discountPct > 0 ? (
+                                          <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black latin-nums">
+                                            -{discountPct}%
+                                          </span>
+                                        ) : invalidHigh ? (
+                                          <span className="px-2 py-0.5 rounded-full bg-amber-200 text-amber-950 text-[10px] font-black">
+                                            {lang === 'fr' ? '≥ tarif base' : 'أكبر من العادي'}
+                                          </span>
+                                        ) : null}
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setVolumeDiscounts((prev) => prev.filter((d) => d.id !== tier.id))
+                                          }
+                                          className="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 transition-colors cursor-pointer"
+                                          aria-label={t('common.delete')}
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {/* Add New Tier Row */}
+                            <div className="p-3 rounded-xl border border-dashed border-steel-300 bg-steel-50/70 space-y-2">
+                              <span className="text-[11px] font-black text-steel-700 block">
+                                {lang === 'fr'
+                                  ? `+ Ajouter un palier de réduction (${currentTab.label})`
+                                  : `+ إضافة شريحة تخفيض جديدة (${currentTab.label})`}
+                              </span>
+                              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
+                                <div className="sm:col-span-5 flex items-center gap-1.5">
+                                  <span className="text-[11px] font-bold text-steel-600 shrink-0">
+                                    {lang === 'fr' ? 'Dès' : 'من'}
+                                  </span>
+                                  <input
+                                    type="number"
+                                    min={2}
+                                    value={newTierQty}
+                                    onChange={(e) => setNewTierQty(Math.max(2, Math.round(Number(e.target.value) || 2)))}
+                                    className="w-full px-2.5 py-1.5 rounded-lg border border-steel-300 bg-white text-xs font-mono font-bold text-ink focus:outline-none focus:ring-2 focus:ring-primary"
+                                    dir="ltr"
+                                  />
+                                  <span className="text-[11px] font-bold text-steel-600 shrink-0">
+                                    {formatTermQuantityUnit(activeDiscountTerm, newTierQty, lang)}+
+                                  </span>
+                                </div>
+
+                                <div className="sm:col-span-5 flex items-center gap-1.5">
+                                  <span className="text-[11px] font-bold text-steel-600 shrink-0">
+                                    {lang === 'fr' ? 'Prix :' : 'الثمن الجديد:'}
+                                  </span>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    value={newTierPrice > 0 ? newTierPrice : ''}
+                                    onChange={(e) =>
+                                      setNewTierPrice(e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))
+                                    }
+                                    placeholder={lang === 'fr' ? 'MAD' : 'د.م'}
+                                    className="w-full px-2.5 py-1.5 rounded-lg border border-steel-300 bg-white text-xs font-mono font-bold text-ink focus:outline-none focus:ring-2 focus:ring-primary"
+                                    dir="ltr"
+                                  />
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (!newTierPrice || newTierPrice <= 0) {
+                                      toast.error(
+                                        lang === 'fr'
+                                          ? 'Veuillez saisir un tarif réduit valide'
+                                          : 'يرجى إدخال الثمن المخفض للوحدة'
+                                      );
+                                      return;
+                                    }
+                                    upsertTier(activeDiscountTerm, newTierQty, newTierPrice);
+                                    setNewTierQty((prev) => prev + (activeDiscountTerm === 'daily' || activeDiscountTerm === 'hourly' ? 5 : 2));
+                                    setNewTierPrice((prev) => Math.max(1, Math.round(prev * 0.92)));
+                                  }}
+                                  className="sm:col-span-2 px-2.5 py-1.5 rounded-lg bg-ink hover:bg-black text-primary text-xs font-black flex items-center justify-center gap-1 cursor-pointer min-h-[34px]"
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                  <span>{lang === 'fr' ? 'Ajouter' : 'إضافة'}</span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
 
@@ -1233,12 +1634,24 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
                   <span className="font-bold text-steel-500">
                     {lang === 'fr' ? 'Tarif :' : 'التسعيرة:'}
                   </span>
-                  <span className="font-mono font-black text-ink">
+                  <span className="font-mono font-black text-ink text-end">
                     {listingMode === 'rent'
-                      ? `${dailyRate} MAD / jour`
+                      ? `${dailyRate} MAD/j · ${monthlyRate} MAD/mois · ${yearlyRate} MAD/an`
                       : `${salePrice} MAD`}
                   </span>
                 </div>
+
+                {listingMode === 'rent' && !isSparePart && (
+                  <div className="flex items-center justify-between pb-2 border-b border-steel-200">
+                    <span className="font-bold text-steel-500">
+                      {lang === 'fr' ? 'Paliers dégressifs :' : 'عروض التخفيض حسب المدة:'}
+                    </span>
+                    <span className="font-bold text-emerald-700 latin-nums">
+                      {volumeDiscounts.length}{' '}
+                      {lang === 'fr' ? 'paliers configurés' : 'شرائح مفعّلة'}
+                    </span>
+                  </div>
+                )}
 
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-steel-500">

@@ -26,7 +26,7 @@ import { Button } from '../components/ui/Button';
 import { CreateBookingModal } from '../components/bookings/CreateBookingModal';
 import { useLanguage } from '../hooks/useLanguage';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { machineStore, resolveMachineRates } from '../lib/machineStore';
+import { machineStore, resolveMachineRates, resolveVolumeDiscounts } from '../lib/machineStore';
 import { MOROCCAN_CITIES, getCityById } from '../data/cities';
 import { calculateDistanceKm } from '../lib/geoUtils';
 import { Machine } from '../types/database';
@@ -118,14 +118,20 @@ export const MarketplacePage: React.FC = () => {
       location_lng: m.lng ?? matchedCity?.lng,
       ...(() => {
         const rates = resolveMachineRates(m);
+        const volumeDiscounts = resolveVolumeDiscounts(m);
         return {
           rate_hourly: rates.rateHourly,
           rate_daily: rates.rateDaily,
           rate_weekly: rates.rateWeekly,
+          rate_monthly: rates.rateMonthly,
+          rate_yearly: rates.rateYearly,
           hourly_rate: rates.rateHourly,
           daily_rate: rates.rateDaily,
           weekly_rate: rates.rateWeekly,
+          monthly_rate: rates.rateMonthly,
+          yearly_rate: rates.rateYearly,
           sale_price: rates.salePrice,
+          volume_discounts: volumeDiscounts,
         };
       })(),
       currency: 'MAD',

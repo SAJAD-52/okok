@@ -20,8 +20,9 @@ import {
   Fuel,
   MapPin,
   MessageCircle,
+  TrendingDown,
 } from 'lucide-react';
-import { Booking, Machine, Client } from '../../types/database';
+import { Booking, Machine, Client, RentalTermType, VolumeDiscountTier } from '../../types/database';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { toast } from '../ui/Toast';
@@ -29,7 +30,8 @@ import { useLanguage } from '../../hooks/useLanguage';
 import { useAuth } from '../../hooks/useAuth';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { bookingStore } from '../../lib/bookingStore';
-import { machineStore, resolveMachineRates } from '../../lib/machineStore';
+import { machineStore, resolveMachineRates, resolveVolumeDiscounts } from '../../lib/machineStore';
+import { formatPriceMAD, resolveEffectiveTermRate, formatTermQuantityUnit } from '../../data/rentalTerms';
 import { clientService } from '../../lib/clientService';
 import { serverApi } from '../../lib/serverApi';
 
@@ -41,8 +43,27 @@ interface CreateBookingModalProps {
   existingBookings?: Booking[];
   preselectedMachineId?: string;
   initialStartDate?: string;
+  initialRateType?: RentalTermType;
+  initialDuration?: number;
   onBookingCreated?: (booking: Booking) => void;
 }
+
+const computeEndDateFromDuration = (startStr: string, term: RentalTermType, qty: number): string => {
+  const safeQty = Math.max(1, Number(qty) || 1);
+  const startMs = new Date(startStr).getTime();
+  const baseMs = Number.isNaN(startMs) ? Date.now() + 24 * 3600 * 1000 : startMs;
+  const durationHours =
+    term === 'hourly'
+      ? safeQty
+      : term === 'weekly'
+      ? safeQty * 7 * 24
+      : term === 'monthly'
+      ? safeQty * 30 * 24
+      : term === 'yearly'
+      ? safeQty * 365 * 24
+      : safeQty * 24;
+  return new Date(baseMs + durationHours * 3600 * 1000).toISOString().slice(0, 16);
+};
 
 export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
   isOpen,
@@ -52,6 +73,8 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
   existingBookings = [],
   preselectedMachineId,
   initialStartDate,
+  initialRateType = 'daily',
+  initialDuration = 1,
   onBookingCreated,
 }) => {
   const { t, lang, isRTL } = useLanguage();
@@ -103,14 +126,21 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
     return new Date(Date.now() + 24 * 3600 * 1000).toISOString().slice(0, 16);
   });
   const [endDate, setEndDate] = useState(() => {
-    if (initialStartDate) {
-      const startMs = new Date(initialStartDate).getTime();
-      return new Date(startMs + 4 * 24 * 3600 * 1000).toISOString().slice(0, 16);
-    }
-    return new Date(Date.now() + 5 * 24 * 3600 * 1000).toISOString().slice(0, 16);
+    const startInit = initialStartDate
+      ? initialStartDate.slice(0, 16)
+      : new Date(Date.now() + 24 * 3600 * 1000).toISOString().slice(0, 16);
+    return computeEndDateFromDuration(startInit, initialRateType || 'daily', initialDuration || 1);
   });
 
-  const [rateType, setRateType] = useState<'hourly' | 'daily' | 'weekly'>('daily');
+  const [rateType, setRateType] = useState<RentalTermType>(initialRateType);
+  const [appliedDiscountInfo, setAppliedDiscountInfo] = useState<{
+    baseUnitRate: number;
+    effectiveUnitRate: number;
+    discountPercent: number;
+    totalSavings: number;
+    units: number;
+    nextTier: VolumeDiscountTier | null;
+  } | null>(null);
   const [totalPrice, setTotalPrice] = useState<number>(10000);
   const [depositAmount, setDepositAmount] = useState<number>(3000);
   const [withOperator, setWithOperator] = useState(true);
@@ -146,13 +176,20 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
     }
 
     if (isOpen) {
+      const effRate = initialRateType || 'daily';
+      const effStart = initialStartDate ? initialStartDate.slice(0, 16) : startDate;
+      if (initialStartDate) {
+        setStartDate(effStart);
+      }
+      setRateType(effRate);
+      setEndDate(computeEndDateFromDuration(effStart, effRate, initialDuration || 1));
       setClientName(autoClientName);
       setClientPhone(autoClientPhone);
       if (profile?.ice_number) {
         setCinOrIce(profile.ice_number);
       }
     }
-  }, [machine, preselectedMachineId, machines, machinesList, isOpen, profile, user, autoClientName, autoClientPhone]);
+  }, [machine, preselectedMachineId, machines, machinesList, isOpen, profile, user, autoClientName, autoClientPhone, initialStartDate, initialRateType, initialDuration]);
 
   // Handle client selection change
   const handleClientSelectChange = (val: string) => {
@@ -171,7 +208,7 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
     }
   };
 
-  // Dynamically calculate total price based on dates, machine rates, delivery
+  // Dynamically calculate total price based on dates, machine rates, tiered discounts, delivery
   useEffect(() => {
     const startTs = new Date(startDate).getTime();
     const endTs = new Date(endDate).getTime();
@@ -181,17 +218,35 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
       const days = Math.max(1, Math.ceil(hours / 24));
 
       const rates = resolveMachineRates(targetMachine);
-      let base = 0;
+      const tiers = resolveVolumeDiscounts(targetMachine);
+      let baseUnitRate = rates.rateDaily;
+      let units = days;
       if (rateType === 'hourly') {
-        base = Math.max(1, Math.round(hours)) * rates.rateHourly;
+        units = Math.max(1, Math.round(hours));
+        baseUnitRate = rates.rateHourly;
       } else if (rateType === 'weekly') {
-        const weeks = Math.max(1, Math.ceil(days / 7));
-        base = weeks * rates.rateWeekly;
-      } else {
-        base = days * rates.rateDaily;
+        units = Math.max(1, Math.ceil(days / 7));
+        baseUnitRate = rates.rateWeekly;
+      } else if (rateType === 'monthly') {
+        units = Math.max(1, Math.ceil(days / 30));
+        baseUnitRate = rates.rateMonthly;
+      } else if (rateType === 'yearly') {
+        units = Math.max(1, Math.ceil(days / 365));
+        baseUnitRate = rates.rateYearly;
       }
 
+      const evalRes = resolveEffectiveTermRate(baseUnitRate, rateType, units, tiers);
+      const base = units * evalRes.effectiveUnitRate;
       const total = base + (deliveryAvailable ? Number(deliveryFee) || 0 : 0);
+
+      setAppliedDiscountInfo({
+        baseUnitRate: evalRes.baseUnitRate,
+        effectiveUnitRate: evalRes.effectiveUnitRate,
+        discountPercent: evalRes.discountPercent,
+        totalSavings: evalRes.totalSavings,
+        units,
+        nextTier: evalRes.nextTier,
+      });
       setTotalPrice(total);
     }
   }, [startDate, endDate, machineId, machines, machine, machinesList, rateType, deliveryAvailable, deliveryFee]);
@@ -355,6 +410,14 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
       }
     }
 
+    const discountNote =
+      appliedDiscountInfo && appliedDiscountInfo.discountPercent > 0
+        ? (lang === 'fr'
+            ? `Tarif dégressif appliqué: ${appliedDiscountInfo.effectiveUnitRate} MAD/${formatTermQuantityUnit(rateType, 1, 'fr')} (-${appliedDiscountInfo.discountPercent}%, économie ${appliedDiscountInfo.totalSavings} MAD)`
+            : `تم تطبيق تخفيض المدة الطويلة: ${appliedDiscountInfo.effectiveUnitRate} د.م/${formatTermQuantityUnit(rateType, 1, 'ar')} (-${appliedDiscountInfo.discountPercent}%، توفير ${appliedDiscountInfo.totalSavings} د.م)`)
+        : '';
+    const mergedNotes = [notes.trim(), discountNote].filter(Boolean).join('\n');
+
     const newBooking: Booking = {
       id: crypto.randomUUID(),
       machine_id: effectiveMachineId,
@@ -376,7 +439,7 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
       delivery_fee: Number(deliveryFee),
       site_address: siteAddress.trim(),
       status: 'pending',
-      notes: notes.trim(),
+      notes: mergedNotes,
       paid_amount: 0,
       balance_due: Number(totalPrice),
       payment_status: 'unpaid',
@@ -554,9 +617,8 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
 🚜 الآلية: ${machineTitle} (${targetMachine?.city || ''})
 📅 الفترة: من ${startStr} إلى ${endStr}
 💰 السعر التقديري: ${Number(totalPrice).toLocaleString('fr-FR')} درهم
-👷 سائق معتمد: ${withOperator ? 'نعم' : 'لا'}
+${appliedDiscountInfo && appliedDiscountInfo.discountPercent > 0 ? `🏷️ تخفيض المدة الطويلة (-${appliedDiscountInfo.discountPercent}%): ${appliedDiscountInfo.effectiveUnitRate.toLocaleString('fr-FR')} د.م للوحدة\n` : ''}👷 سائق معتمد: ${withOperator ? 'نعم' : 'لا'}
 ⛽ الوقود: ${fuelIncluded ? 'شامل' : 'غير مشمول'}
-
 👤 الزبون / المقاولة: ${finalClientName}
 📱 الهاتف: ${finalClientPhone}
 📍 موقع الورش: ${siteAddress.trim() || targetMachine?.city || 'المغرب'}
@@ -787,12 +849,14 @@ ${notes.trim() ? `📝 ملاحظات: ${notes.trim()}\n` : ''}
               </label>
               <select
                 value={rateType}
-                onChange={(e) => setRateType(e.target.value as any)}
+                onChange={(e) => setRateType(e.target.value as RentalTermType)}
                 className="w-full px-3 py-2.5 rounded-xl border border-steel-300 font-bold focus:outline-none focus:ring-2 focus:ring-primary bg-surface"
               >
-                <option value="daily">{lang === 'fr' ? 'Par jour (يومي)' : 'باليوم'}</option>
                 <option value="hourly">{lang === 'fr' ? 'Par heure (بالساعة)' : 'بالساعة'}</option>
+                <option value="daily">{lang === 'fr' ? 'Par jour (باليوم)' : 'باليوم'}</option>
                 <option value="weekly">{lang === 'fr' ? 'Par semaine (أسبوعي)' : 'بالأسبوع'}</option>
+                <option value="monthly">{lang === 'fr' ? 'Par mois (شهري)' : 'بالشهر'}</option>
+                <option value="yearly">{lang === 'fr' ? 'Par an (سنوي)' : 'بالسنة'}</option>
               </select>
             </div>
 
@@ -864,6 +928,56 @@ ${notes.trim() ? `📝 ملاحظات: ${notes.trim()}\n` : ''}
               />
             </label>
           </div>
+
+          {/* Tiered Volume Discount Status & Smart Nudge */}
+          {appliedDiscountInfo && (appliedDiscountInfo.discountPercent > 0 || appliedDiscountInfo.nextTier) && (
+            <div className="space-y-2">
+              {appliedDiscountInfo.discountPercent > 0 && (
+                <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-between gap-2 text-[11px] text-emerald-900">
+                  <div className="flex items-center gap-2 font-bold">
+                    <TrendingDown className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>
+                      {lang === 'fr'
+                        ? `Tarif dégressif appliqué : ${formatPriceMAD(appliedDiscountInfo.effectiveUnitRate, 'fr')} au lieu de ${formatPriceMAD(appliedDiscountInfo.baseUnitRate, 'fr')} (-${appliedDiscountInfo.discountPercent}%)`
+                        : `تم تطبيق تخفيض المدة الطويلة: ${formatPriceMAD(appliedDiscountInfo.effectiveUnitRate, 'ar')} بدلاً من ${formatPriceMAD(appliedDiscountInfo.baseUnitRate, 'ar')} (-${appliedDiscountInfo.discountPercent}%)`}
+                    </span>
+                  </div>
+                  <span className="font-mono font-black text-emerald-700 shrink-0 latin-nums">
+                    {lang === 'fr'
+                      ? `-${formatPriceMAD(appliedDiscountInfo.totalSavings, 'fr')}`
+                      : `وفّرت ${formatPriceMAD(appliedDiscountInfo.totalSavings, 'ar')}`}
+                  </span>
+                </div>
+              )}
+
+              {appliedDiscountInfo.nextTier && (
+                <div className="p-3 rounded-2xl bg-amber-50/70 border border-amber-200 flex items-center justify-between gap-2 text-[11px]">
+                  <span className="font-bold text-amber-950 leading-snug">
+                    {lang === 'fr'
+                      ? `Astuce économie : réservez ${appliedDiscountInfo.nextTier.min_quantity}+ ${formatTermQuantityUnit(rateType, appliedDiscountInfo.nextTier.min_quantity, 'fr')} pour passer à ${formatPriceMAD(appliedDiscountInfo.nextTier.discounted_unit_price, 'fr')} !`
+                      : `عرض التوفير: امدد المدة إلى ${appliedDiscountInfo.nextTier.min_quantity}+ ${formatTermQuantityUnit(rateType, appliedDiscountInfo.nextTier.min_quantity, 'ar')} لتحصل على سعر ${formatPriceMAD(appliedDiscountInfo.nextTier.discounted_unit_price, 'ar')} للوحدة!`}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEndDate(
+                        computeEndDateFromDuration(
+                          startDate,
+                          rateType,
+                          appliedDiscountInfo.nextTier!.min_quantity
+                        )
+                      )
+                    }
+                    className="px-2.5 py-1 rounded-lg bg-ink hover:bg-black text-primary text-[10px] font-black shrink-0 cursor-pointer latin-nums"
+                  >
+                    {lang === 'fr'
+                      ? `Appliquer ${appliedDiscountInfo.nextTier.min_quantity}+`
+                      : `تطبيق ${appliedDiscountInfo.nextTier.min_quantity}+`}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           {deliveryAvailable && (
             <div className="grid grid-cols-2 gap-3">

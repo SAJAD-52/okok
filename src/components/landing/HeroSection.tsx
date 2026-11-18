@@ -16,6 +16,8 @@ import {
 } from 'lucide-react';
 import { DualCtaRow } from './DualCtaRow';
 import { useLanguage } from '../../hooks/useLanguage';
+import heroExcavatorImg from '../../assets/images/hero_excavator_1795030081800.jpg';
+import heroDumpTruckImg from '../../assets/images/hero_dump_truck_1795030081385.jpg';
 
 export const HeroSection: React.FC = () => {
   const { lang } = useLanguage();
@@ -37,89 +39,240 @@ export const HeroSection: React.FC = () => {
       <div className="absolute top-1/4 start-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] sm:w-[720px] h-[340px] bg-primary/15 rounded-full blur-[130px] pointer-events-none" />
       <div className="absolute bottom-0 start-0 end-0 h-20 bg-gradient-to-t from-ink to-transparent pointer-events-none" />
 
+      {/* Ambient Machinery Flanking Backgrounds (Excavator & Dump Truck blended into bg-ink) */}
+      <div className="hidden md:block absolute top-6 left-0 w-[300px] lg:w-[430px] xl:w-[500px] h-[250px] lg:h-[340px] pointer-events-none opacity-45 lg:opacity-55 select-none [mask-image:radial-gradient(ellipse_at_center,black_35%,transparent_74%)] [-webkit-mask-image:radial-gradient(ellipse_at_center,black_35%,transparent_74%)]">
+        <img
+          src={heroExcavatorImg}
+          alt=""
+          aria-hidden="true"
+          referrerPolicy="no-referrer"
+          className="w-full h-full object-cover object-center -scale-x-100 mix-blend-lighten contrast-110"
+        />
+      </div>
+      <div className="hidden md:block absolute top-6 right-0 w-[300px] lg:w-[430px] xl:w-[500px] h-[250px] lg:h-[340px] pointer-events-none opacity-45 lg:opacity-55 select-none [mask-image:radial-gradient(ellipse_at_center,black_35%,transparent_74%)] [-webkit-mask-image:radial-gradient(ellipse_at_center,black_35%,transparent_74%)]">
+        <img
+          src={heroDumpTruckImg}
+          alt=""
+          aria-hidden="true"
+          referrerPolicy="no-referrer"
+          className="w-full h-full object-cover object-center -scale-x-100 mix-blend-lighten contrast-110"
+        />
+      </div>
+
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Main Content Column */}
-        <div className="text-center max-w-4xl mx-auto flex flex-col items-center">
-          {/* Unboxed Clean Kicker with Kinetic Entrance */}
+        <div className="text-center max-w-5xl mx-auto flex flex-col items-center">
+          {/* Top Golden Kicker + Curved Arc */}
           <motion.div
             initial={{ opacity: 0, y: 12, filter: 'blur(4px)' }}
             animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
             transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
-            className="flex flex-wrap items-center justify-center gap-2 text-xs sm:text-sm font-semibold text-primary mb-4 sm:mb-5 tracking-wide"
+            className="flex flex-col items-center mb-4 sm:mb-5 w-full max-w-xl"
           >
-            <span>
+            <span className="font-display text-lg sm:text-2xl lg:text-[2rem] font-black text-primary tracking-tight leading-snug">
               {lang === 'fr'
-                ? 'Réseau B2B Maroc · 40 villes · Engins & Pièces'
-                : 'شبكة B2B بالمغرب · 40 مدينة · كراء وبيع الآليات وقطع الغيار'}
+                ? "Tout l'univers des engins lourds... réuni ici."
+                : 'كل عالم الآليات الثقيلة... يجتمع هنا.'}
             </span>
+            <svg
+              viewBox="0 0 500 18"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              className="w-56 sm:w-80 h-3.5 mt-1.5 text-primary"
+              aria-hidden="true"
+            >
+              <path
+                d="M10 14C150 2 350 2 490 14"
+                stroke="currentColor"
+                strokeWidth="3.5"
+                strokeLinecap="round"
+              />
+            </svg>
           </motion.div>
 
-          {/* Headline with Alexandria Display Font & Staggered Motion */}
+          {/* Main Poster Headline */}
           <motion.h1
-            initial={{ opacity: 0, y: 22, filter: 'blur(6px)' }}
+            initial={{ opacity: 0, y: 20, filter: 'blur(6px)' }}
             animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-            transition={{ duration: 0.6, delay: 0.08, ease: [0.16, 1, 0.3, 1] }}
-            className="font-display text-2xl sm:text-4xl lg:text-[3rem] font-extrabold tracking-tight text-white leading-[1.5] sm:leading-[1.38] text-balance mb-5"
+            transition={{ duration: 0.55, delay: 0.08, ease: [0.16, 1, 0.3, 1] }}
+            className="font-display text-2xl sm:text-4xl lg:text-[2.85rem] font-black tracking-tight text-white leading-[1.45] sm:leading-[1.35] text-balance max-w-4xl"
           >
             {lang === 'fr' ? (
               <>
-                <span className="inline-block">La 1ère plateforme marocaine qui réunit </span>
-                <span className="relative inline-block">
-                  <span className="bg-gradient-to-r from-[#FFE082] via-[#FFB400] to-[#FFF3CD] bg-clip-text text-transparent animate-text-shimmer">
-                    clients, chantiers, fermes et loueurs d&apos;engins
-                  </span>
-                  <motion.span
-                    initial={{ scaleX: 0 }}
-                    animate={{ scaleX: 1 }}
-                    transition={{ duration: 0.7, delay: 0.45, ease: [0.16, 1, 0.3, 1] }}
-                    className="block h-[3px] w-full origin-left rounded-full bg-gradient-to-r from-primary via-amber-300 to-transparent mt-1"
-                  />
-                </span>{' '}
-                <span>et pièces de rechange</span>
+                <span className="block">La 1ère plateforme marocaine qui réunit</span>
+                <span className="block">clients, loueurs d&apos;engins, chauffeurs</span>
+                <span className="block text-primary mt-1">
+                  et fournisseurs de pièces, au même endroit.
+                </span>
               </>
             ) : (
               <>
-                <span>أول منصة مغربية تجمع كل الزبناء مع ملاك </span>
-                <span className="relative inline-block">
-                  <span className="bg-gradient-to-l from-[#FFE082] via-[#FFB400] to-[#FFF3CD] bg-clip-text text-transparent animate-text-shimmer">
-                    الآليات الثقيلة وقطع الغيار
-                  </span>
-                  <motion.span
-                    initial={{ scaleX: 0 }}
-                    animate={{ scaleX: 1 }}
-                    transition={{ duration: 0.75, delay: 0.45, ease: [0.16, 1, 0.3, 1] }}
-                    className="block h-[3px] w-full origin-right rounded-full bg-gradient-to-l from-primary via-amber-300 to-transparent mt-1.5"
-                  />
+                <span className="block">أول منصة مغربية تجمع</span>
+                <span className="block">الزبائن وملاك الآليات والسائقين</span>
+                <span className="block text-primary mt-0.5">
+                  وموردي قطع الغيار، في مكان واحد.
                 </span>
               </>
             )}
           </motion.h1>
 
-          {/* Subheadline in Moroccan Darija with Smooth Motion & Crisp Readability */}
-          <motion.p
+          {/* Bottom Curved Golden Arc under Headline */}
+          <motion.div
+            initial={{ opacity: 0, scaleX: 0.85 }}
+            animate={{ opacity: 1, scaleX: 1 }}
+            transition={{ duration: 0.55, delay: 0.16, ease: [0.16, 1, 0.3, 1] }}
+            className="w-full max-w-2xl flex justify-center mt-3 mb-6"
+          >
+            <svg
+              viewBox="0 0 600 18"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              className="w-64 sm:w-[460px] h-3.5 text-primary"
+              aria-hidden="true"
+            >
+              <path
+                d="M12 14C180 2 420 2 588 14"
+                stroke="currentColor"
+                strokeWidth="3.5"
+                strokeLinecap="round"
+              />
+            </svg>
+          </motion.div>
+
+          {/* 4-Role Golden Framed Showcase Bar (Clients · Owners · Drivers · Spare Parts) */}
+          <motion.div
             initial={{ opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.55, delay: 0.22, ease: [0.16, 1, 0.3, 1] }}
-            className="text-sm sm:text-lg text-slate-200 max-w-3xl leading-[1.85] sm:leading-[1.8] font-normal mb-6 px-1"
+            transition={{ duration: 0.5, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
+            className="w-full max-w-4xl rounded-2xl border-2 border-primary bg-[#0B1120]/85 backdrop-blur-md shadow-[0_0_32px_rgba(255,180,0,0.12)] mb-6 overflow-hidden"
           >
-            {lang === 'fr' ? (
-              'Entreprise, agriculteur, artisan ou particulier avec un terrain ? Trouvez l’engin idéal en 30 secondes par téléphone, sans paperasse, ou rentabilisez votre parc matériel et vos pièces.'
-            ) : (
-              <>
-                سواء كنت مقاولة، فلاحاً، مهنياً أو صاحب بقعة أرضية وبغيتي تكري ولا تشري آلية فالحين، ولا عندك ماتريال وقطع الغيار؟{' '}
-                <motion.span
-                  initial={{ opacity: 0.7 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ duration: 0.5, delay: 0.5 }}
-                  className="text-white font-semibold"
-                >
-                  تسجّل غير بنمرة التليفون فـ 30 ثانية، بلا أوراق معقدة،
-                </motion.span>{' '}
-                ولقى أقرب آلية لموقع عملك{' '}
-                <span className="text-primary font-semibold">في البلاصة!</span>
-              </>
-            )}
-          </motion.p>
+            <div className="grid grid-cols-2 md:grid-cols-4">
+              {/* 1. Clients */}
+              <Link
+                to="/marketplace"
+                className="group flex flex-col items-center justify-center gap-2 py-4 px-3 hover:bg-primary/10 transition-colors border-b border-e md:border-b-0 md:border-e-0 border-primary/35"
+              >
+                <div className="h-11 flex items-center justify-center text-primary group-hover:scale-105 transition-transform">
+                  <svg viewBox="0 0 64 48" className="w-12 h-10 fill-current" aria-hidden="true">
+                    <circle cx="32" cy="14" r="8" />
+                    <path d="M18 39c0-7.2 6.3-13 14-13s14 5.8 14 13v2H18v-2z" />
+                    <circle cx="14" cy="18" r="5.5" />
+                    <path d="M4 39c0-5.2 4.3-9.5 9.8-9.8 1.5 0 3 .4 4.2 1-2.5 2.4-4 5.8-4 9.5v1.3H4V39z" />
+                    <circle cx="50" cy="18" r="5.5" />
+                    <path d="M60 39c0-5.2-4.3-9.5-9.8-9.8-1.5 0-3 .4-4.2 1 2.5 2.4 4 5.8 4 9.5v1.3H60V39z" />
+                  </svg>
+                </div>
+                <span className="font-display text-sm sm:text-base font-black text-white group-hover:text-primary transition-colors">
+                  {lang === 'fr' ? 'Clients' : 'الزبائن'}
+                </span>
+              </Link>
+
+              {/* 2. Machinery Owners */}
+              <Link
+                to="/auth?mode=signup"
+                className="group flex flex-col items-center justify-center gap-2 py-4 px-3 hover:bg-primary/10 transition-colors border-b md:border-b-0 md:border-s border-primary/35"
+              >
+                <div className="h-11 flex items-center justify-center text-primary group-hover:scale-105 transition-transform">
+                  <svg viewBox="0 0 64 48" className="w-14 h-10 fill-current" aria-hidden="true">
+                    <rect x="6" y="34" width="32" height="8" rx="4" />
+                    <circle cx="11" cy="38" r="2.2" fill="#0B1120" />
+                    <circle cx="22" cy="38" r="2.2" fill="#0B1120" />
+                    <circle cx="33" cy="38" r="2.2" fill="#0B1120" />
+                    <path d="M10 32h22v-9c0-1.6-1.3-3-3-3h-8l-3 5H10v7z" />
+                    <rect x="20" y="22" width="8" height="6" rx="1" fill="#0B1120" />
+                    <path d="M31 24L43 9l5 2-9 14 7 6-4 3-11-10z" />
+                    <path d="M47 11l9 13-3 5c-2.5 1-6-.5-7.5-3l3-4-4-7 2.5-4z" />
+                  </svg>
+                </div>
+                <span className="font-display text-sm sm:text-base font-black text-white group-hover:text-primary transition-colors">
+                  {lang === 'fr' ? "Loueurs d'engins" : 'مالكو الآليات'}
+                </span>
+              </Link>
+
+              {/* 3. Drivers / Operators */}
+              <Link
+                to="/auth?mode=signup"
+                className="group flex flex-col items-center justify-center gap-2 py-4 px-3 hover:bg-primary/10 transition-colors border-e md:border-e-0 md:border-s border-primary/35"
+              >
+                <div className="h-11 flex items-center justify-center text-primary group-hover:scale-105 transition-transform">
+                  <svg viewBox="0 0 64 48" className="w-12 h-10 fill-current" aria-hidden="true">
+                    <path d="M21 17c0-6.2 4.9-11 11-11s11 4.8 11 11H21z" />
+                    <rect x="17" y="16" width="30" height="3.5" rx="1.7" />
+                    <rect x="30" y="5" width="4" height="5" rx="1.5" />
+                    <circle cx="32" cy="24" r="5.5" />
+                    <path d="M18 42c0-6.6 6.3-11.5 14-11.5s14 4.9 14 11.5v2H18v-2z" />
+                  </svg>
+                </div>
+                <span className="font-display text-sm sm:text-base font-black text-white group-hover:text-primary transition-colors">
+                  {lang === 'fr' ? 'Chauffeurs' : 'السائقون'}
+                </span>
+              </Link>
+
+              {/* 4. Spare Parts Suppliers */}
+              <Link
+                to="/marketplace?section=spare_parts"
+                className="group flex flex-col items-center justify-center gap-2 py-4 px-3 hover:bg-primary/10 transition-colors md:border-s border-primary/35"
+              >
+                <div className="h-11 flex items-center justify-center text-primary group-hover:scale-105 transition-transform">
+                  <svg viewBox="0 0 64 48" className="w-12 h-10" fill="none" aria-hidden="true">
+                    <path
+                      d="M32 6l3.2 4.2 5-.9 1.2 5 4.9 1.5-1 5 3.8 3.2-3 4.2 1.8 4.7-4.8 1.9-.3 5.1-5-.6-3.1 4-4.2-2.8-4.2 2.8-3.1-4-5 .6-.3-5.1-4.8-1.9 1.8-4.7-3-4.2 3.8-3.2-1-5 4.9-1.5 1.2-5 5 .9L32 6z"
+                      className="fill-current"
+                    />
+                    <circle cx="32" cy="25" r="10" fill="#0B1120" />
+                    <path
+                      d="M27.5 29.5l7.2-7.2c-.5-1.5 0-3.2 1.2-4.3 1.1-1 2.7-1.2 4-.5l-2.3 2.3 1.6 1.6 2.3-2.3c.7 1.3.5 2.9-.5 4-1.1 1.2-2.8 1.7-4.3 1.2l-7.2 7.2c-.8.8-2 .8-2.8 0-.7-.8-.7-2 .8-2.8z"
+                      className="fill-current"
+                    />
+                  </svg>
+                </div>
+                <span className="font-display text-sm sm:text-base font-black text-white group-hover:text-primary transition-colors text-center leading-tight">
+                  {lang === 'fr' ? 'Fournisseurs de pièces' : 'موردو قطع الغيار'}
+                </span>
+              </Link>
+            </div>
+          </motion.div>
+
+          {/* Copy Block + Highlighted Yellow Driver Question Pill */}
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.26, ease: [0.16, 1, 0.3, 1] }}
+            className="max-w-3xl mx-auto space-y-3 mb-5 px-1"
+          >
+            <p className="text-sm sm:text-lg text-slate-100 leading-[1.85] font-bold">
+              {lang === 'fr' ? (
+                <>
+                  Entreprise, professionnel ou particulier avec un terrain pour louer ou acheter un engin, ou vous avez du matériel{' '}
+                  <span className="text-primary font-black">et des pièces de rechange ?</span>
+                </>
+              ) : (
+                <>
+                  سواء كنت مقاولة، مهنياً أو صاحب بقعة أرضية وبغيتي تكري، ولا تشري آلية فالحين، ولا عندك ماتريال{' '}
+                  <span className="text-primary font-black">وقطع الغيار ؟</span>
+                </>
+              )}
+            </p>
+
+            <div>
+              <span className="inline-flex items-center justify-center px-5 sm:px-7 py-2 rounded-full bg-primary text-ink font-black text-sm sm:text-lg shadow-yellow-glow">
+                {lang === 'fr'
+                  ? "Ou vous êtes chauffeur à la recherche d'un chantier ?"
+                  : 'ولا انت شيفور كتقلب على خدمة ؟'}
+              </span>
+            </div>
+
+            <p className="text-sm sm:text-lg text-slate-200 font-bold leading-relaxed">
+              {lang === 'fr'
+                ? 'Inscrivez-vous par téléphone en 30 secondes, sans paperasse, et trouvez la machine la plus proche de votre site !'
+                : (
+                  <>
+                    تسجّل بنمرة التليفون فـ 30 ثانية، بلا أوراق معقدة، ولقى أقرب آلية لموقعك{' '}
+                    <span className="text-primary font-black">في البلاصة!</span>
+                  </>
+                )}
+            </p>
+          </motion.div>
 
           {/* Dual CTA */}
           <motion.div

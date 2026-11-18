@@ -29,7 +29,7 @@ import { useLanguage } from '../../hooks/useLanguage';
 import { useAuth } from '../../hooks/useAuth';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { bookingStore } from '../../lib/bookingStore';
-import { machineStore } from '../../lib/machineStore';
+import { machineStore, resolveMachineRates } from '../../lib/machineStore';
 import { clientService } from '../../lib/clientService';
 import { serverApi } from '../../lib/serverApi';
 
@@ -180,17 +180,15 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
       const hours = (endTs - startTs) / (1000 * 60 * 60);
       const days = Math.max(1, Math.ceil(hours / 24));
 
+      const rates = resolveMachineRates(targetMachine);
       let base = 0;
       if (rateType === 'hourly') {
-        const hourlyRate = Number(targetMachine?.hourly_rate || targetMachine?.rate_hourly) || 350;
-        base = Math.max(1, Math.round(hours)) * hourlyRate;
+        base = Math.max(1, Math.round(hours)) * rates.rateHourly;
       } else if (rateType === 'weekly') {
-        const weeklyRate = Number(targetMachine?.weekly_rate || targetMachine?.rate_weekly) || 12000;
         const weeks = Math.max(1, Math.ceil(days / 7));
-        base = weeks * weeklyRate;
+        base = weeks * rates.rateWeekly;
       } else {
-        const dailyRate = Number(targetMachine?.daily_rate || targetMachine?.rate_daily) || 2000;
-        base = days * dailyRate;
+        base = days * rates.rateDaily;
       }
 
       const total = base + (deliveryAvailable ? Number(deliveryFee) || 0 : 0);

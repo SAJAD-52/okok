@@ -52,7 +52,7 @@ import { CreateBookingModal } from '../components/bookings/CreateBookingModal';
 import { AddExpenseModal } from '../components/analytics/AddExpenseModal';
 import { Machine, Booking, Lead, MachineExpense } from '../types/database';
 import { bookingStore } from '../lib/bookingStore';
-import { machineStore } from '../lib/machineStore';
+import { machineStore, resolveMachineRates } from '../lib/machineStore';
 import { expenseStore } from '../lib/expenseStore';
 import { paymentService } from '../lib/paymentService';
 import { leadService } from '../lib/leadService';
@@ -153,10 +153,18 @@ export const DashboardOverviewPage: React.FC = () => {
               lng: m.lng != null ? Number(m.lng) : undefined,
               location_lat: Number(m.location_lat ?? m.lat ?? 0),
               location_lng: Number(m.location_lng ?? m.lng ?? 0),
-              daily_rate: Number(m.daily_rate ?? m.rate_daily) || 2000,
-              rate_daily: Number(m.rate_daily ?? m.daily_rate) || 2000,
-              rate_hourly: Number(m.rate_hourly ?? m.hourly_rate) || 0,
-              rate_weekly: Number(m.rate_weekly ?? m.weekly_rate) || 0,
+              ...(() => {
+                const rates = resolveMachineRates(m);
+                return {
+                  daily_rate: rates.rateDaily,
+                  rate_daily: rates.rateDaily,
+                  hourly_rate: rates.rateHourly,
+                  rate_hourly: rates.rateHourly,
+                  weekly_rate: rates.rateWeekly,
+                  rate_weekly: rates.rateWeekly,
+                  sale_price: rates.salePrice,
+                };
+              })(),
               with_operator: Boolean(m.with_operator ?? true),
               fuel_included: Boolean(m.fuel_included),
               delivery_available: Boolean(m.delivery_available),
@@ -1126,7 +1134,7 @@ export const DashboardOverviewPage: React.FC = () => {
                 {idleMachines.map((m) => {
                   const storefrontSlug = localStorage.getItem('jadijcb_owner_storefront_slug') || 'store';
                   const publicMachineUrl = `https://jadijcb.ma/s/${storefrontSlug}`;
-                  const rateStr = (m.daily_rate || 2000).toLocaleString('fr-FR');
+                  const rateStr = resolveMachineRates(m).rateDaily.toLocaleString('fr-FR');
 
                   const waText =
                     lang === 'fr'

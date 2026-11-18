@@ -60,7 +60,7 @@ import { getDriverExperienceOption } from '../data/driverMachines';
 import { chatStore } from '../lib/chatStore';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { mapDatabaseError } from '../lib/errorHelpers';
-import { machineStore } from '../lib/machineStore';
+import { machineStore, resolveMachineRates } from '../lib/machineStore';
 
 export const MachinesPage: React.FC = () => {
   const { t, lang } = useLanguage();
@@ -137,13 +137,18 @@ export const MachinesPage: React.FC = () => {
             lng: m.lng,
             location_lat: m.lat,
             location_lng: m.lng,
-            rate_hourly: Number(m.hourly_rate) || 0,
-            rate_daily: Number(m.daily_rate) || 0,
-            rate_weekly: Number(m.weekly_rate) || 0,
-            hourly_rate: Number(m.hourly_rate) || 0,
-            daily_rate: Number(m.daily_rate) || 0,
-            weekly_rate: Number(m.weekly_rate) || 0,
-            sale_price: Number(m.sale_price) || 0,
+            ...(() => {
+              const rates = resolveMachineRates(m);
+              return {
+                rate_hourly: rates.rateHourly,
+                rate_daily: rates.rateDaily,
+                rate_weekly: rates.rateWeekly,
+                hourly_rate: rates.rateHourly,
+                daily_rate: rates.rateDaily,
+                weekly_rate: rates.rateWeekly,
+                sale_price: rates.salePrice,
+              };
+            })(),
             currency: 'MAD',
             with_operator: Boolean(m.with_operator),
             fuel_included: Boolean(m.fuel_included),

@@ -26,7 +26,7 @@ import { Button } from '../components/ui/Button';
 import { CreateBookingModal } from '../components/bookings/CreateBookingModal';
 import { useLanguage } from '../hooks/useLanguage';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { machineStore } from '../lib/machineStore';
+import { machineStore, resolveMachineRates } from '../lib/machineStore';
 import { MOROCCAN_CITIES, getCityById } from '../data/cities';
 import { calculateDistanceKm } from '../lib/geoUtils';
 import { Machine } from '../types/database';
@@ -116,10 +116,18 @@ export const MarketplacePage: React.FC = () => {
       lng: m.lng ?? matchedCity?.lng,
       location_lat: m.lat ?? matchedCity?.lat,
       location_lng: m.lng ?? matchedCity?.lng,
-      rate_hourly: Number(m.hourly_rate) || 0,
-      rate_daily: Number(m.daily_rate) || 0,
-      rate_weekly: Number(m.weekly_rate) || 0,
-      sale_price: Number(m.sale_price) || 0,
+      ...(() => {
+        const rates = resolveMachineRates(m);
+        return {
+          rate_hourly: rates.rateHourly,
+          rate_daily: rates.rateDaily,
+          rate_weekly: rates.rateWeekly,
+          hourly_rate: rates.rateHourly,
+          daily_rate: rates.rateDaily,
+          weekly_rate: rates.rateWeekly,
+          sale_price: rates.salePrice,
+        };
+      })(),
       currency: 'MAD',
       with_operator: Boolean(m.with_operator),
       fuel_included: Boolean(m.fuel_included),
@@ -388,7 +396,8 @@ export const MarketplacePage: React.FC = () => {
 
       // 8. Max price
       if (maxPriceParam) {
-        const itemPrice = item.listing_mode === 'sale' || isItemSparePart ? item.sale_price || 0 : item.rate_daily || 0;
+        const rates = resolveMachineRates(item);
+        const itemPrice = item.listing_mode === 'sale' || isItemSparePart ? rates.salePrice : rates.rateDaily;
         if (itemPrice > maxPriceParam) return false;
       }
 
@@ -406,9 +415,8 @@ export const MarketplacePage: React.FC = () => {
     }).sort((a, b) => {
       const priceOf = (item: Machine) => {
         const isPart = item.category === 'spare-parts' || item.category_id === 'spare-parts';
-        return item.listing_mode === 'sale' || isPart
-          ? Number(item.sale_price) || 0
-          : Number(item.rate_daily) || 0;
+        const rates = resolveMachineRates(item);
+        return item.listing_mode === 'sale' || isPart ? rates.salePrice : rates.rateDaily;
       };
 
       if (sortParam === 'price_asc') {

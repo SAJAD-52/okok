@@ -54,7 +54,7 @@ import { bookingStore } from '../lib/bookingStore';
 import { paymentService } from '../lib/paymentService';
 import { documentService } from '../lib/documentService';
 import { businessService } from '../lib/businessService';
-import { machineStore } from '../lib/machineStore';
+import { machineStore, resolveMachineRates } from '../lib/machineStore';
 import { serverApi } from '../lib/serverApi';
 import { mapDatabaseError } from '../lib/errorHelpers';
 import {
@@ -147,8 +147,17 @@ export const BookingsPage: React.FC = () => {
             category: m.category,
             brand: m.brand,
             model: m.model,
-            daily_rate: Number(m.daily_rate) || 2000,
-            hourly_rate: Number(m.hourly_rate) || 350,
+            ...(() => {
+              const rates = resolveMachineRates(m);
+              return {
+                daily_rate: rates.rateDaily,
+                rate_daily: rates.rateDaily,
+                hourly_rate: rates.rateHourly,
+                rate_hourly: rates.rateHourly,
+                weekly_rate: rates.rateWeekly,
+                rate_weekly: rates.rateWeekly,
+              };
+            })(),
             status: m.is_published ? 'available' : 'inactive',
             images: m.images || [],
           } as Machine));

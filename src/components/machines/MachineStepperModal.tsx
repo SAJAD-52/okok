@@ -33,7 +33,7 @@ import { MapLocationPicker } from './MapLocationPicker';
 import { compressImage } from '../../lib/imageCompressor';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { mapDatabaseError } from '../../lib/errorHelpers';
-import { machineStore } from '../../lib/machineStore';
+import { machineStore, resolveMachineRates } from '../../lib/machineStore';
 
 interface MachineStepperModalProps {
   isOpen: boolean;
@@ -76,10 +76,11 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
   const [condition, setCondition] = useState<MachineCondition>(
     machineToEdit?.condition || 'good'
   );
-  const [hourlyRate, setHourlyRate] = useState<number>(machineToEdit?.rate_hourly || 350);
-  const [dailyRate, setDailyRate] = useState<number>(machineToEdit?.rate_daily || 2200);
-  const [weeklyRate, setWeeklyRate] = useState<number>(machineToEdit?.rate_weekly || 12000);
-  const [salePrice, setSalePrice] = useState<number>(machineToEdit?.sale_price || 480000);
+  const initialRates = machineToEdit ? resolveMachineRates(machineToEdit) : null;
+  const [hourlyRate, setHourlyRate] = useState<number>(initialRates ? initialRates.rateHourly : 350);
+  const [dailyRate, setDailyRate] = useState<number>(initialRates ? initialRates.rateDaily : 2200);
+  const [weeklyRate, setWeeklyRate] = useState<number>(initialRates ? initialRates.rateWeekly : 12000);
+  const [salePrice, setSalePrice] = useState<number>(initialRates ? initialRates.salePrice : 480000);
   const [withOperator, setWithOperator] = useState<boolean>(
     machineToEdit?.with_operator ?? true
   );
@@ -152,10 +153,11 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
     setYear(machineToEdit?.year || 2022);
     setListingMode(machineToEdit?.listing_mode || 'rent');
     setCondition(machineToEdit?.condition || 'good');
-    setHourlyRate(machineToEdit?.rate_hourly || 350);
-    setDailyRate(machineToEdit?.rate_daily || 2200);
-    setWeeklyRate(machineToEdit?.rate_weekly || 12000);
-    setSalePrice(machineToEdit?.sale_price || 480000);
+    const editRates = machineToEdit ? resolveMachineRates(machineToEdit) : null;
+    setHourlyRate(editRates ? editRates.rateHourly : 350);
+    setDailyRate(editRates ? editRates.rateDaily : 2200);
+    setWeeklyRate(editRates ? editRates.rateWeekly : 12000);
+    setSalePrice(editRates ? editRates.salePrice : 480000);
     setWithOperator(machineToEdit?.with_operator ?? true);
     setFuelIncluded(machineToEdit?.fuel_included ?? false);
     setDeliveryAvailable(machineToEdit?.delivery_available ?? true);
@@ -311,6 +313,11 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
       }
     }
 
+    const cleanHourlyRate = isSparePart ? 0 : Math.max(0, Number(hourlyRate) || 0);
+    const cleanDailyRate = isSparePart ? 0 : Math.max(0, Number(dailyRate) || 0);
+    const cleanWeeklyRate = isSparePart ? 0 : Math.max(0, Number(weeklyRate) || 0);
+    const cleanSalePrice = Math.max(0, Number(salePrice) || 0);
+
     const cityName = MOROCCAN_CITIES.find((c) => c.id === cityId)?.name_ar || cityId;
     const catSlug = isSparePart ? 'spare-parts' : categoryId;
 
@@ -334,13 +341,13 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
       lng,
       location_lat: lat,
       location_lng: lng,
-      rate_hourly: isSparePart ? 0 : hourlyRate,
-      rate_daily: isSparePart ? 0 : dailyRate,
-      rate_weekly: isSparePart ? 0 : weeklyRate,
-      hourly_rate: isSparePart ? 0 : hourlyRate,
-      daily_rate: isSparePart ? 0 : dailyRate,
-      weekly_rate: isSparePart ? 0 : weeklyRate,
-      sale_price: salePrice,
+      rate_hourly: cleanHourlyRate,
+      rate_daily: cleanDailyRate,
+      rate_weekly: cleanWeeklyRate,
+      hourly_rate: cleanHourlyRate,
+      daily_rate: cleanDailyRate,
+      weekly_rate: cleanWeeklyRate,
+      sale_price: cleanSalePrice,
       currency: 'MAD',
       with_operator: isSparePart ? false : withOperator,
       fuel_included: isSparePart ? false : fuelIncluded,
@@ -391,10 +398,13 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
           city: machineData.city,
           lat: machineData.lat,
           lng: machineData.lng,
-          rate_hourly: machineData.rate_hourly,
-          rate_daily: machineData.rate_daily,
-          rate_weekly: machineData.rate_weekly,
-          sale_price: machineData.sale_price,
+          hourly_rate: cleanHourlyRate,
+          daily_rate: cleanDailyRate,
+          weekly_rate: cleanWeeklyRate,
+          rate_hourly: cleanHourlyRate,
+          rate_daily: cleanDailyRate,
+          rate_weekly: cleanWeeklyRate,
+          sale_price: cleanSalePrice,
           with_operator: machineData.with_operator,
           fuel_included: machineData.fuel_included,
           delivery_available: machineData.delivery_available,
@@ -406,8 +416,8 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
         let savedData: any = null;
         let lastError: any = null;
 
-        // Perform adaptive insert/update (up to 4 adaptive attempts for schema cache mismatches)
-        for (let attempt = 0; attempt < 4; attempt++) {
+        // Perform adaptive insert/update (up to 12 adaptive attempts for schema cache mismatches)
+        for (let attempt = 0; attempt < 12; attempt++) {
           const req = machineToEdit?.id
             ? supabase.from('machines').update(payload).eq('id', machineToEdit.id).select().maybeSingle()
             : supabase.from('machines').insert(payload).select().maybeSingle();
@@ -423,20 +433,11 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
           lastError = error;
           const msg = error.message || '';
 
-          // 1. Column missing in PostgREST schema cache: e.g. "Could not find the 'daily_rate' column"
+          // 1. Column missing in PostgREST schema cache: e.g. "Could not find the 'rate_daily' column"
           const missingColMatch = msg.match(/Could not find the '([^']+)' column/i);
           if (missingColMatch && missingColMatch[1]) {
             const col = missingColMatch[1];
             delete payload[col];
-            if (col === 'daily_rate') {
-              delete payload.hourly_rate;
-              delete payload.weekly_rate;
-            }
-            if (col === 'rate_daily') {
-              payload.daily_rate = machineData.rate_daily;
-              payload.hourly_rate = machineData.rate_hourly;
-              payload.weekly_rate = machineData.rate_weekly;
-            }
             continue;
           }
 
@@ -948,23 +949,29 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <Input
                           type="number"
+                          min={0}
                           label={t('machines.hourly_rate_label')}
-                          value={hourlyRate}
-                          onChange={(e) => setHourlyRate(Number(e.target.value))}
+                          value={hourlyRate > 0 ? hourlyRate : ''}
+                          placeholder="0"
+                          onChange={(e) => setHourlyRate(e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
                           required
                         />
                         <Input
                           type="number"
+                          min={0}
                           label={t('machines.daily_rate_label')}
-                          value={dailyRate}
-                          onChange={(e) => setDailyRate(Number(e.target.value))}
+                          value={dailyRate > 0 ? dailyRate : ''}
+                          placeholder="0"
+                          onChange={(e) => setDailyRate(e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
                           required
                         />
                         <Input
                           type="number"
+                          min={0}
                           label={t('machines.weekly_rate_label')}
-                          value={weeklyRate}
-                          onChange={(e) => setWeeklyRate(Number(e.target.value))}
+                          value={weeklyRate > 0 ? weeklyRate : ''}
+                          placeholder="0"
+                          onChange={(e) => setWeeklyRate(e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
                           required
                         />
                       </div>
@@ -1015,9 +1022,11 @@ export const MachineStepperModal: React.FC<MachineStepperModalProps> = ({
                     <div className="space-y-4 pt-2">
                       <Input
                         type="number"
+                        min={0}
                         label={t('machines.sale_price_label')}
-                        value={salePrice}
-                        onChange={(e) => setSalePrice(Number(e.target.value))}
+                        value={salePrice > 0 ? salePrice : ''}
+                        placeholder="0"
+                        onChange={(e) => setSalePrice(e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
                         required
                       />
 

@@ -50,7 +50,7 @@ import { formatPriceMAD } from '../data/rentalTerms';
 import { MachineCard } from '../components/marketplace/MachineCard';
 import { CreateBookingModal } from '../components/bookings/CreateBookingModal';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { machineStore } from '../lib/machineStore';
+import { machineStore, resolveMachineRates, normalizeMachineRates } from '../lib/machineStore';
 import { loadStorefrontByOwner } from '../lib/storefrontService';
 import { serverApi } from '../lib/serverApi';
 import { bookingStore } from '../lib/bookingStore';
@@ -136,11 +136,12 @@ export const MachineDetailPage: React.FC = () => {
         // Fallback to locally saved/cached machines
         const localCached = machineStore.getCachedMachines().find((m) => m.id === id);
         if (localCached) {
-          setMachine(localCached);
+          setMachine(normalizeMachineRates(localCached));
           const others = machineStore
             .getCachedMachines()
             .filter((m) => m.id !== id && m.category === localCached.category)
-            .slice(0, 3);
+            .slice(0, 3)
+            .map((m) => normalizeMachineRates(m));
           setSimilarMachines(others);
           setIsLoading(false);
           return;
@@ -170,10 +171,18 @@ export const MachineDetailPage: React.FC = () => {
         lng: data.lng,
         location_lat: data.lat,
         location_lng: data.lng,
-        rate_hourly: Number(data.hourly_rate) || 0,
-        rate_daily: Number(data.daily_rate) || 0,
-        rate_weekly: Number(data.weekly_rate) || 0,
-        sale_price: Number(data.sale_price) || 0,
+        ...(() => {
+          const rates = resolveMachineRates(data);
+          return {
+            rate_hourly: rates.rateHourly,
+            rate_daily: rates.rateDaily,
+            rate_weekly: rates.rateWeekly,
+            hourly_rate: rates.rateHourly,
+            daily_rate: rates.rateDaily,
+            weekly_rate: rates.rateWeekly,
+            sale_price: rates.salePrice,
+          };
+        })(),
         currency: 'MAD',
         with_operator: Boolean(data.with_operator),
         fuel_included: Boolean(data.fuel_included),
@@ -231,10 +240,18 @@ export const MachineDetailPage: React.FC = () => {
               lng: m.lng,
               location_lat: m.lat,
               location_lng: m.lng,
-              rate_hourly: Number(m.hourly_rate) || 0,
-              rate_daily: Number(m.daily_rate) || 0,
-              rate_weekly: Number(m.weekly_rate) || 0,
-              sale_price: Number(m.sale_price) || 0,
+              ...(() => {
+                const rates = resolveMachineRates(m);
+                return {
+                  rate_hourly: rates.rateHourly,
+                  rate_daily: rates.rateDaily,
+                  rate_weekly: rates.rateWeekly,
+                  hourly_rate: rates.rateHourly,
+                  daily_rate: rates.rateDaily,
+                  weekly_rate: rates.rateWeekly,
+                  sale_price: rates.salePrice,
+                };
+              })(),
               currency: 'MAD',
               with_operator: Boolean(m.with_operator),
               fuel_included: Boolean(m.fuel_included),
@@ -300,10 +317,18 @@ export const MachineDetailPage: React.FC = () => {
                 lng: m.lng,
                 location_lat: m.lat,
                 location_lng: m.lng,
-                rate_hourly: Number(m.hourly_rate) || 0,
-                rate_daily: Number(m.daily_rate) || 0,
-                rate_weekly: Number(m.weekly_rate) || 0,
-                sale_price: Number(m.sale_price) || 0,
+                ...(() => {
+                  const rates = resolveMachineRates(m);
+                  return {
+                    rate_hourly: rates.rateHourly,
+                    rate_daily: rates.rateDaily,
+                    rate_weekly: rates.rateWeekly,
+                    hourly_rate: rates.rateHourly,
+                    daily_rate: rates.rateDaily,
+                    weekly_rate: rates.rateWeekly,
+                    sale_price: rates.salePrice,
+                  };
+                })(),
                 currency: 'MAD',
                 with_operator: Boolean(m.with_operator),
                 fuel_included: Boolean(m.fuel_included),
@@ -446,7 +471,8 @@ export const MachineDetailPage: React.FC = () => {
       document.head.appendChild(scriptTag);
     }
 
-    const priceValue = isRent ? machine.rate_daily : machine.sale_price;
+    const resolvedRates = resolveMachineRates(machine);
+    const priceValue = isRent ? resolvedRates.rateDaily : resolvedRates.salePrice;
 
     const jsonLdData = {
       '@context': 'https://schema.org/',
@@ -559,10 +585,11 @@ export const MachineDetailPage: React.FC = () => {
     : `https://wa.me/?text=${encodeURIComponent(whatsappMessage)}`;
 
   const calculateEstimate = () => {
-    if (!isRent) return machine.sale_price || 0;
-    if (selectedTerm === 'hourly') return (machine.rate_hourly || 350) * selectedDuration;
-    if (selectedTerm === 'weekly') return (machine.rate_weekly || 12000) * selectedDuration;
-    return (machine.rate_daily || 2800) * selectedDuration;
+    const rates = resolveMachineRates(machine);
+    if (!isRent) return rates.salePrice;
+    if (selectedTerm === 'hourly') return rates.rateHourly * selectedDuration;
+    if (selectedTerm === 'weekly') return rates.rateWeekly * selectedDuration;
+    return rates.rateDaily * selectedDuration;
   };
 
   const isBooked = Boolean(
@@ -978,7 +1005,7 @@ export const MachineDetailPage: React.FC = () => {
                 </span>
                 <div className="flex items-baseline gap-2 mt-1">
                   <span className="text-2xl sm:text-3xl font-black text-ink font-mono latin-nums">
-                    {formatPriceMAD(isRent ? machine.rate_daily : machine.sale_price || 0)}
+                    {formatPriceMAD(isRent ? resolveMachineRates(machine).rateDaily : resolveMachineRates(machine).salePrice)}
                   </span>
                   {isRent && (
                     <span className="text-xs font-bold text-steel-500">

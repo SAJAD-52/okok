@@ -34,7 +34,7 @@ import { calculateDistanceKm, estimateDeliveryMinutes, formatDistanceKm, formatE
 import { useLanguage } from '../hooks/useLanguage';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabase';
-import { machineStore } from '../lib/machineStore';
+import { machineStore, resolveMachineRates } from '../lib/machineStore';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Card } from '../components/ui/Card';
@@ -170,11 +170,18 @@ export const SiteRadarMapPage: React.FC = () => {
           lng: m.lng || -7.5898,
           location_lat: m.lat || 33.5731,
           location_lng: m.lng || -7.5898,
-          rate_hourly: Number(m.hourly_rate || m.rate_hourly) || 350,
-          rate_daily: Number(m.daily_rate || m.rate_daily) || 2200,
-          daily_rate: Number(m.daily_rate || m.rate_daily) || 2200,
-          rate_weekly: Number(m.weekly_rate || m.rate_weekly) || 12000,
-          sale_price: Number(m.sale_price) || 0,
+          ...(() => {
+            const rates = resolveMachineRates(m);
+            return {
+              rate_hourly: rates.rateHourly,
+              rate_daily: rates.rateDaily,
+              rate_weekly: rates.rateWeekly,
+              hourly_rate: rates.rateHourly,
+              daily_rate: rates.rateDaily,
+              weekly_rate: rates.rateWeekly,
+              sale_price: rates.salePrice,
+            };
+          })(),
           currency: 'MAD',
           with_operator: Boolean(m.with_operator),
           fuel_included: Boolean(m.fuel_included),

@@ -54,6 +54,7 @@ import { useAuth, SUPER_ADMIN_EMAIL } from '../hooks/useAuth';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { adminService, AdminAccountDetail, PlatformOverviewMetrics } from '../lib/adminService';
 import { bookingStore } from '../lib/bookingStore';
+import { resolveMachineRates } from '../lib/machineStore';
 import { platformSettingsStore, PlatformSettings } from '../lib/platformSettings';
 import { adminResetUserPassword, adminIssueWhatsAppOtp } from '../lib/whatsappOtpService';
 import { PaymentRecord, PaymentStatus, Machine, Booking, UserRole } from '../types/database';
@@ -152,10 +153,18 @@ export const AdminPage: React.FC = () => {
             model: m.model,
             year: m.year,
             city: m.city,
-            daily_rate: Number(m.daily_rate) || 2200,
-            rate_daily: Number(m.daily_rate) || 2200,
-            hourly_rate: Number(m.hourly_rate) || 350,
-            sale_price: Number(m.sale_price) || 0,
+            ...(() => {
+              const rates = resolveMachineRates(m);
+              return {
+                daily_rate: rates.rateDaily,
+                rate_daily: rates.rateDaily,
+                hourly_rate: rates.rateHourly,
+                rate_hourly: rates.rateHourly,
+                weekly_rate: rates.rateWeekly,
+                rate_weekly: rates.rateWeekly,
+                sale_price: rates.salePrice,
+              };
+            })(),
             currency: 'MAD',
             with_operator: Boolean(m.with_operator),
             status: m.is_published ? 'available' : 'inactive',

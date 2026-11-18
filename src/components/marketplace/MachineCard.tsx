@@ -90,15 +90,18 @@ export const MachineCard: React.FC<MachineCardProps> = ({ machine, onBookClick }
     : rawOwnerPhone;
   const hasOwnerWhatsapp = ownerPhone.length >= 9;
 
+  const displayDailyRate = Number(machine.rate_daily) || Number(machine.daily_rate) || 0;
+  const displaySalePrice = Number(machine.sale_price) || 0;
+
   const machineTitle = (lang === 'fr' ? machine.title_fr : machine.title_ar) || `${machine.brand} ${machine.model}`;
   const whatsappMsg = encodeURIComponent(
     lang === 'fr'
       ? (isSparePart
-          ? `Bonjour, je souhaite acheter la pièce détachée "${machineTitle}" (${machine.city || 'Maroc'}) proposée à ${machine.sale_price?.toLocaleString('fr-FR')} MAD sur JADIJCB.\nLien: ${typeof window !== 'undefined' ? window.location.origin : ''}/marketplace/${machine.id}`
-          : `Bonjour, je souhaite réserver l'engin "${machineTitle}" (${machine.city || 'Maroc'}) proposé à ${machine.rate_daily?.toLocaleString('fr-FR')} MAD/jour sur JADIJCB.\nLien: ${typeof window !== 'undefined' ? window.location.origin : ''}/marketplace/${machine.id}`)
+          ? `Bonjour, je souhaite acheter la pièce détachée "${machineTitle}" (${machine.city || 'Maroc'}) proposée à ${displaySalePrice.toLocaleString('fr-FR')} MAD sur JADIJCB.\nLien: ${typeof window !== 'undefined' ? window.location.origin : ''}/marketplace/${machine.id}`
+          : `Bonjour, je souhaite réserver l'engin "${machineTitle}" (${machine.city || 'Maroc'}) proposé à ${displayDailyRate.toLocaleString('fr-FR')} MAD/jour sur JADIJCB.\nLien: ${typeof window !== 'undefined' ? window.location.origin : ''}/marketplace/${machine.id}`)
       : (isSparePart
-          ? `السلام عليكم، أرغب في شراء قطعة الغيار "${machineTitle}" (${machine.city || 'المغرب'}) المعروضة بسعر ${machine.sale_price?.toLocaleString('fr-FR')} د.م على منصة JADIJCB.\nالرابط: ${typeof window !== 'undefined' ? window.location.origin : ''}/marketplace/${machine.id}`
-          : `السلام عليكم، أرغب في حجز الآلية "${machineTitle}" (${machine.city || 'المغرب'}) المعروضة بسعر ${machine.rate_daily?.toLocaleString('fr-FR')} د.م/يوم على منصة JADIJCB.\nالرابط: ${typeof window !== 'undefined' ? window.location.origin : ''}/marketplace/${machine.id}`)
+          ? `السلام عليكم، أرغب في شراء قطعة الغيار "${machineTitle}" (${machine.city || 'المغرب'}) المعروضة بسعر ${displaySalePrice.toLocaleString('fr-FR')} د.م على منصة JADIJCB.\nالرابط: ${typeof window !== 'undefined' ? window.location.origin : ''}/marketplace/${machine.id}`
+          : `السلام عليكم، أرغب في حجز الآلية "${machineTitle}" (${machine.city || 'المغرب'}) المعروضة بسعر ${displayDailyRate.toLocaleString('fr-FR')} د.م/يوم على منصة JADIJCB.\nالرابط: ${typeof window !== 'undefined' ? window.location.origin : ''}/marketplace/${machine.id}`)
   );
   const whatsappLink = hasOwnerWhatsapp ? `https://wa.me/${ownerPhone}?text=${whatsappMsg}` : '';
 
@@ -270,14 +273,14 @@ export const MachineCard: React.FC<MachineCardProps> = ({ machine, onBookClick }
           <div className="font-mono font-black text-base text-ink leading-tight">
             {isRent ? (
               <span>
-                {machine.rate_daily?.toLocaleString('fr-FR')}{' '}
+                {displayDailyRate.toLocaleString('fr-FR')}{' '}
                 <span className="text-xs font-bold text-steel-500">
                   {t('common.mad')} / {lang === 'fr' ? 'j' : 'يوم'}
                 </span>
               </span>
             ) : (
               <span>
-                {machine.sale_price?.toLocaleString('fr-FR')}{' '}
+                {displaySalePrice.toLocaleString('fr-FR')}{' '}
                 <span className="text-xs font-bold text-steel-500">
                   {t('common.mad')}
                 </span>

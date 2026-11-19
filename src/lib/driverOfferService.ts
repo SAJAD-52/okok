@@ -14,7 +14,7 @@ import {
 } from '../types/database';
 import { supabase, isSupabaseConfigured } from './supabase';
 import { serverApi } from './serverApi';
-import { sendWebPushToUsers } from './pushService';
+import { sendWebPushToUsers, syncServiceWorkerPushContext } from './pushService';
 import { getDriverMachineOption } from '../data/driverMachines';
 import { chatStore } from './chatStore';
 import { machineStore } from './machineStore';
@@ -24,6 +24,8 @@ const LOCAL_APPLIED_MAP_KEY = 'jadijcb_driver_applied_offers_v1';
 const LOCAL_DRIVER_DEALS_KEY = 'jadijcb_driver_deals_cache_v1';
 const LOCAL_DRIVER_CONTRACTS_KEY = 'jadijcb_driver_contracts_cache_v1';
 const LOCAL_WORK_TERMINATIONS_KEY = 'jadijcb_driver_work_end_v1';
+const LOCAL_DRIVER_BUSY_LOCK_PREFIX = 'jadijcb_driver_busy_contract_';
+const LOCAL_DRIVER_MANUAL_BUSY_PREFIX = 'jadijcb_driver_manual_busy_';
 const DRIVER_DISPATCH_CHANNEL = 'jadijcb_driver_dispatch';
 
 export const DRIVER_OFFER_MARKER = '\n#DRIVER_OFFER:';
@@ -209,6 +211,40 @@ export async function findMatchingDriversForOffer(
             driver_experience_years: row.driver_experience_years || undefined,
             driver_machines: machines,
           });
+        }
+      }
+
+      // Cross-check active accepted contracts so drivers bound to an active contract are never notified
+      if (results.length > 0) {
+        try {
+          const candidateIds = results.map((d) => d.id);
+          const { data: activeDeals } = await supabase
+            .from('driver_job_offers')
+            .select('id, won_driver_id, duration_label, agreed_at, created_at, contract_data')
+            .eq('status', 'accepted')
+            .in('won_driver_id', candidateIds);
+
+          if (Array.isArray(activeDeals) && activeDeals.length > 0) {
+            const busyDriverIds = new Set<string>();
+            const nowMs = Date.now();
+            for (const d of activeDeals as any[]) {
+              if (!d?.won_driver_id) continue;
+              const term = d?.contract_data?.termination;
+              if (term?.work_status === 'ended') continue;
+              const expiresAt = getContractExpiresAtMs({
+                agreed_at: d.agreed_at || d.created_at,
+                duration_label: d.duration_label || '',
+                contract: d.contract_data || null,
+              });
+              if (expiresAt !== null && nowMs >= expiresAt) continue;
+              busyDriverIds.add(d.won_driver_id);
+            }
+            if (busyDriverIds.size > 0) {
+              return results.filter((d) => !busyDriverIds.has(d.id));
+            }
+          }
+        } catch {
+          // ignore if contract_data column is unavailable
         }
       }
     } catch {
@@ -1321,6 +1357,214 @@ export function buildFallbackDriverContractFromDeal(
   };
 }
 
+export function markDriverContractBusyLock(driverId: string, offerId?: string): void {
+  if (!driverId || typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(
+      `${LOCAL_DRIVER_BUSY_LOCK_PREFIX}${driverId}`,
+      JSON.stringify({ offerId: offerId || '', lockedAt: new Date().toISOString() })
+    );
+    localStorage.removeItem(`${LOCAL_DRIVER_MANUAL_BUSY_PREFIX}${driverId}`);
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function clearDriverContractBusyLock(driverId: string): void {
+  if (!driverId || typeof localStorage === 'undefined') return;
+  try {
+    localStorage.removeItem(`${LOCAL_DRIVER_BUSY_LOCK_PREFIX}${driverId}`);
+  } catch {
+    // ignore
+  }
+}
+
+export function hasDriverContractBusyLock(driverId: string): boolean {
+  if (!driverId || typeof localStorage === 'undefined') return false;
+  try {
+    return Boolean(localStorage.getItem(`${LOCAL_DRIVER_BUSY_LOCK_PREFIX}${driverId}`));
+  } catch {
+    return false;
+  }
+}
+
+export function setDriverManualBusyFlag(driverId: string, manualBusy: boolean): void {
+  if (!driverId || typeof localStorage === 'undefined') return;
+  try {
+    if (manualBusy) {
+      localStorage.setItem(`${LOCAL_DRIVER_MANUAL_BUSY_PREFIX}${driverId}`, '1');
+    } else {
+      localStorage.removeItem(`${LOCAL_DRIVER_MANUAL_BUSY_PREFIX}${driverId}`);
+    }
+  } catch {
+    // ignore
+  }
+}
+
+export function notifyDriverAvailabilityChanged(
+  driverId: string,
+  available: boolean,
+  driverMachines?: string[]
+): void {
+  if (!driverId) return;
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('jadijcb_driver_availability_changed', {
+        detail: { driverId, available },
+      })
+    );
+  }
+  syncServiceWorkerPushContext(driverId, 'driver', driverMachines, available).catch(() => {});
+}
+
+export function parseContractDurationMs(durationLabel?: string): number | null {
+  if (!durationLabel) return null;
+  const normalized = durationLabel
+    .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+    .trim()
+    .toLowerCase();
+
+  if (
+    !normalized ||
+    normalized.includes('مستمر') ||
+    normalized.includes('دائم') ||
+    normalized.includes('حسب الاتفاق') ||
+    normalized.includes('مفتوح') ||
+    normalized.includes('longue durée') ||
+    normalized.includes('à convenir') ||
+    normalized.includes('indéterminé')
+  ) {
+    return null;
+  }
+
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const numMatch = normalized.match(/(\d+(?:[.,]\d+)?)/);
+  if (numMatch) {
+    const val = Number(numMatch[1].replace(',', '.'));
+    if (!Number.isFinite(val) || val <= 0) return null;
+    if (/(سنة|سنوات|عام|أعوام|an|ans|année|années)/.test(normalized)) {
+      return val * 365 * DAY_MS;
+    }
+    if (/(شهر|أشهر|شهور|mois)/.test(normalized)) {
+      return val * 30 * DAY_MS;
+    }
+    if (/(أسبوع|أسابيع|اسبوع|اسابيع|semaine|semaines)/.test(normalized)) {
+      return val * 7 * DAY_MS;
+    }
+    if (/(يوم|أيام|ايام|jour|jours)/.test(normalized)) {
+      return val * DAY_MS;
+    }
+    if (/(ساعة|ساعات|heure|heures)/.test(normalized)) {
+      return val * 60 * 60 * 1000;
+    }
+  }
+
+  if (normalized.includes('أسبوعين') || normalized.includes('أسبوعان')) return 14 * DAY_MS;
+  if (normalized.includes('أسبوع') || normalized.includes('اسبوع')) return 7 * DAY_MS;
+  if (normalized.includes('شهرين') || normalized.includes('شهران')) return 60 * DAY_MS;
+  if (normalized.includes('شهر')) return 30 * DAY_MS;
+  if (normalized.includes('يومين') || normalized.includes('يومان')) return 2 * DAY_MS;
+  if (normalized.includes('يوم')) return DAY_MS;
+  if (normalized.includes('سنتين') || normalized.includes('عامين')) return 730 * DAY_MS;
+  if (normalized.includes('سنة') || normalized.includes('عام')) return 365 * DAY_MS;
+
+  return null;
+}
+
+export function getContractExpiresAtMs(
+  deal: Pick<AgreedDriverDealItem, 'agreed_at' | 'duration_label' | 'contract'>
+): number | null {
+  const durationLabel = deal.contract?.duration_label || deal.duration_label;
+  const durationMs = parseContractDurationMs(durationLabel);
+  if (!durationMs) return null;
+
+  const agreedAtMs = deal.agreed_at ? new Date(deal.agreed_at).getTime() : NaN;
+  const startDateRaw = deal.contract?.start_date;
+  const startDateMs = startDateRaw ? new Date(startDateRaw).getTime() : NaN;
+
+  let baseStartMs = Number.isFinite(agreedAtMs) ? agreedAtMs : Date.now();
+  if (Number.isFinite(startDateMs)) {
+    // Only defer start if contract start_date is genuinely in the future (>12h after agreedAt)
+    if (!Number.isFinite(agreedAtMs) || startDateMs - agreedAtMs > 12 * 3600 * 1000) {
+      baseStartMs = startDateMs;
+    }
+  }
+
+  return baseStartMs + durationMs;
+}
+
+export function isDriverContractActive(
+  deal: AgreedDriverDealItem,
+  nowMs: number = Date.now()
+): boolean {
+  const term = deal.termination || deal.contract?.termination || null;
+  if (term?.work_status === 'ended') return false;
+  const expiresAt = getContractExpiresAtMs(deal);
+  if (expiresAt !== null && nowMs >= expiresAt) return false;
+  return true;
+}
+
+export async function getActiveDriverContract(
+  driverId: string
+): Promise<AgreedDriverDealItem | null> {
+  if (!driverId) return null;
+  const deals = await fetchDriverAgreedDeals(driverId);
+  const nowMs = Date.now();
+  return deals.find((d) => isDriverContractActive(d, nowMs)) || null;
+}
+
+async function persistSelfDriverAvailability(
+  driverId: string,
+  available: boolean
+): Promise<void> {
+  if (!isSupabaseConfigured || !driverId) return;
+  try {
+    const { data } = await supabase.auth.getUser();
+    if (data?.user?.id !== driverId) return;
+    await supabase.from('profiles').update({ driver_available: available }).eq('id', driverId);
+    await supabase.auth.updateUser({ data: { driver_available: available } });
+  } catch {
+    // ignore if offline or auth unavailable
+  }
+}
+
+export async function syncDriverAvailabilityFromContracts(
+  driverId: string,
+  currentAvailable?: boolean,
+  driverMachines?: string[]
+): Promise<{ activeContract: AgreedDriverDealItem | null; isAvailable: boolean }> {
+  if (!driverId) {
+    return { activeContract: null, isAvailable: currentAvailable ?? true };
+  }
+
+  const activeContract = await getActiveDriverContract(driverId);
+
+  if (activeContract) {
+    markDriverContractBusyLock(driverId, activeContract.offer_id);
+    if (currentAvailable !== false) {
+      await persistSelfDriverAvailability(driverId, false);
+      notifyDriverAvailabilityChanged(driverId, false, driverMachines);
+    } else {
+      syncServiceWorkerPushContext(driverId, 'driver', driverMachines, false).catch(() => {});
+    }
+    return { activeContract, isAvailable: false };
+  }
+
+  // No active contract remains: if driver was locked by a contract that just expired or was ended, restore availability
+  if (hasDriverContractBusyLock(driverId)) {
+    clearDriverContractBusyLock(driverId);
+    if (currentAvailable === false) {
+      await persistSelfDriverAvailability(driverId, true);
+      notifyDriverAvailabilityChanged(driverId, true, driverMachines);
+    } else {
+      syncServiceWorkerPushContext(driverId, 'driver', driverMachines, true).catch(() => {});
+    }
+    return { activeContract: null, isAvailable: true };
+  }
+
+  return { activeContract: null, isAvailable: currentAvailable ?? true };
+}
+
 export async function markOfferAcceptedAndClosed(params: {
   offerId: string;
   driverId: string;
@@ -1329,6 +1573,8 @@ export async function markOfferAcceptedAndClosed(params: {
 }): Promise<void> {
   const { offerId, driverId, driverName, driverPhone } = params;
   const agreedAtIso = new Date().toISOString();
+
+  markDriverContractBusyLock(driverId, offerId);
 
   if (isSupabaseConfigured && offerId && !offerId.startsWith('starter-')) {
     try {
@@ -1340,6 +1586,8 @@ export async function markOfferAcceptedAndClosed(params: {
     } catch {
       // ignore if migration has not been executed yet
     }
+
+    await persistSelfDriverAvailability(driverId, false);
 
     try {
       const { error } = await supabase
@@ -1389,6 +1637,8 @@ export async function markOfferAcceptedAndClosed(params: {
         : o
     )
   );
+
+  notifyDriverAvailabilityChanged(driverId, false);
 
   try {
     if (typeof BroadcastChannel !== 'undefined') {
@@ -1982,6 +2232,26 @@ export async function submitWorkTerminationAction(params: {
         .eq('id', deal.offer_id);
     } catch {
       // ignore if contract_data column is not migrated yet
+    }
+
+    if (isFinalEnded && deal.driver_id && !deal.driver_id.startsWith('starter-')) {
+      try {
+        await supabase.rpc('release_driver_on_contract_end', {
+          p_offer_id: deal.offer_id,
+          p_driver_id: deal.driver_id,
+        });
+      } catch {
+        // ignore if migration has not been executed yet
+      }
+    }
+  }
+
+  if (isFinalEnded && deal.driver_id) {
+    const remainingActive = await getActiveDriverContract(deal.driver_id);
+    if (!remainingActive) {
+      clearDriverContractBusyLock(deal.driver_id);
+      await persistSelfDriverAvailability(deal.driver_id, true);
+      notifyDriverAvailabilityChanged(deal.driver_id, true);
     }
   }
 

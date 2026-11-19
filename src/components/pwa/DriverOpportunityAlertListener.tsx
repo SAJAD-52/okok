@@ -28,6 +28,7 @@ import {
   fetchDriverJobOffers,
   mapNotificationRowToDriverOffer,
   subscribeDriverJobOffers,
+  syncDriverAvailabilityFromContracts,
 } from '../../lib/driverOfferService';
 import { getDriverExperienceOption } from '../../data/driverMachines';
 import {
@@ -84,9 +85,14 @@ export const DriverOpportunityAlertListener: React.FC<DriverOpportunityAlertList
 
   const [activeOffer, setActiveOffer] = useState<DriverJobOffer | null>(null);
   const [isApplying, setIsApplying] = useState(false);
+  const [hasActiveContract, setHasActiveContract] = useState(false);
   const alertedIdsRef = useRef<Set<string>>(getSessionAlertedOffers());
   const onSyncRef = useRef(onOffersSync);
   onSyncRef.current = onOffersSync;
+
+  const isDriverBusy = driverProfile?.driver_available === false || hasActiveContract;
+  const isDriverBusyRef = useRef(isDriverBusy);
+  isDriverBusyRef.current = isDriverBusy;
 
   const driverMachines = useMemo(
     () => (Array.isArray(driverProfile?.driver_machines) ? driverProfile.driver_machines : []),
@@ -95,6 +101,7 @@ export const DriverOpportunityAlertListener: React.FC<DriverOpportunityAlertList
 
   const triggerDriverAlert = useCallback(
     (offer: DriverJobOffer) => {
+      if (isDriverBusyRef.current) return;
       if (!offer?.id || offer.status !== 'open' || offer.is_demo) return;
       if (offer.owner_id === driverId) return;
 
@@ -144,40 +151,54 @@ export const DriverOpportunityAlertListener: React.FC<DriverOpportunityAlertList
       if (!driverId || syncInFlightRef.current) return;
       syncInFlightRef.current = true;
       try {
-      onSyncRef.current?.();
+        const availabilitySync = await syncDriverAvailabilityFromContracts(
+          driverId,
+          driverProfile?.driver_available,
+          driverMachines
+        );
+        const activeBusy = !availabilitySync.isAvailable || Boolean(availabilitySync.activeContract);
+        setHasActiveContract(Boolean(availabilitySync.activeContract));
+        isDriverBusyRef.current = activeBusy;
 
-      const offers = await fetchDriverJobOffers(driverId);
+        onSyncRef.current?.();
 
-      // Dismiss popup if offer was closed
-      setActiveOffer((prev) => {
-        if (!prev) return null;
-        const stillOpen = offers.find((o) => o.id === prev.id && o.status === 'open');
-        return stillOpen ? prev : null;
-      });
-
-      if (notifyNew) {
-        const recentThreshold = Date.now() - 1000 * 60 * 60 * 12; // last 12h
-        const candidate = offers.find((o) => {
-          if (o.is_demo || o.status !== 'open' || o.has_applied) return false;
-          if (o.owner_id === driverId) return false;
-          const matches =
-            driverMachines.length === 0 || driverMachines.includes(o.machine_category);
-          if (!matches) return false;
-          if (new Date(o.created_at).getTime() < recentThreshold) return false;
-          return (
-            !alertedIdsRef.current.has(o.id) &&
-            !alertedIdsRef.current.has(`driver-offer-${o.id}`)
-          );
-        });
-        if (candidate) {
-          triggerDriverAlert(candidate);
+        if (activeBusy) {
+          setActiveOffer(null);
+          return;
         }
-      }
+
+        const offers = await fetchDriverJobOffers(driverId);
+
+        // Dismiss popup if offer was closed
+        setActiveOffer((prev) => {
+          if (!prev) return null;
+          const stillOpen = offers.find((o) => o.id === prev.id && o.status === 'open');
+          return stillOpen ? prev : null;
+        });
+
+        if (notifyNew) {
+          const recentThreshold = Date.now() - 1000 * 60 * 60 * 12; // last 12h
+          const candidate = offers.find((o) => {
+            if (o.is_demo || o.status !== 'open' || o.has_applied) return false;
+            if (o.owner_id === driverId) return false;
+            const matches =
+              driverMachines.length === 0 || driverMachines.includes(o.machine_category);
+            if (!matches) return false;
+            if (new Date(o.created_at).getTime() < recentThreshold) return false;
+            return (
+              !alertedIdsRef.current.has(o.id) &&
+              !alertedIdsRef.current.has(`driver-offer-${o.id}`)
+            );
+          });
+          if (candidate) {
+            triggerDriverAlert(candidate);
+          }
+        }
       } finally {
         syncInFlightRef.current = false;
       }
     },
-    [driverId, driverMachines, triggerDriverAlert]
+    [driverId, driverProfile?.driver_available, driverMachines, triggerDriverAlert]
   );
 
   useEffect(() => {
@@ -187,15 +208,19 @@ export const DriverOpportunityAlertListener: React.FC<DriverOpportunityAlertList
   // Keep Service Worker push context & Web Push subscription synced for closed-app phone alerts
   useEffect(() => {
     if (!driverId) return;
-    syncServiceWorkerPushContext(driverId, 'driver', driverMachines).catch(() => {});
+    const swAvailable = !isDriverBusy;
+    syncServiceWorkerPushContext(driverId, 'driver', driverMachines, swAvailable).catch(() => {});
     if (
       typeof window !== 'undefined' &&
       'Notification' in window &&
       Notification.permission === 'granted'
     ) {
-      subscribeOwnerWebPush(driverId, 'driver', driverMachines).catch(() => {});
+      subscribeOwnerWebPush(driverId, 'driver', driverMachines, swAvailable).catch(() => {});
     }
-  }, [driverId, driverMachines]);
+    if (isDriverBusy) {
+      setActiveOffer(null);
+    }
+  }, [driverId, driverMachines, isDriverBusy]);
 
   useEffect(() => {
     if (!driverId) return;
@@ -203,7 +228,7 @@ export const DriverOpportunityAlertListener: React.FC<DriverOpportunityAlertList
     syncOffersAndCheckUnread(true);
 
     const unsubscribeOffers = subscribeDriverJobOffers(driverMachines, (incomingOffer) => {
-      if (incomingOffer) {
+      if (incomingOffer && !isDriverBusyRef.current) {
         triggerDriverAlert(incomingOffer);
       }
       onSyncRef.current?.();
@@ -224,10 +249,16 @@ export const DriverOpportunityAlertListener: React.FC<DriverOpportunityAlertList
             },
             (payload: any) => {
               const row = payload?.new;
+              if (row?.type === 'driver_deal_closed' || row?.type === 'driver_work_ended') {
+                syncOffersAndCheckUnread(false);
+                return;
+              }
               if (row?.type === 'driver_job_offer') {
-                const mapped = mapNotificationRowToDriverOffer(row);
-                if (mapped) {
-                  triggerDriverAlert(mapped);
+                if (!isDriverBusyRef.current) {
+                  const mapped = mapNotificationRowToDriverOffer(row);
+                  if (mapped) {
+                    triggerDriverAlert(mapped);
+                  }
                 }
                 onSyncRef.current?.();
               }
@@ -239,6 +270,12 @@ export const DriverOpportunityAlertListener: React.FC<DriverOpportunityAlertList
       }
     }
 
+    const handleOffersOrAvailabilityUpdated = () => {
+      syncOffersAndCheckUnread(false);
+    };
+    window.addEventListener('jadijcb_driver_offers_updated', handleOffersOrAvailabilityUpdated);
+    window.addEventListener('jadijcb_driver_availability_changed', handleOffersOrAvailabilityUpdated);
+
     const pollTimer = setInterval(() => {
       if (document.visibilityState === 'visible') {
         syncOffersAndCheckUnread(true);
@@ -248,7 +285,12 @@ export const DriverOpportunityAlertListener: React.FC<DriverOpportunityAlertList
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
         syncOffersAndCheckUnread(true);
-        syncServiceWorkerPushContext(driverId, 'driver', driverMachines).catch(() => {});
+        syncServiceWorkerPushContext(
+          driverId,
+          'driver',
+          driverMachines,
+          !isDriverBusyRef.current
+        ).catch(() => {});
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);
@@ -256,6 +298,11 @@ export const DriverOpportunityAlertListener: React.FC<DriverOpportunityAlertList
     return () => {
       unsubscribeOffers();
       clearInterval(pollTimer);
+      window.removeEventListener('jadijcb_driver_offers_updated', handleOffersOrAvailabilityUpdated);
+      window.removeEventListener(
+        'jadijcb_driver_availability_changed',
+        handleOffersOrAvailabilityUpdated
+      );
       document.removeEventListener('visibilitychange', handleVisibility);
       if (notifChannel) {
         supabase.removeChannel(notifChannel);
@@ -331,7 +378,7 @@ export const DriverOpportunityAlertListener: React.FC<DriverOpportunityAlertList
     }
   };
 
-  if (!activeOffer) return null;
+  if (!activeOffer || isDriverBusy) return null;
 
   const expMeta = activeOffer.experience_required
     ? getDriverExperienceOption(activeOffer.experience_required)

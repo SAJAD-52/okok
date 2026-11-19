@@ -52,7 +52,8 @@ export async function waitForServiceWorkerReady(
 export async function syncServiceWorkerPushContext(
   userId: string,
   userRole: string = 'owner',
-  driverMachines?: string[]
+  driverMachines?: string[],
+  driverAvailable?: boolean
 ): Promise<void> {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !userId) return;
 
@@ -82,6 +83,9 @@ export async function syncServiceWorkerPushContext(
       accessToken,
       updatedAt: Date.now(),
     };
+    if (typeof driverAvailable === 'boolean') {
+      payload.driverAvailable = driverAvailable;
+    }
     if (Array.isArray(driverMachines)) {
       payload.driverMachines = driverMachines;
     }
@@ -146,13 +150,14 @@ async function resolveVapidPublicKey(): Promise<string | null> {
 export async function subscribeOwnerWebPush(
   userId: string,
   userRole: string = 'owner',
-  driverMachines?: string[]
+  driverMachines?: string[],
+  driverAvailable?: boolean
 ): Promise<boolean> {
   if (typeof window === 'undefined' || !userId) return false;
   if (!('Notification' in window) || Notification.permission !== 'granted') return false;
   if (!('serviceWorker' in navigator)) return false;
 
-  await syncServiceWorkerPushContext(userId, userRole, driverMachines);
+  await syncServiceWorkerPushContext(userId, userRole, driverMachines, driverAvailable);
 
   if (!('PushManager' in window)) return false;
 
@@ -224,7 +229,8 @@ export async function subscribeOwnerWebPush(
 export async function registerOwnerPushNotifications(
   userId: string,
   userRole: string = 'owner',
-  driverMachines?: string[]
+  driverMachines?: string[],
+  driverAvailable?: boolean
 ): Promise<NotificationPermission> {
   if (typeof window === 'undefined' || !('Notification' in window)) {
     return 'denied';
@@ -240,7 +246,7 @@ export async function registerOwnerPushNotifications(
   }
 
   if (perm === 'granted' && userId) {
-    subscribeOwnerWebPush(userId, userRole, driverMachines).catch(() => {});
+    subscribeOwnerWebPush(userId, userRole, driverMachines, driverAvailable).catch(() => {});
   }
 
   return perm;

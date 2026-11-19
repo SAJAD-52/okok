@@ -108,6 +108,7 @@ async function checkBackgroundDispatchAlerts() {
   const userRole = (ctx && ctx.userRole) || 'owner';
   const isContractorRole = userRole === 'client' || userRole === 'contractor';
   const isDriverRole = userRole === 'driver';
+  const isDriverBusy = isDriverRole && ctx && ctx.driverAvailable === false;
   const driverMachines = Array.isArray(ctx && ctx.driverMachines) ? ctx.driverMachines : [];
   const messagesBase = getDefaultMessagesBase(userRole);
 
@@ -135,7 +136,7 @@ async function checkBackgroundDispatchAlerts() {
             tag: (n.data && n.data.campaign_id) || n.id,
             url: `/owner/messages?target=${(n.data && n.data.contractor_id) || ''}&machine=${(n.data && n.data.machine_id) || ''}&campaign=${(n.data && n.data.campaign_id) || ''}`,
           });
-        } else if (n.type === 'driver_job_offer' && isDriverRole && !seenSet.has(n.id)) {
+        } else if (n.type === 'driver_job_offer' && isDriverRole && !isDriverBusy && !seenSet.has(n.id)) {
           const offerKey = (n.data && n.data.offer_id) ? `driver-offer-${n.data.offer_id}` : n.id;
           if (!seenSet.has(offerKey)) {
             newlyFound.push({
@@ -144,7 +145,9 @@ async function checkBackgroundDispatchAlerts() {
               title: n.title_ar || 'عرض عمل عاجل لسائق 👷',
               body: n.body_ar || 'مالك آلية يبحث عن سائق محترف لآليتك على JADIJCB',
               tag: offerKey,
-              url: '/driver/joboffer',
+              url: (n.data && n.data.offer_id)
+                ? `/driver/joboffer?offer=${encodeURIComponent(n.data.offer_id)}`
+                : '/driver/joboffer',
             });
           }
         } else if (n.type === 'chat_message') {
@@ -199,7 +202,7 @@ async function checkBackgroundDispatchAlerts() {
                   url: `/owner/messages?target=${d.contractor_id || ''}&machine=${d.machine_id || ''}&campaign=${d.campaign_id || ''}`,
                 });
               }
-            } else if (r.type === 'driver_job_offer' && isDriverRole) {
+            } else if (r.type === 'driver_job_offer' && isDriverRole && !isDriverBusy) {
               const key = d.offer_id ? `driver-offer-${d.offer_id}` : r.id;
               if (!seenSet.has(r.id) && !seenSet.has(key)) {
                 newlyFound.push({
@@ -210,7 +213,7 @@ async function checkBackgroundDispatchAlerts() {
                     r.body_ar ||
                     `مطلوب سائق: ${d.machine_label_ar || 'آلية بناء'} · ${d.offered_salary || ''} درهم`,
                   tag: key,
-                  url: '/driver/joboffer',
+                  url: d.offer_id ? `/driver/joboffer?offer=${encodeURIComponent(d.offer_id)}` : '/driver/joboffer',
                 });
               }
             } else if (r.type === 'chat_message') {
@@ -263,7 +266,7 @@ async function checkBackgroundDispatchAlerts() {
       }
     }
 
-    if (isDriverRole) {
+    if (isDriverRole && !isDriverBusy) {
       try {
         const drvOffersUrl = `${ctx.supabaseUrl}/rest/v1/driver_job_offers?status=eq.open&order=created_at.desc&limit=10`;
         const res = await fetch(drvOffersUrl, { headers, cache: 'no-store' });
@@ -287,7 +290,7 @@ async function checkBackgroundDispatchAlerts() {
                     .filter(Boolean)
                     .join(' · '),
                   tag,
-                  url: '/driver/joboffer',
+                  url: `/driver/joboffer?offer=${encodeURIComponent(o.id)}`,
                 });
               }
             }
@@ -332,6 +335,16 @@ self.addEventListener('push', (event) => {
 
   event.waitUntil(
     (async () => {
+      const ctx = await readCacheJson(PUSH_CTX_REQ, null);
+      if (
+        payload &&
+        payload.type === 'driver_job_offer' &&
+        ctx &&
+        ctx.userRole === 'driver' &&
+        ctx.driverAvailable === false
+      ) {
+        return;
+      }
       if (payload && payload.id) {
         const seenIds = await readCacheJson(PUSH_SEEN_REQ, []);
         const seenSet = new Set(Array.isArray(seenIds) ? seenIds : []);
@@ -395,6 +408,12 @@ self.addEventListener('message', (event) => {
             : Array.isArray(prev && prev.driverMachines)
             ? prev.driverMachines
             : [],
+          driverAvailable:
+            typeof msg.payload.driverAvailable === 'boolean'
+              ? msg.payload.driverAvailable
+              : typeof (prev && prev.driverAvailable) === 'boolean'
+              ? prev.driverAvailable
+              : true,
         };
         await writeCacheJson(PUSH_CTX_REQ, mergedPayload);
       })()

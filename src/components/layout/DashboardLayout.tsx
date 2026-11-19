@@ -66,7 +66,9 @@ import { getClientSegmentOption } from '../../data/clientSegments';
 import {
   cacheDriverOfferFromNotification,
   fetchDriverJobOffers,
+  getActiveDriverContract,
   subscribeDriverJobOffers,
+  syncDriverAvailabilityFromContracts,
 } from '../../lib/driverOfferService';
 
 export const DashboardLayout: React.FC = () => {
@@ -89,14 +91,47 @@ export const DashboardLayout: React.FC = () => {
   );
   const [isPushPromptDismissed, setIsPushPromptDismissed] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [driverHasActiveContract, setDriverHasActiveContract] = useState(false);
 
   const isContractor = profile?.role === 'client' || profile?.role === 'contractor';
   const isDriver = profile?.role === 'driver';
+  const isDriverBusy = isDriver && (profile?.driver_available === false || driverHasActiveContract);
+  const isDriverBusyRef = React.useRef(isDriverBusy);
+  isDriverBusyRef.current = isDriverBusy;
   const isChatRoute = location.pathname.includes('/messages');
   // Contractors and drivers are NEVER blocked by owner 72h trial soft-lock!
   const shouldShowLock = !isContractor && !isDriver && isLocked && !isChatRoute;
 
   const [unreadMessagesCount, setUnreadMessagesCount] = useState<number>(0);
+
+  useEffect(() => {
+    if (!isDriver || !profile?.id) {
+      setDriverHasActiveContract(false);
+      return;
+    }
+    let active = true;
+    const syncContractState = async () => {
+      try {
+        const contract = await getActiveDriverContract(profile.id);
+        if (active) {
+          setDriverHasActiveContract(Boolean(contract));
+        }
+      } catch {
+        // ignore
+      }
+    };
+    syncContractState();
+    const onRefresh = () => {
+      syncContractState();
+    };
+    window.addEventListener('jadijcb_driver_offers_updated', onRefresh);
+    window.addEventListener('jadijcb_driver_availability_changed', onRefresh);
+    return () => {
+      active = false;
+      window.removeEventListener('jadijcb_driver_offers_updated', onRefresh);
+      window.removeEventListener('jadijcb_driver_availability_changed', onRefresh);
+    };
+  }, [isDriver, profile?.id, profile?.driver_available]);
 
   useEffect(() => {
     const updateUnread = async () => {
@@ -302,7 +337,18 @@ export const DashboardLayout: React.FC = () => {
                 row?.type === 'driver_application'
               ) {
                 if (row?.type === 'driver_job_offer') {
+                  if (isDriverBusyRef.current) return;
                   cacheDriverOfferFromNotification(row);
+                } else if (
+                  (row?.type === 'driver_deal_closed' || row?.type === 'driver_work_ended') &&
+                  isDriver &&
+                  activeId
+                ) {
+                  syncDriverAvailabilityFromContracts(
+                    activeId,
+                    profile?.driver_available,
+                    profile?.driver_machines
+                  ).catch(() => {});
                 }
                 window.dispatchEvent(new CustomEvent('jadijcb_driver_offers_updated'));
               }
@@ -319,16 +365,30 @@ export const DashboardLayout: React.FC = () => {
       window.removeEventListener('jadijcb_chat_unread_updated', refreshSystemNotifications);
       if (notifChannel) supabase.removeChannel(notifChannel);
     };
-  }, [refreshSystemNotifications, profile?.id, user?.id, isSuperAdmin, isImpersonating, lang]);
+  }, [
+    refreshSystemNotifications,
+    profile?.id,
+    profile?.driver_available,
+    profile?.driver_machines,
+    user?.id,
+    isDriver,
+    isSuperAdmin,
+    isImpersonating,
+    lang,
+  ]);
 
   // Sync open driver job offers badge count
   useEffect(() => {
-    if (!isDriver || !profile?.id) {
+    if (!isDriver || !profile?.id || isDriverBusy) {
       setDriverOpenOffersCount(0);
       return;
     }
 
     const syncDriverBadge = async () => {
+      if (isDriverBusyRef.current) {
+        setDriverOpenOffersCount(0);
+        return;
+      }
       try {
         const list = await fetchDriverJobOffers(profile.id);
         setDriverOpenOffersCount(list.filter((o) => o.status === 'open' && !o.has_applied).length);
@@ -340,7 +400,7 @@ export const DashboardLayout: React.FC = () => {
     syncDriverBadge();
     const unsub = subscribeDriverJobOffers(profile.driver_machines || [], syncDriverBadge);
     return unsub;
-  }, [isDriver, profile?.id, profile?.driver_machines]);
+  }, [isDriver, isDriverBusy, profile?.id, profile?.driver_machines]);
 
   // Sync pending bookings for owner notification badge with real-time updates
   useEffect(() => {
@@ -916,7 +976,9 @@ export const DashboardLayout: React.FC = () => {
               {/* Notifications Button with Live Badge & Dropdown */}
               {(() => {
                 const generalSystemNotifs = systemNotifications.filter(
-                  (n) => n.type !== 'dispatch_opportunity'
+                  (n) =>
+                    n.type !== 'dispatch_opportunity' &&
+                    !(isDriverBusy && n.type === 'driver_job_offer')
                 );
                 const unreadSystemCount = generalSystemNotifs.filter((n) => !n.is_read && !n.read).length;
                 const unreadOppCount = opportunityNotifications.filter(
@@ -999,7 +1061,8 @@ export const DashboardLayout: React.FC = () => {
                                   const perm = await registerOwnerPushNotifications(
                                     targetUserId,
                                     targetRole,
-                                    profile?.driver_machines
+                                    profile?.driver_machines,
+                                    !isDriverBusy
                                   );
                                   setNotifPermission(perm);
                                   if (perm === 'granted') {
@@ -1466,7 +1529,8 @@ export const DashboardLayout: React.FC = () => {
                     const perm = await registerOwnerPushNotifications(
                       targetUserId,
                       targetRole,
-                      profile?.driver_machines
+                      profile?.driver_machines,
+                      !isDriverBusy
                     );
                     setNotifPermission(perm);
                     if (perm === 'granted') {
@@ -1947,8 +2011,18 @@ export const DashboardLayout: React.FC = () => {
           driverId={profile?.id || user?.id || ''}
           driverProfile={profile || null}
           onOffersSync={() => {
+            if (isDriverBusyRef.current) {
+              setDriverOpenOffersCount(0);
+              return;
+            }
             fetchDriverJobOffers(profile?.id || user?.id || '').then((list) => {
-              setDriverOpenOffersCount(list.filter((o) => !o.has_applied).length);
+              if (isDriverBusyRef.current) {
+                setDriverOpenOffersCount(0);
+                return;
+              }
+              setDriverOpenOffersCount(
+                list.filter((o) => o.status === 'open' && !o.has_applied).length
+              );
             });
           }}
         />

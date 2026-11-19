@@ -385,6 +385,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [fetchProfile]);
 
+  useEffect(() => {
+    const handleDriverAvailabilityChanged = (e: Event) => {
+      const detail = (e as CustomEvent<{ driverId?: string; available?: boolean }>)?.detail;
+      if (!detail?.driverId || typeof detail.available !== 'boolean') return;
+      setProfile((prev) => {
+        if (!prev || prev.id !== detail.driverId) return prev;
+        if (prev.driver_available === detail.available) return prev;
+        const next: UserProfile = { ...prev, driver_available: detail.available };
+        try {
+          localStorage.setItem(LOCAL_STORAGE_PROFILE_KEY, JSON.stringify(next));
+        } catch {
+          // ignore
+        }
+        return next;
+      });
+    };
+
+    window.addEventListener('jadijcb_driver_availability_changed', handleDriverAvailabilityChanged);
+    return () => {
+      window.removeEventListener('jadijcb_driver_availability_changed', handleDriverAvailabilityChanged);
+    };
+  }, []);
+
   const loginWithPhone = async (
     rawPhone: string,
     pass: string

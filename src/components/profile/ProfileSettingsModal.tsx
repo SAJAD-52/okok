@@ -41,6 +41,12 @@ import { DRIVER_EXPERIENCE_LEVELS } from '../../data/driverMachines';
 import { ClientSegment } from '../../types/database';
 import { supabase } from '../../lib/supabase';
 import { normalizeMoroccanPhone } from '../../lib/authHelpers';
+import {
+  AgreedDriverDealItem,
+  getActiveDriverContract,
+  setDriverManualBusyFlag,
+} from '../../lib/driverOfferService';
+import { syncServiceWorkerPushContext } from '../../lib/pushService';
 
 interface ProfileSettingsModalProps {
   isOpen: boolean;
@@ -72,6 +78,7 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
   const [driverMachines, setDriverMachines] = useState<string[]>([]);
   const [driverExperienceYears, setDriverExperienceYears] = useState('3_5');
   const [driverAvailable, setDriverAvailable] = useState(true);
+  const [activeDriverContract, setActiveDriverContract] = useState<AgreedDriverDealItem | null>(null);
   const [fullName, setFullName] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [cityId, setCityId] = useState('casablanca');
@@ -98,6 +105,26 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
       setPhone(profile.phone || '');
       setIceNumber(profile.ice_number || '');
       setNewPassword('');
+
+      if (profile.role === 'driver' && profile.id) {
+        let active = true;
+        getActiveDriverContract(profile.id)
+          .then((contract) => {
+            if (!active) return;
+            setActiveDriverContract(contract);
+            if (contract) {
+              setDriverAvailable(false);
+            }
+          })
+          .catch(() => {
+            if (active) setActiveDriverContract(null);
+          });
+        return () => {
+          active = false;
+        };
+      } else {
+        setActiveDriverContract(null);
+      }
     }
   }, [isOpen, profile]);
 
@@ -144,6 +171,11 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
     setIsSubmitting(true);
 
     try {
+      const effectiveDriverAvailable = activeDriverContract ? false : driverAvailable;
+      if (isDriver && profile?.id && !activeDriverContract) {
+        setDriverManualBusyFlag(profile.id, !effectiveDriverAvailable);
+      }
+
       const updatePayload: any = {
         full_name: fullName.trim(),
         company_name: finalCompanyName,
@@ -153,7 +185,7 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
           isClient && clientSegment === 'other' ? clientActivityNote.trim() : '',
         driver_machines: isDriver ? driverMachines : undefined,
         driver_experience_years: isDriver ? driverExperienceYears : undefined,
-        driver_available: isDriver ? driverAvailable : undefined,
+        driver_available: isDriver ? effectiveDriverAvailable : undefined,
         ice_number: !isClient && !isDriver ? iceNumber.trim() : '',
         whatsapp_verified: true,
       };
@@ -166,6 +198,20 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
       }
 
       const res = await updateProfile(updatePayload);
+
+      if (isDriver && profile?.id) {
+        syncServiceWorkerPushContext(
+          profile.id,
+          'driver',
+          driverMachines,
+          effectiveDriverAvailable
+        ).catch(() => {});
+        window.dispatchEvent(
+          new CustomEvent('jadijcb_driver_availability_changed', {
+            detail: { driverId: profile.id, available: effectiveDriverAvailable },
+          })
+        );
+      }
 
       if (newPassword.trim()) {
         if (newPassword.trim().length < 8) {
@@ -428,21 +474,43 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
                   </label>
                   <button
                     type="button"
-                    onClick={() => setDriverAvailable((prev) => !prev)}
-                    className={`w-full min-h-[42px] px-3 rounded-xl border text-xs font-bold transition-colors cursor-pointer ${
-                      driverAvailable
+                    onClick={() => {
+                      if (activeDriverContract) {
+                        toast.info(
+                          lang === 'fr'
+                            ? 'Statut verrouillé sur « Conducteur occupé » jusqu’à la fin ou résiliation du contrat actif.'
+                            : 'الحالة مقفلة على «سائق مشغول» حتى انتهاء مدة العقد الجاري أو فسخه من الطرفين.'
+                        );
+                        return;
+                      }
+                      setDriverAvailable((prev) => !prev);
+                    }}
+                    className={`w-full min-h-[42px] px-3 rounded-xl border text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${
+                      !activeDriverContract && driverAvailable
                         ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                        : activeDriverContract
+                        ? 'bg-amber-50 border-amber-300 text-amber-900'
                         : 'bg-steel-100 border-steel-300 text-steel-700'
                     }`}
                   >
-                    {driverAvailable
-                      ? lang === 'fr'
-                        ? 'Disponible pour travailler'
-                        : 'متاح للعمل الآن'
-                      : lang === 'fr'
-                      ? 'Actuellement occupé'
-                      : 'مشغول حالياً'}
+                    {activeDriverContract && <Lock className="w-3.5 h-3.5 shrink-0" />}
+                    <span>
+                      {!activeDriverContract && driverAvailable
+                        ? lang === 'fr'
+                          ? 'Disponible pour travailler'
+                          : 'متاح للعمل الآن'
+                        : lang === 'fr'
+                        ? 'Conducteur occupé'
+                        : 'سائق مشغول'}
+                    </span>
                   </button>
+                  {activeDriverContract && (
+                    <span className="text-[10px] text-amber-700 font-bold mt-1 block">
+                      {lang === 'fr'
+                        ? 'Contrat actif en cours — notifications suspendues.'
+                        : 'مرتبط بعقد عمل جاري — إشعارات التوظيف متوقفة مؤقتاً.'}
+                    </span>
+                  )}
                 </div>
               </div>
 

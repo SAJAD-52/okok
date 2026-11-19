@@ -20,6 +20,8 @@ import {
   UserCheck,
   PauseCircle,
   Edit3,
+  FileText,
+  Lock,
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -33,10 +35,17 @@ import {
   getDriverMachineOption,
 } from '../data/driverMachines';
 import {
+  AgreedDriverDealItem,
   fetchDriverJobOffers,
+  getContractExpiresAtMs,
+  setDriverManualBusyFlag,
   subscribeDriverJobOffers,
+  syncDriverAvailabilityFromContracts,
 } from '../lib/driverOfferService';
-import { registerOwnerPushNotifications } from '../lib/pushService';
+import {
+  registerOwnerPushNotifications,
+  syncServiceWorkerPushContext,
+} from '../lib/pushService';
 import {
   playOpportunitySound,
   showBrowserOpportunityNotification,
@@ -52,36 +61,78 @@ export const DriverDashboardPage: React.FC = () => {
   const [isLoadingOffers, setIsLoadingOffers] = useState(true);
   const [isTogglingAvail, setIsTogglingAvail] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [activeContract, setActiveContract] = useState<AgreedDriverDealItem | null>(null);
   const [notifPerm, setNotifPerm] = useState<NotificationPermission>(
     typeof window !== 'undefined' && 'Notification' in window
       ? Notification.permission
       : 'default'
   );
 
+  const driverId = profile?.id || user?.id || '';
+
   const driverMachines = useMemo(
     () => (Array.isArray(profile?.driver_machines) ? profile.driver_machines : []),
     [profile?.driver_machines]
   );
 
+  const syncContractAvailability = useCallback(async () => {
+    if (!driverId) {
+      setActiveContract(null);
+      return;
+    }
+    try {
+      const res = await syncDriverAvailabilityFromContracts(
+        driverId,
+        profile?.driver_available,
+        driverMachines
+      );
+      setActiveContract(res.activeContract);
+    } catch {
+      // ignore
+    }
+  }, [driverId, profile?.driver_available, driverMachines]);
+
   const loadOffers = useCallback(async () => {
     try {
-      const list = await fetchDriverJobOffers(profile?.id || user?.id);
+      const list = await fetchDriverJobOffers(driverId || undefined);
       setOffers(list);
     } finally {
       setIsLoadingOffers(false);
     }
-  }, [profile?.id, user?.id]);
+  }, [driverId]);
 
   useEffect(() => {
+    syncContractAvailability();
     loadOffers();
-    const unsub = subscribeDriverJobOffers(driverMachines, () => {
-      loadOffers();
-    });
-    return unsub;
-  }, [loadOffers, driverMachines]);
 
-  const isAvailable = profile?.driver_available ?? true;
+    const handleRefresh = () => {
+      syncContractAvailability();
+      loadOffers();
+    };
+    window.addEventListener('jadijcb_driver_offers_updated', handleRefresh);
+    window.addEventListener('jadijcb_driver_availability_changed', handleRefresh);
+
+    const unsub = subscribeDriverJobOffers(driverMachines, () => {
+      handleRefresh();
+    });
+    return () => {
+      unsub();
+      window.removeEventListener('jadijcb_driver_offers_updated', handleRefresh);
+      window.removeEventListener('jadijcb_driver_availability_changed', handleRefresh);
+    };
+  }, [syncContractAvailability, loadOffers, driverMachines]);
+
+  const isAvailable = (profile?.driver_available ?? true) && !activeContract;
   const experienceMeta = getDriverExperienceOption(profile?.driver_experience_years);
+
+  const contractExpiresAtMs = activeContract ? getContractExpiresAtMs(activeContract) : null;
+  const formattedContractExpiry = contractExpiresAtMs
+    ? new Date(contractExpiresAtMs).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'ar-MA', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+      })
+    : null;
 
   const matchingOffers = useMemo(() => {
     if (driverMachines.length === 0) return offers;
@@ -107,9 +158,27 @@ export const DriverDashboardPage: React.FC = () => {
   }, [matchingOffers, offers]);
 
   const handleToggleAvailability = async () => {
+    if (activeContract) {
+      toast.info(
+        lang === 'fr'
+          ? 'Vous êtes actuellement lié à un contrat actif. Votre statut reste « Conducteur occupé » jusqu’à la fin du contrat ou sa résiliation par les deux parties.'
+          : 'أنت مرتبط حالياً بعقد عمل جاري — تبقى حالتك «سائق مشغول» ولا تتلقى إشعارات التوظيف حتى انتهاء مدة العقد أو فسخه من الطرفين.'
+      );
+      return;
+    }
+
     setIsTogglingAvail(true);
     const nextState = !isAvailable;
+    setDriverManualBusyFlag(driverId, !nextState);
     await updateProfile({ driver_available: nextState });
+    if (driverId) {
+      syncServiceWorkerPushContext(driverId, 'driver', driverMachines, nextState).catch(() => {});
+      window.dispatchEvent(
+        new CustomEvent('jadijcb_driver_availability_changed', {
+          detail: { driverId, available: nextState },
+        })
+      );
+    }
     setIsTogglingAvail(false);
     toast.success(
       nextState
@@ -117,15 +186,15 @@ export const DriverDashboardPage: React.FC = () => {
           ? 'Statut mis à jour : Disponible pour travailler'
           : 'أنت الآن متاح لاستقبال عروض العمل العاجلة من الملاك'
         : lang === 'fr'
-        ? 'Statut mis à jour : Actuellement en mission'
-        : 'تم ضبط حالتك إلى: مشغول حالياً في ورش'
+        ? 'Statut mis à jour : Conducteur occupé (notifications suspendues)'
+        : 'تم ضبط حالتك إلى: سائق مشغول (لن تتلقى إشعارات توظيف جديدة حتى تعود متاحاً)'
     );
   };
 
   const handleEnableNotifications = async () => {
     unlockAudioContextNow();
-    const uid = profile?.id || user?.id || '';
-    const perm = await registerOwnerPushNotifications(uid, 'driver', driverMachines);
+    const uid = driverId;
+    const perm = await registerOwnerPushNotifications(uid, 'driver', driverMachines, isAvailable);
     setNotifPerm(perm);
     if (perm === 'granted') {
       playOpportunitySound();
@@ -199,6 +268,8 @@ export const DriverDashboardPage: React.FC = () => {
               className={`min-h-[46px] px-4 py-2.5 rounded-xl border font-bold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer whitespace-nowrap ${
                 isAvailable
                   ? 'bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100'
+                  : activeContract
+                  ? 'bg-amber-50 border-amber-300 text-amber-900'
                   : 'bg-steel-100 border-steel-300 text-steel-700 hover:bg-steel-200'
               }`}
             >
@@ -209,8 +280,14 @@ export const DriverDashboardPage: React.FC = () => {
                 </>
               ) : (
                 <>
-                  <PauseCircle className="w-4 h-4 text-steel-600" />
-                  <span>{lang === 'fr' ? 'Occupé actuellement' : 'مشغول في ورش حالياً'}</span>
+                  {activeContract ? (
+                    <Lock className="w-4 h-4 text-amber-700" />
+                  ) : (
+                    <PauseCircle className="w-4 h-4 text-steel-600" />
+                  )}
+                  <span>
+                    {lang === 'fr' ? 'Conducteur occupé' : 'سائق مشغول'}
+                  </span>
                 </>
               )}
             </button>
@@ -228,6 +305,38 @@ export const DriverDashboardPage: React.FC = () => {
             </Button>
           </div>
         </div>
+
+        {activeContract && (
+          <div className="mt-4 pt-3 border-t border-steel-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-amber-50/70 border border-amber-200 rounded-xl px-3.5 py-2.5">
+            <div className="flex items-start gap-2.5 min-w-0">
+              <FileText className="w-4 h-4 text-amber-800 shrink-0 mt-0.5" />
+              <div className="min-w-0 text-xs">
+                <p className="font-black text-ink">
+                  {lang === 'fr'
+                    ? `Contrat de travail actif (${activeContract.machine_label_fr})`
+                    : `عقد عمل جاري (${activeContract.machine_title || activeContract.machine_label_ar})`}
+                </p>
+                <p className="text-[11px] text-steel-700 font-semibold mt-0.5">
+                  {lang === 'fr'
+                    ? `Les nouvelles offres d’emploi sont suspendues jusqu’à la fin de la durée (${activeContract.duration_label || 'selon accord'})${formattedContractExpiry ? ` · fin prévue le ${formattedContractExpiry}` : ''} ou résiliation du contrat.`
+                    : `توقفت إشعارات التوظيف الجديدة مؤقتاً حتى انتهاء مدة العقد (${activeContract.duration_label || 'حسب الاتفاق'})${formattedContractExpiry ? ` · ينتهي في ${formattedContractExpiry}` : ''} أو فسخه من الطرفين.`}
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() =>
+                navigate(
+                  `/driver/joboffer?tab=agreed&offer=${encodeURIComponent(activeContract.offer_id)}`
+                )
+              }
+              className="px-3 py-2 rounded-lg bg-ink text-primary font-black text-[11px] hover:bg-steel-900 transition-colors cursor-pointer shrink-0 whitespace-nowrap"
+            >
+              {lang === 'fr' ? 'Voir le contrat actif' : 'عرض العقد الجاري'}
+            </button>
+          </div>
+        )}
       </Card>
 
       {/* 3 Key Stats */}
@@ -286,20 +395,42 @@ export const DriverDashboardPage: React.FC = () => {
       </div>
 
       {/* Mobile Urgent Campaign Alert Readiness Card */}
-      <Card className="p-4 sm:p-5 bg-amber-50/70 border border-amber-200 rounded-2xl">
+      <Card
+        className={`p-4 sm:p-5 rounded-2xl border ${
+          !isAvailable
+            ? 'bg-steel-50 border-steel-200'
+            : 'bg-amber-50/70 border-amber-200'
+        }`}
+      >
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-xl bg-primary text-ink flex items-center justify-center shrink-0">
-              <Bell className="w-5 h-5" />
+            <div
+              className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                !isAvailable ? 'bg-steel-200 text-steel-700' : 'bg-primary text-ink'
+              }`}
+            >
+              {!isAvailable ? <PauseCircle className="w-5 h-5" /> : <Bell className="w-5 h-5" />}
             </div>
             <div className="space-y-0.5">
               <h2 className="text-sm font-black text-ink">
-                {lang === 'fr'
+                {!isAvailable
+                  ? lang === 'fr'
+                    ? 'Alertes de recrutement en pause (Conducteur occupé)'
+                    : 'إشعارات التوظيف الجديدة متوقفة حالياً (سائق مشغول)'
+                  : lang === 'fr'
                   ? 'Alertes mobiles pour les campagnes urgentes des propriétaires'
                   : 'إشعارات الهاتف الفورية لحملات البحث العاجل عن السائقين'}
               </h2>
               <p className="text-xs text-steel-600 leading-relaxed">
-                {notifPerm === 'granted'
+                {!isAvailable
+                  ? activeContract
+                    ? lang === 'fr'
+                      ? 'Vous ne recevez aucune nouvelle notification d’emploi tant que votre contrat en cours n’est pas arrivé à terme ou résilié par les deux parties.'
+                      : 'لن تتلقى أي إشعارات توظيف جديدة ما دمت مرتبطاً بعقد العمل الجاري، وستعود الإشعارات تلقائياً فور انتهاء مدة العقد أو فسخه.'
+                    : lang === 'fr'
+                    ? 'Votre statut est « Conducteur occupé ». Passez à « Disponible » pour recevoir à nouveau les offres urgentes.'
+                    : 'حالتك مضبوطة على «سائق مشغول»، ولن تتلقى إشعارات التوظيف الجديدة حتى تعيد تفعيل خيار «متاح للعمل الآن».'
+                  : notifPerm === 'granted'
                   ? lang === 'fr'
                     ? 'Vos alertes sont actives : dès qu’un propriétaire lance une recherche urgente, vous recevrez une notification mobile avec le type d’engin, le tarif et la ville.'
                     : 'إشعارات هاتفك مفعّلة وجاهزة: فور إطلاق أي مالك حملة بحث عاجلة عن سائق، سيصلك تنبيه فوري على الهاتف بنوع الآلية، الثمن، والمدينة.'
@@ -310,26 +441,28 @@ export const DriverDashboardPage: React.FC = () => {
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={handleEnableNotifications}
-            className={`min-h-[44px] px-4 py-2 rounded-xl font-black text-xs flex items-center justify-center gap-2 shrink-0 cursor-pointer whitespace-nowrap transition-colors ${
-              notifPerm === 'granted'
-                ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                : 'bg-ink text-primary hover:bg-steel-900'
-            }`}
-          >
-            <Volume2 className="w-4 h-4" />
-            <span>
-              {notifPerm === 'granted'
-                ? lang === 'fr'
-                  ? 'Tester l’alerte'
-                  : 'إشعار مفعّل · تجربة الصوت'
-                : lang === 'fr'
-                ? 'Activer les alertes'
-                : 'تفعيل إشعارات الهاتف'}
-            </span>
-          </button>
+          {isAvailable && (
+            <button
+              type="button"
+              onClick={handleEnableNotifications}
+              className={`min-h-[44px] px-4 py-2 rounded-xl font-black text-xs flex items-center justify-center gap-2 shrink-0 cursor-pointer whitespace-nowrap transition-colors ${
+                notifPerm === 'granted'
+                  ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                  : 'bg-ink text-primary hover:bg-steel-900'
+              }`}
+            >
+              <Volume2 className="w-4 h-4" />
+              <span>
+                {notifPerm === 'granted'
+                  ? lang === 'fr'
+                    ? 'Tester l’alerte'
+                    : 'إشعار مفعّل · تجربة الصوت'
+                  : lang === 'fr'
+                  ? 'Activer les alertes'
+                  : 'تفعيل إشعارات الهاتف'}
+              </span>
+            </button>
+          )}
         </div>
       </Card>
 

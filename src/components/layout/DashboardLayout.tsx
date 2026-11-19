@@ -29,6 +29,8 @@ import {
   AlertTriangle,
   Pause,
   Play,
+  Clock,
+  Banknote,
 } from 'lucide-react';
 import { Logo } from '../ui/Logo';
 import { LanguageSwitcher } from '../ui/LanguageSwitcher';
@@ -47,6 +49,7 @@ import { Booking, DispatchNotification } from '../../types/database';
 import { bookingStore } from '../../lib/bookingStore';
 import { machineStore } from '../../lib/machineStore';
 import { chatStore } from '../../lib/chatStore';
+import { paymentService } from '../../lib/paymentService';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { toast } from '../ui/Toast';
 import { serverApi, ServerNotification } from '../../lib/serverApi';
@@ -86,6 +89,43 @@ export const DashboardLayout: React.FC = () => {
   const [pendingBookingsList, setPendingBookingsList] = useState<Booking[]>([]);
   const [systemNotifications, setSystemNotifications] = useState<ServerNotification[]>([]);
   const [opportunityNotifications, setOpportunityNotifications] = useState<DispatchNotification[]>([]);
+  const [operationalAlerts, setOperationalAlerts] = useState<
+    Array<{
+      id: string;
+      kind: 'booking_expiring_soon' | 'booking_overdue' | 'booking_unpaid_balance';
+      bookingId: string;
+      titleAr: string;
+      titleFr: string;
+      bodyAr: string;
+      bodyFr: string;
+      targetUrl: string;
+      clientPhone?: string;
+      clientName?: string;
+      machineName?: string;
+      totalPrice?: number;
+      balanceDue?: number;
+      sortMs: number;
+      createdAt: string;
+    }>
+  >([]);
+  const activeNotifUserKey = profile?.id || user?.id || 'guest';
+  const [readOpAlertIds, setReadOpAlertIds] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem(`jadijcb_read_op_alerts_${activeNotifUserKey}`);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(`jadijcb_read_op_alerts_${activeNotifUserKey}`);
+      setReadOpAlertIds(raw ? JSON.parse(raw) : []);
+    } catch {
+      setReadOpAlertIds([]);
+    }
+  }, [activeNotifUserKey]);
   const [notifPermission, setNotifPermission] = useState<NotificationPermission>(
     typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'denied'
   );
@@ -163,8 +203,6 @@ export const DashboardLayout: React.FC = () => {
             if (typeof dbCount === 'number') {
               count = dbCount;
             }
-          } else {
-            count = 0;
           }
         } catch {
           // Fallback to local store count
@@ -190,11 +228,28 @@ export const DashboardLayout: React.FC = () => {
     window.addEventListener('storage', updateUnread);
     window.addEventListener('jadijcb_chat_unread_updated', onChatUnreadEvent);
 
+    let msgChannel: any = null;
+    if (isSupabaseConfigured && profile?.id && !(isSuperAdmin && !isImpersonating)) {
+      try {
+        msgChannel = supabase
+          .channel(`dashboard_unread_msgs_${profile.id}`)
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'messages' },
+            () => updateUnread()
+          )
+          .subscribe();
+      } catch {
+        // ignore
+      }
+    }
+
     return () => {
       clearInterval(interval);
       document.removeEventListener('visibilitychange', onVisibleUnread);
       window.removeEventListener('storage', updateUnread);
       window.removeEventListener('jadijcb_chat_unread_updated', onChatUnreadEvent);
+      if (msgChannel) supabase.removeChannel(msgChannel);
     };
   }, [profile?.id, isSuperAdmin, isImpersonating]);
 
@@ -225,8 +280,9 @@ export const DashboardLayout: React.FC = () => {
             .from('notifications')
             .select('*')
             .eq('user_id', activeId)
+            .neq('type', 'chat_message')
             .order('created_at', { ascending: false })
-            .limit(20);
+            .limit(40);
           if (Array.isArray(sbNotifs)) {
             for (const r of sbNotifs as any[]) {
               const dedupKey = r.data?.message_id || r.id;
@@ -269,7 +325,6 @@ export const DashboardLayout: React.FC = () => {
     const timer = setInterval(() => {
       if (document.visibilityState === 'visible') refreshSystemNotifications();
     }, 60000);
-    window.addEventListener('jadijcb_chat_unread_updated', refreshSystemNotifications);
 
     const activeId = profile?.id || user?.id;
     let notifChannel: any = null;
@@ -287,6 +342,10 @@ export const DashboardLayout: React.FC = () => {
             },
             (payload: any) => {
               const row = payload?.new;
+              if (row?.type === 'chat_message') {
+                // Chat messages are handled by ChatAlertListener popup + unread badge on المحادثات
+                return;
+              }
               refreshSystemNotifications();
               if (row?.type === 'booking_breakdown') {
                 window.dispatchEvent(new CustomEvent('jadijcb_booking_event'));
@@ -376,7 +435,6 @@ export const DashboardLayout: React.FC = () => {
 
     return () => {
       clearInterval(timer);
-      window.removeEventListener('jadijcb_chat_unread_updated', refreshSystemNotifications);
       if (notifChannel) supabase.removeChannel(notifChannel);
     };
   }, [
@@ -416,21 +474,236 @@ export const DashboardLayout: React.FC = () => {
     return unsub;
   }, [isDriver, isDriverBusy, profile?.id, profile?.driver_machines]);
 
-  // Sync pending bookings for owner notification badge with real-time updates
+  // Sync pending bookings & important operational booking alerts (1-day expiry, overdue, unpaid dues)
   useEffect(() => {
     const activeOwnerId = isImpersonating ? profile?.id : (user?.id || profile?.id);
 
-    if (!activeOwnerId || isContractor || isDriver || (isSuperAdmin && !isImpersonating)) {
+    if (!activeOwnerId || isDriver || (isSuperAdmin && !isImpersonating)) {
       setPendingBookingsCount(0);
       setPendingBookingsList([]);
+      setOperationalAlerts([]);
       return;
     }
 
     let previousCount = -1;
 
+    const buildOperationalAlerts = (
+      bookingsList: Booking[],
+      paymentsList: ReturnType<typeof paymentService.getLocalPayments>,
+      forContractor: boolean
+    ) => {
+      const nowMs = Date.now();
+      const oneDayMs = 24 * 3600 * 1000;
+      const twoWeeksMs = 14 * oneDayMs;
+      const alerts: Array<{
+        id: string;
+        kind: 'booking_expiring_soon' | 'booking_overdue' | 'booking_unpaid_balance';
+        bookingId: string;
+        titleAr: string;
+        titleFr: string;
+        bodyAr: string;
+        bodyFr: string;
+        targetUrl: string;
+        clientPhone?: string;
+        clientName?: string;
+        machineName?: string;
+        totalPrice?: number;
+        balanceDue?: number;
+        sortMs: number;
+        createdAt: string;
+      }> = [];
+
+      for (const b of bookingsList) {
+        if (!b?.id || b.status === 'cancelled' || b.status === 'pending') continue;
+
+        const machineNameAr = b.machine?.title_ar || b.machine?.title_fr || 'الآلية';
+        const machineNameFr = b.machine?.title_fr || b.machine?.title_ar || 'Engin';
+        const clientName = b.client_name || (lang === 'fr' ? 'Client' : 'زبون مقاولة');
+        const endIso = b.end_at || b.end_date || '';
+        const endMs = endIso ? new Date(endIso).getTime() : 0;
+        const isPaused = Boolean(b.pause_state?.is_paused);
+
+        // 1. 1-Day Rental Expiry / Overdue Return Alerts (active non-paused bookings)
+        if (b.status === 'active' && !isPaused && endMs > 0) {
+          const remainingMs = endMs - nowMs;
+          if (remainingMs > 0 && remainingMs <= oneDayMs) {
+            const hoursLeft = Math.max(1, Math.round(remainingMs / 3600000));
+            const triggerMs = Math.min(nowMs, endMs - oneDayMs);
+            alerts.push({
+              id: `exp_1d_${b.id}_${endIso.slice(0, 10)}`,
+              kind: 'booking_expiring_soon',
+              bookingId: b.id,
+              titleAr: `⏰ ينتهي كراء «${machineNameAr}» خلال أقل من يوم`,
+              titleFr: `⏰ Fin de location «${machineNameFr}» dans moins de 24h`,
+              bodyAr: forContractor
+                ? `متبقي ~${hoursLeft} ساعة على نهاية الكراء (${endIso.slice(0, 10)}). يمكنك طلب التمديد أو تجهيز التسليم.`
+                : `الزبون ${clientName} — متبقي ~${hoursLeft} ساعة (${endIso.slice(0, 10)}). تواصل للتمديد أو الاستلام.`,
+              bodyFr: forContractor
+                ? `Il reste ~${hoursLeft}h avant la fin (${endIso.slice(0, 10)}).`
+                : `Client ${clientName} — ~${hoursLeft}h restantes (${endIso.slice(0, 10)}).`,
+              targetUrl: forContractor ? '/entreprise/bookings' : '/owner/bookings?tab=active',
+              clientPhone: b.client_phone,
+              clientName,
+              machineName: machineNameAr,
+              sortMs: triggerMs,
+              createdAt: new Date(triggerMs).toISOString(),
+            });
+          } else if (remainingMs <= 0 && nowMs - endMs <= twoWeeksMs) {
+            alerts.push({
+              id: `overdue_${b.id}_${endIso.slice(0, 10)}`,
+              kind: 'booking_overdue',
+              bookingId: b.id,
+              titleAr: `🚨 تجاوز موعد انتهاء كراء «${machineNameAr}»`,
+              titleFr: `🚨 Retour dépassé : «${machineNameFr}»`,
+              bodyAr: forContractor
+                ? `انتهت مدة الكراء المحددة (${endIso.slice(0, 10)}). يرجى التنسيق مع المالك.`
+                : `تأخر ${clientName} في إرجاع الآلية عن الموعد (${endIso.slice(0, 10)}).`,
+              bodyFr: forContractor
+                ? `La date de fin (${endIso.slice(0, 10)}) est dépassée.`
+                : `${clientName} a dépassé la date de retour (${endIso.slice(0, 10)}).`,
+              targetUrl: forContractor ? '/entreprise/bookings' : '/owner/bookings?tab=active',
+              clientPhone: b.client_phone,
+              clientName,
+              machineName: machineNameAr,
+              sortMs: endMs,
+              createdAt: new Date(endMs).toISOString(),
+            });
+          }
+        }
+
+        // 2. Unpaid / Partial Payment Balance Alert
+        if (!forContractor) {
+          const stats = paymentService.computeBookingPaymentStats(b, paymentsList);
+          if (stats.balanceDue > 0 && Number(b.total_price) > 0) {
+            const eventMs =
+              b.status === 'completed' && endMs > 0
+                ? Math.min(nowMs, endMs)
+                : new Date(b.created_at || b.start_at || nowMs).getTime();
+            alerts.push({
+              id: `unpaid_${b.id}_${Math.round(stats.balanceDue)}`,
+              kind: 'booking_unpaid_balance',
+              bookingId: b.id,
+              titleAr: `💰 مستحقات غير مسددة: ${clientName}`,
+              titleFr: `💰 Solde impayé : ${clientName}`,
+              bodyAr: `المقاولة لم تدفع كامل المبلغ عن «${machineNameAr}» — المتبقي: ${stats.balanceDue.toLocaleString('fr-FR')} د.م.`,
+              bodyFr: `Reste à payer pour «${machineNameFr}» : ${stats.balanceDue.toLocaleString('fr-FR')} MAD.`,
+              targetUrl: '/owner/bookings?tab=dues',
+              clientPhone: b.client_phone,
+              clientName,
+              machineName: machineNameAr,
+              totalPrice: Number(b.total_price),
+              balanceDue: stats.balanceDue,
+              sortMs: eventMs,
+              createdAt: new Date(eventMs).toISOString(),
+            });
+          }
+        } else {
+          const rawPaid = Number(b.paid_amount) || 0;
+          const total = Number(b.total_price) || 0;
+          const balanceDue =
+            b.payment_status === 'paid'
+              ? 0
+              : Math.max(0, b.balance_due != null ? Number(b.balance_due) : total - rawPaid);
+          if (balanceDue > 0 && (b.status === 'completed' || b.payment_status === 'partial')) {
+            const eventMs =
+              b.status === 'completed' && endMs > 0
+                ? Math.min(nowMs, endMs)
+                : new Date(b.created_at || b.start_at || nowMs).getTime();
+            alerts.push({
+              id: `unpaid_client_${b.id}_${Math.round(balanceDue)}`,
+              kind: 'booking_unpaid_balance',
+              bookingId: b.id,
+              titleAr: `💰 رصيد مستحق الأداء عن «${machineNameAr}»`,
+              titleFr: `💰 Solde restant pour «${machineNameFr}»`,
+              bodyAr: `المبلغ المتبقي للأداء: ${balanceDue.toLocaleString('fr-FR')} د.م.`,
+              bodyFr: `Montant restant à régler : ${balanceDue.toLocaleString('fr-FR')} MAD.`,
+              targetUrl: '/entreprise/bookings',
+              machineName: machineNameAr,
+              totalPrice: total,
+              balanceDue,
+              sortMs: eventMs,
+              createdAt: new Date(eventMs).toISOString(),
+            });
+          }
+        }
+      }
+
+      return alerts;
+    };
+
     const checkPending = async () => {
       try {
         const cachedMachines = machineStore.getCachedMachines();
+
+        if (isContractor) {
+          setPendingBookingsCount(0);
+          setPendingBookingsList([]);
+
+          const contractorMap = new Map<string, Booking>();
+          try {
+            const serverBookings = await serverApi.getBookings({ client_id: activeOwnerId });
+            if (Array.isArray(serverBookings)) {
+              for (const sb of serverBookings) {
+                if (!sb?.id) continue;
+                const matchedMachine =
+                  sb.machine || cachedMachines.find((m) => m.id === sb.machine_id);
+                contractorMap.set(sb.id, { ...sb, machine: matchedMachine });
+              }
+            }
+          } catch {
+            // ignore
+          }
+
+          if (isSupabaseConfigured) {
+            try {
+              const userPhone = profile?.phone || user?.user_metadata?.phone;
+              let cQuery = supabase
+                .from('bookings')
+                .select('*, machines(*)')
+                .order('created_at', { ascending: false })
+                .limit(100);
+              cQuery = userPhone
+                ? cQuery.or(`client_id.eq.${activeOwnerId},client_phone.eq.${userPhone}`)
+                : cQuery.eq('client_id', activeOwnerId);
+              const { data: cData, error: cErr } = await cQuery;
+              if (!cErr && cData) {
+                for (const b of cData as any[]) {
+                  contractorMap.set(b.id, {
+                    id: b.id,
+                    machine_id: b.machine_id,
+                    owner_id: b.owner_id,
+                    client_id: b.client_id,
+                    client_name: b.client_name,
+                    client_phone: b.client_phone,
+                    start_at: b.start_at || b.start_date,
+                    end_at: b.end_at || b.end_date,
+                    total_price: Number(b.total_price) || 0,
+                    paid_amount: Number(b.paid_amount) || 0,
+                    balance_due: b.balance_due != null ? Number(b.balance_due) : undefined,
+                    payment_status: b.payment_status,
+                    status: b.status,
+                    pause_state: b.pause_state || null,
+                    notes: b.notes,
+                    created_at: b.created_at,
+                    machine: b.machines || cachedMachines.find((m) => m.id === b.machine_id),
+                    with_operator: Boolean(b.with_operator ?? true),
+                  });
+                }
+              }
+            } catch {
+              // ignore
+            }
+          }
+
+          const mergedContractor = bookingStore.mergeContractorBookings(
+            Array.from(contractorMap.values()),
+            activeOwnerId,
+            profile?.phone
+          );
+          setOperationalAlerts(buildOperationalAlerts(mergedContractor, [], true));
+          return;
+        }
+
         let ownerMachineIds = cachedMachines
           .filter((m) => m.owner_id === activeOwnerId || !m.owner_id)
           .map((m) => m.id)
@@ -452,10 +725,10 @@ export const DashboardLayout: React.FC = () => {
           }
         }
 
-        const mergedMap = new Map<string, Booking>();
+        const mergedAllMap = new Map<string, Booking>();
         const resolvedNonPendingIds = new Set<string>();
 
-        // 1. Fetch from Server SQLite DB (all statuses so resolved ones are tracked too)
+        // 1. Fetch from Server SQLite DB (all statuses so resolved & operational alerts are tracked too)
         try {
           const serverBookings = await serverApi.getBookings({
             owner_id: activeOwnerId,
@@ -465,11 +738,10 @@ export const DashboardLayout: React.FC = () => {
               if (!sb?.id) continue;
               if (sb.status !== 'pending') {
                 resolvedNonPendingIds.add(sb.id);
-              } else {
-                const matchedMachine =
-                  sb.machine || cachedMachines.find((m) => m.id === sb.machine_id);
-                mergedMap.set(sb.id, { ...sb, machine: matchedMachine });
               }
+              const matchedMachine =
+                sb.machine || cachedMachines.find((m) => m.id === sb.machine_id);
+              mergedAllMap.set(sb.id, { ...sb, machine: matchedMachine });
             }
           }
         } catch (serverErr) {
@@ -522,14 +794,14 @@ export const DashboardLayout: React.FC = () => {
               if (!b?.id) continue;
               if (b.status !== 'pending') {
                 resolvedNonPendingIds.add(b.id);
-                mergedMap.delete(b.id);
-                continue;
+              } else {
+                resolvedNonPendingIds.delete(b.id);
               }
               const matchedMachine =
                 cachedMachines.find((m) => m.id === b.machine_id) ||
                 b.machines ||
                 b.machine;
-              mergedMap.set(b.id, {
+              mergedAllMap.set(b.id, {
                 id: b.id,
                 machine_id: b.machine_id,
                 owner_id: b.owner_id,
@@ -540,6 +812,7 @@ export const DashboardLayout: React.FC = () => {
                 end_at: b.end_at || b.end_date,
                 total_price: Number(b.total_price) || 0,
                 status: b.status,
+                pause_state: b.pause_state || null,
                 notes: b.notes,
                 created_at: b.created_at,
                 machine: matchedMachine,
@@ -551,13 +824,18 @@ export const DashboardLayout: React.FC = () => {
           }
         }
 
-        // 3. Merge local bookingStore fallback (for instant optimistic / offline bookings)
-        const cachedOwnerBookings = bookingStore.mergeOwnerBookings(
-          Array.from(mergedMap.values()),
-          activeOwnerId,
-          ownerMachineIds,
-          false
-        );
+        // 3. Merge local bookingStore fallback & payments
+        const [cachedOwnerBookings, ownerPayments] = await Promise.all([
+          Promise.resolve(
+            bookingStore.mergeOwnerBookings(
+              Array.from(mergedAllMap.values()),
+              activeOwnerId,
+              ownerMachineIds,
+              false
+            )
+          ),
+          paymentService.getPaymentsForOwner(activeOwnerId).catch(() => []),
+        ]);
 
         const pendingList = cachedOwnerBookings
           .filter((b) => b.status === 'pending' && !resolvedNonPendingIds.has(b.id))
@@ -578,6 +856,7 @@ export const DashboardLayout: React.FC = () => {
           }
           return pendingList;
         });
+        setOperationalAlerts(buildOperationalAlerts(cachedOwnerBookings, ownerPayments, false));
 
         // Notify user if a new booking just arrived (avoid interrupting active chat)
         if (
@@ -604,10 +883,15 @@ export const DashboardLayout: React.FC = () => {
     window.addEventListener('jadijcb_booking_event', handleEvent);
     window.addEventListener('jadijcb_bookings_updated', handleEvent);
     window.addEventListener('jadijcb_machines_updated', handleEvent);
+    window.addEventListener('jadijcb_payments_updated', handleEvent);
 
     // 2. Cross-tab storage event
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === 'jadijcb_cached_bookings' || e.key === 'jadijcb_last_booking_event') {
+      if (
+        e.key === 'jadijcb_cached_bookings' ||
+        e.key === 'jadijcb_last_booking_event' ||
+        e.key === 'jadijcb_booking_payments'
+      ) {
         checkPending();
       }
     };
@@ -645,12 +929,13 @@ export const DashboardLayout: React.FC = () => {
       window.removeEventListener('jadijcb_booking_event', handleEvent);
       window.removeEventListener('jadijcb_bookings_updated', handleEvent);
       window.removeEventListener('jadijcb_machines_updated', handleEvent);
+      window.removeEventListener('jadijcb_payments_updated', handleEvent);
       window.removeEventListener('storage', handleStorage);
       clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisible);
       if (bookingsChannel) supabase.removeChannel(bookingsChannel);
     };
-  }, [profile?.id, user?.id, isContractor, isDriver, isSuperAdmin, isImpersonating, lang]);
+  }, [profile?.id, profile?.phone, user?.id, user?.user_metadata?.phone, isContractor, isDriver, isSuperAdmin, isImpersonating, lang]);
 
   const contractorNavigationItems = [
     {
@@ -1029,18 +1314,96 @@ export const DashboardLayout: React.FC = () => {
             <div className="md:hidden shrink-0">
               <LanguageSwitcher className="px-2! min-h-[40px]!" />
             </div>
-              {/* Notifications Button with Live Badge & Dropdown */}
+              {/* Notifications Button with Live Badge & Chronological Important Alerts Dropdown */}
               {(() => {
+                const pendingBookingIdSet = new Set(pendingBookingsList.map((b) => b.id));
                 const generalSystemNotifs = systemNotifications.filter(
                   (n) =>
                     n.type !== 'dispatch_opportunity' &&
-                    !(isDriverBusy && n.type === 'driver_job_offer')
+                    n.type !== 'chat_message' &&
+                    !(isDriverBusy && n.type === 'driver_job_offer') &&
+                    !(
+                      n.type === 'booking_request' &&
+                      n.data?.booking_id &&
+                      pendingBookingIdSet.has(n.data.booking_id)
+                    )
                 );
                 const unreadSystemCount = generalSystemNotifs.filter((n) => !n.is_read && !n.read).length;
                 const unreadOppCount = opportunityNotifications.filter(
                   (n) => !n.is_read && n.status === 'sent'
                 ).length;
-                const totalAlertsCount = pendingBookingsCount + unreadSystemCount + unreadOppCount;
+                const unreadOpCount = operationalAlerts.filter(
+                  (a) => !readOpAlertIds.includes(a.id)
+                ).length;
+                const totalAlertsCount =
+                  pendingBookingsCount + unreadSystemCount + unreadOppCount + unreadOpCount;
+
+                const formatNotifTime = (iso?: string, fallbackMs?: number) => {
+                  const d = iso ? new Date(iso) : fallbackMs ? new Date(fallbackMs) : null;
+                  if (!d || Number.isNaN(d.getTime())) return '';
+                  const now = new Date();
+                  const isSameDay =
+                    d.getFullYear() === now.getFullYear() &&
+                    d.getMonth() === now.getMonth() &&
+                    d.getDate() === now.getDate();
+                  const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+                  if (isSameDay) return hhmm;
+                  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} · ${hhmm}`;
+                };
+
+                type TimelineEntry =
+                  | { kind: 'opportunity'; id: string; sortMs: number; opp: DispatchNotification }
+                  | { kind: 'pending_booking'; id: string; sortMs: number; pb: Booking }
+                  | {
+                      kind: 'operational';
+                      id: string;
+                      sortMs: number;
+                      alert: (typeof operationalAlerts)[number];
+                    }
+                  | { kind: 'system'; id: string; sortMs: number; notif: ServerNotification };
+
+                const timelineItems: TimelineEntry[] = [
+                  ...opportunityNotifications.map((opp) => ({
+                    kind: 'opportunity' as const,
+                    id: `opp_${opp.id}`,
+                    sortMs: new Date(opp.created_at || 0).getTime() || 0,
+                    opp,
+                  })),
+                  ...pendingBookingsList.map((pb) => ({
+                    kind: 'pending_booking' as const,
+                    id: `pb_${pb.id}`,
+                    sortMs: new Date(pb.created_at || pb.start_at || 0).getTime() || 0,
+                    pb,
+                  })),
+                  ...operationalAlerts.map((alert) => ({
+                    kind: 'operational' as const,
+                    id: `op_${alert.id}`,
+                    sortMs: alert.sortMs || 0,
+                    alert,
+                  })),
+                  ...generalSystemNotifs.map((notif) => ({
+                    kind: 'system' as const,
+                    id: `sys_${notif.id}`,
+                    sortMs: new Date(notif.created_at || 0).getTime() || 0,
+                    notif,
+                  })),
+                ].sort((a, b) => b.sortMs - a.sortMs);
+
+                const markOperationalAlertRead = (alertId: string) => {
+                  setReadOpAlertIds((prev) => {
+                    if (prev.includes(alertId)) return prev;
+                    const next = [...prev.slice(-150), alertId];
+                    try {
+                      localStorage.setItem(
+                        `jadijcb_read_op_alerts_${activeNotifUserKey}`,
+                        JSON.stringify(next)
+                      );
+                    } catch {
+                      // ignore
+                    }
+                    return next;
+                  });
+                };
 
                 return (
                   <div className="relative shrink-0">
@@ -1070,7 +1433,7 @@ export const DashboardLayout: React.FC = () => {
                           <div className="flex items-center gap-2">
                             <Bell className="w-4 h-4 text-primary" />
                             <span className="text-xs font-bold">
-                              {lang === 'fr' ? 'Notifications & Opportunités' : 'الإشعارات والفرص المباشرة'}
+                              {lang === 'fr' ? 'Alertes & Opérations' : 'التنبيهات والعمليات الهامة'}
                             </span>
                           </div>
                           <div className="flex items-center gap-2">
@@ -1079,14 +1442,42 @@ export const DashboardLayout: React.FC = () => {
                                 {totalAlertsCount} {lang === 'fr' ? 'nouveaux' : 'جديد'}
                               </span>
                             )}
-                            {unreadSystemCount > 0 && (
+                            {unreadSystemCount + unreadOpCount > 0 && (
                               <button
                                 type="button"
                                 onClick={async () => {
-                                  await serverApi.markAllNotificationsRead(profile?.id);
+                                  const activeUserId = profile?.id || user?.id;
+                                  await serverApi.markAllNotificationsRead(activeUserId);
+                                  if (isSupabaseConfigured && activeUserId) {
+                                    Promise.resolve(
+                                      supabase
+                                        .from('notifications')
+                                        .update({ is_read: true })
+                                        .eq('user_id', activeUserId)
+                                        .neq('type', 'chat_message')
+                                        .eq('is_read', false)
+                                    ).catch(() => {});
+                                  }
                                   setSystemNotifications((prev) =>
                                     prev.map((n) => ({ ...n, is_read: true, read: true }))
                                   );
+                                  if (operationalAlerts.length > 0) {
+                                    const nextIds = Array.from(
+                                      new Set([
+                                        ...readOpAlertIds,
+                                        ...operationalAlerts.map((a) => a.id),
+                                      ])
+                                    ).slice(-150);
+                                    setReadOpAlertIds(nextIds);
+                                    try {
+                                      localStorage.setItem(
+                                        `jadijcb_read_op_alerts_${activeNotifUserKey}`,
+                                        JSON.stringify(nextIds)
+                                      );
+                                    } catch {
+                                      // ignore
+                                    }
+                                  }
                                 }}
                                 className="text-[10px] text-primary hover:underline cursor-pointer"
                               >
@@ -1096,7 +1487,7 @@ export const DashboardLayout: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* Enable or Test Mobile Audio & Push Alerts for Owners & Contractors */}
+                        {/* Enable or Test Mobile Audio & Push Alerts */}
                         {typeof window !== 'undefined' && 'Notification' in window && (
                           notifPermission === 'default' ? (
                             <div className="p-2.5 bg-amber-50 border-b border-amber-200 flex items-center justify-between gap-2">
@@ -1127,8 +1518,8 @@ export const DashboardLayout: React.FC = () => {
                                       title: lang === 'fr' ? 'Notifications activées 🔔' : 'تم تفعيل إشعارات الهاتف 🔔',
                                       body:
                                         lang === 'fr'
-                                          ? 'Les nouveaux messages apparaîtront ici avec sonnerie.'
-                                          : 'ستصلك إشعارات الرسائل في القائمة المنسدلة للهاتف مع صوت تنبيه.',
+                                          ? 'Les alertes importantes apparaîtront ici avec sonnerie.'
+                                          : 'ستصلك التنبيهات والرسائل مع صوت تنبيه على الهاتف.',
                                       tag: 'jadijcb-test-notif',
                                       url: isDriver
                                         ? '/driver/messages'
@@ -1139,7 +1530,7 @@ export const DashboardLayout: React.FC = () => {
                                     toast.success(
                                       lang === 'fr'
                                         ? 'Notifications activées sur votre téléphone !'
-                                        : 'تم تفعيل إشعارات الهاتف بنجاح! ستصلك الرسائل في شريط الإشعارات.'
+                                        : 'تم تفعيل إشعارات الهاتف بنجاح!'
                                     );
                                   } else if (perm === 'denied') {
                                     toast.error(
@@ -1167,7 +1558,7 @@ export const DashboardLayout: React.FC = () => {
                                   unlockAudioContextNow();
                                   playChatMessageSound();
                                   const shown = await showBrowserChatNotification({
-                                    title: lang === 'fr' ? 'Test notification JADIJCB 💬' : 'تجربة إشعار الرسائل JADIJCB 💬',
+                                    title: lang === 'fr' ? 'Test notification JADIJCB 🔔' : 'تجربة تنبيه JADIJCB 🔔',
                                     body:
                                       lang === 'fr'
                                         ? 'Sonnerie et notification dans la barre mobile prêtes.'
@@ -1202,317 +1593,356 @@ export const DashboardLayout: React.FC = () => {
                         )}
 
                         <div className="max-h-80 overflow-y-auto p-2 space-y-2">
-                          {opportunityNotifications.length === 0 &&
-                          pendingBookingsList.length === 0 &&
-                          generalSystemNotifs.length === 0 ? (
+                          {timelineItems.length === 0 ? (
                             <div className="p-6 text-center text-steel-400 text-xs">
                               <Check className="w-8 h-8 mx-auto mb-1 text-steel-300" />
                               <span>
                                 {lang === 'fr'
-                                  ? 'Aucune nouvelle demande pour le moment.'
-                                  : 'لا توجد طلبات أو فرص جديدة حالياً.'}
+                                  ? 'Aucune alerte importante pour le moment.'
+                                  : 'لا توجد تنبيهات أو طلبات جديدة حالياً.'}
                               </span>
                             </div>
                           ) : (
-                            <>
-                              {/* 0. Live InDrive Dispatch Opportunities */}
-                              {opportunityNotifications.map((opp) => {
+                            timelineItems.map((entry) => {
+                              if (entry.kind === 'opportunity') {
+                                const opp = entry.opp;
                                 const isSpareOpp =
                                   opp.campaign_type === 'spare_part' || Boolean(opp.part_reference);
                                 return (
-                                <div
-                                  key={opp.id}
-                                  className={`p-3 rounded-xl border space-y-2 text-xs shadow-xs ${
-                                    !opp.is_read && opp.status === 'sent'
-                                      ? 'bg-ink text-white border-primary'
-                                      : 'bg-amber-50/70 text-ink border-amber-200'
-                                  }`}
-                                >
-                                  <div className="flex items-start gap-2.5">
-                                    <img
-                                      src="/assets/aistudio/image_010e3368.png"
-                                      alt={isSpareOpp ? 'طلب قطعة غيار' : 'فرصة جديدة'}
-                                      className="w-9 h-9 object-contain shrink-0 rounded-lg bg-white/10 p-0.5"
-                                    />
-                                    <div className="min-w-0 flex-1">
-                                      <div className="flex items-center justify-between gap-2">
-                                        <span
-                                          className={`text-xs font-black ${
-                                            !opp.is_read && opp.status === 'sent'
-                                              ? 'text-primary'
-                                              : 'text-primary-dark'
-                                          }`}
-                                        >
-                                          {isSpareOpp ? 'طلب قطعة غيار 🔧' : 'فرصة جديدة'}
-                                        </span>
-                                        {opp.is_nationwide ? (
-                                          <span className="inline-flex items-center gap-1 text-[10px] font-bold opacity-85">
-                                            <Globe className="w-3 h-3" />
-                                            <span>{lang === 'fr' ? 'Maroc' : 'المغرب كاملاً'}</span>
+                                  <div
+                                    key={entry.id}
+                                    className={`p-3 rounded-xl border space-y-2 text-xs shadow-xs ${
+                                      !opp.is_read && opp.status === 'sent'
+                                        ? 'bg-ink text-white border-primary'
+                                        : 'bg-amber-50/70 text-ink border-amber-200'
+                                    }`}
+                                  >
+                                    <div className="flex items-start gap-2.5">
+                                      <img
+                                        src="/assets/aistudio/image_010e3368.png"
+                                        alt={isSpareOpp ? 'طلب قطعة غيار' : 'فرصة جديدة'}
+                                        className="w-9 h-9 object-contain shrink-0 rounded-lg bg-white/10 p-0.5"
+                                      />
+                                      <div className="min-w-0 flex-1">
+                                        <div className="flex items-center justify-between gap-2">
+                                          <span
+                                            className={`text-xs font-black ${
+                                              !opp.is_read && opp.status === 'sent'
+                                                ? 'text-primary'
+                                                : 'text-primary-dark'
+                                            }`}
+                                          >
+                                            {isSpareOpp ? 'طلب قطعة غيار 🔧' : 'فرصة جديدة'}
                                           </span>
-                                        ) : opp.distance_km != null ? (
-                                          <span className="inline-flex items-center gap-1 text-[10px] font-black tabular-nums opacity-90">
-                                            <Navigation className="w-3 h-3" />
-                                            <span>{formatDistanceKm(opp.distance_km, lang)}</span>
-                                          </span>
-                                        ) : null}
+                                          <div className="flex items-center gap-2 shrink-0">
+                                            {opp.is_nationwide ? (
+                                              <span className="inline-flex items-center gap-1 text-[10px] font-bold opacity-85">
+                                                <Globe className="w-3 h-3" />
+                                                <span>{lang === 'fr' ? 'Maroc' : 'المغرب كاملاً'}</span>
+                                              </span>
+                                            ) : opp.distance_km != null ? (
+                                              <span className="inline-flex items-center gap-1 text-[10px] font-black tabular-nums opacity-90">
+                                                <Navigation className="w-3 h-3" />
+                                                <span>{formatDistanceKm(opp.distance_km, lang)}</span>
+                                              </span>
+                                            ) : null}
+                                            <span className="text-[10px] opacity-70 font-mono" dir="ltr">
+                                              {formatNotifTime(opp.created_at, entry.sortMs)}
+                                            </span>
+                                          </div>
+                                        </div>
+                                        <p className="font-black leading-snug mt-0.5 break-words">
+                                          {isSpareOpp
+                                            ? `«${opp.company_name}» يبحث عن Réf: ${opp.part_reference || opp.machine_name}`
+                                            : `«${opp.company_name}» محتاجة «${opp.machine_name}» ديالك`}
+                                        </p>
+                                        <p className="text-[10px] opacity-75 truncate mt-0.5">
+                                          {opp.site_name}
+                                          {opp.site_city ? ` · ${opp.site_city}` : ''}
+                                        </p>
                                       </div>
-                                      <p className="font-black leading-snug mt-0.5 break-words">
+                                    </div>
+
+                                    <div className="flex items-center gap-2 pt-1">
+                                      <button
+                                        type="button"
+                                        onClick={async () => {
+                                          const ownerTargetId = profile?.id || user?.id || '';
+                                          await Promise.allSettled([
+                                            updateDispatchNotificationStatus(
+                                              opp.id,
+                                              {
+                                                is_read: true,
+                                                status: 'accepted',
+                                              },
+                                              opp.campaign_id
+                                            ),
+                                            ensureDispatchConversationLinked({
+                                              contractorId: opp.contractor_id,
+                                              ownerId: ownerTargetId,
+                                              notification: opp,
+                                            }),
+                                          ]);
+                                          setOpportunityNotifications((prev) =>
+                                            prev.map((item) =>
+                                              item.id === opp.id
+                                                ? { ...item, is_read: true, status: 'accepted' }
+                                                : item
+                                            )
+                                          );
+                                          setIsNotificationsOpen(false);
+                                          navigate(
+                                            `/owner/messages?target=${opp.contractor_id}&machine=${opp.machine_id || ''}&campaign=${opp.campaign_id}`
+                                          );
+                                        }}
+                                        className="px-2.5 py-1.5 rounded-lg bg-primary text-ink font-black text-[11px] hover:bg-primary-hover transition-colors cursor-pointer"
+                                      >
                                         {isSpareOpp
-                                          ? `«${opp.company_name}» يبحث عن Réf: ${opp.part_reference || opp.machine_name}`
-                                          : `«${opp.company_name}» محتاجة «${opp.machine_name}» ديالك`}
-                                      </p>
-                                      <p className="text-[10px] opacity-75 truncate mt-0.5">
-                                        {opp.site_name}
-                                        {opp.site_city ? ` · ${opp.site_city}` : ''}
-                                      </p>
+                                          ? lang === 'fr'
+                                            ? 'Disponible & Discuter'
+                                            : 'متوفرة عندي — محادثة'
+                                          : lang === 'fr'
+                                          ? 'Accepter & Discuter'
+                                          : 'موافقة ومحادثة المقاولة'}
+                                      </button>
+                                      {opp.site_phone && (
+                                        <a
+                                          href={`tel:${opp.site_phone}`}
+                                          className="px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white font-bold text-[11px] hover:bg-emerald-700 flex items-center gap-1"
+                                        >
+                                          <Phone className="w-3 h-3" />
+                                          <span>{lang === 'fr' ? 'Appeler' : 'اتصال'}</span>
+                                        </a>
+                                      )}
                                     </div>
                                   </div>
-
-                                  <div className="flex items-center gap-2 pt-1">
-                                    <button
-                                      type="button"
-                                      onClick={async () => {
-                                        const ownerTargetId = profile?.id || user?.id || '';
-                                        await Promise.allSettled([
-                                          updateDispatchNotificationStatus(
-                                            opp.id,
-                                            {
-                                              is_read: true,
-                                              status: 'accepted',
-                                            },
-                                            opp.campaign_id
-                                          ),
-                                          ensureDispatchConversationLinked({
-                                            contractorId: opp.contractor_id,
-                                            ownerId: ownerTargetId,
-                                            notification: opp,
-                                          }),
-                                        ]);
-                                        setOpportunityNotifications((prev) =>
-                                          prev.map((item) =>
-                                            item.id === opp.id
-                                              ? { ...item, is_read: true, status: 'accepted' }
-                                              : item
-                                          )
-                                        );
-                                        setIsNotificationsOpen(false);
-                                        navigate(
-                                          `/owner/messages?target=${opp.contractor_id}&machine=${opp.machine_id || ''}&campaign=${opp.campaign_id}`
-                                        );
-                                      }}
-                                      className="px-2.5 py-1.5 rounded-lg bg-primary text-ink font-black text-[11px] hover:bg-primary-hover transition-colors cursor-pointer"
-                                    >
-                                      {isSpareOpp
-                                        ? lang === 'fr'
-                                          ? 'Disponible & Discuter'
-                                          : 'متوفرة عندي — محادثة'
-                                        : lang === 'fr'
-                                        ? 'Accepter & Discuter'
-                                        : 'موافقة ومحادثة المقاولة'}
-                                    </button>
-                                    {opp.site_phone && (
-                                      <a
-                                        href={`tel:${opp.site_phone}`}
-                                        className="px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white font-bold text-[11px] hover:bg-emerald-700 flex items-center gap-1"
-                                      >
-                                        <Phone className="w-3 h-3" />
-                                        <span>{lang === 'fr' ? 'Appeler' : 'اتصال'}</span>
-                                      </a>
-                                    )}
-                                  </div>
-                                </div>
                                 );
-                              })}
+                              }
 
-                              {/* 1. Pending Bookings requiring action */}
-                              {pendingBookingsList.map((pb) => (
-                                <div
-                                  key={pb.id}
-                                  className="p-3 bg-amber-50/80 rounded-xl border border-amber-300 space-y-1.5 text-xs shadow-xs"
-                                >
-                                  <div className="flex items-center justify-between">
-                                    <span className="font-black text-ink">
-                                      {pb.machine?.title_ar || pb.machine?.title_fr || 'آلية JCB'}
-                                    </span>
-                                    <span className="text-primary-dark font-black font-mono">
-                                      {Number(pb.total_price || 0).toLocaleString('fr-FR')} MAD
-                                    </span>
-                                  </div>
-                                  <div className="text-[11px] text-steel-600 flex items-center gap-2">
-                                    <span className="font-bold">{pb.client_name || 'زبون مقاولة'}</span>
-                                    {pb.client_phone && (
-                                      <span dir="ltr" className="font-mono text-steel-500">
-                                        ({pb.client_phone})
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div className="text-[10px] text-steel-500 font-mono" dir="ltr">
-                                    {pb.start_at?.slice(0, 10)} → {pb.end_at?.slice(0, 10)}
-                                  </div>
-                                  <div className="flex items-center gap-2 pt-1 border-t border-amber-200/60">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setIsNotificationsOpen(false);
-                                        navigate('/owner/bookings?tab=pending');
-                                      }}
-                                      className="px-2.5 py-1 rounded-lg bg-primary text-ink font-bold text-[11px] hover:bg-primary-hover transition-colors cursor-pointer"
-                                    >
-                                      {lang === 'fr' ? 'Voir et Confirmer' : 'مراجعة وتأكيد'}
-                                    </button>
-                                    {pb.client_phone && (
-                                      <a
-                                        href={`https://wa.me/${pb.client_phone.replace(/\D/g, '')}`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="px-2.5 py-1 rounded-lg bg-[#25D366] text-white font-bold text-[11px] hover:bg-[#20bd5a] flex items-center gap-1 cursor-pointer"
-                                      >
-                                        <MessageSquare className="w-3 h-3" />
-                                        <span>{lang === 'fr' ? 'WhatsApp' : 'واتساب'}</span>
-                                      </a>
-                                    )}
-                                  </div>
-                                </div>
-                              ))}
-
-                              {/* 2. System & Chat notifications */}
-                              {generalSystemNotifs.map((notif) => {
-                                const isChatNotif = notif.type === 'chat_message';
-                                const isBreakdownNotif =
-                                  notif.type === 'booking_breakdown' ||
-                                  notif.type === 'booking_breakdown_resolved';
-                                const isPauseNotif =
-                                  notif.type === 'booking_paused' ||
-                                  notif.type === 'booking_resumed';
-                                const isDriverOfferNotif =
-                                  notif.type === 'driver_job_offer' ||
-                                  notif.type === 'driver_deal_closed' ||
-                                  notif.type === 'driver_work_ended' ||
-                                  notif.type === 'driver_application';
-                                const chatConvId = notif.data?.conversation_id || '';
-                                const targetOfferId = notif.data?.offer_id || '';
+                              if (entry.kind === 'pending_booking') {
+                                const pb = entry.pb;
                                 return (
                                   <div
-                                    key={notif.id}
-                                    onClick={async () => {
-                                      if (!notif.is_read) {
-                                        await serverApi.markNotificationRead(notif.id);
-                                        if (isSupabaseConfigured) {
-                                          Promise.resolve(
-                                            supabase
-                                              .from('notifications')
-                                              .update({ is_read: true })
-                                              .eq('id', notif.id)
-                                          ).catch(() => {});
-                                        }
-                                        setSystemNotifications((prev) =>
-                                          prev.map((n) => (n.id === notif.id ? { ...n, is_read: true, read: true } : n))
-                                        );
-                                      }
+                                    key={entry.id}
+                                    className="p-3 bg-amber-50/80 rounded-xl border border-amber-300 space-y-1.5 text-xs shadow-xs"
+                                  >
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className="font-black text-ink truncate">
+                                        🚜 {pb.machine?.title_ar || pb.machine?.title_fr || 'طلب كراء آلية'}
+                                      </span>
+                                      <div className="flex items-center gap-2 shrink-0">
+                                        <span className="text-primary-dark font-black font-mono">
+                                          {Number(pb.total_price || 0).toLocaleString('fr-FR')} MAD
+                                        </span>
+                                        <span className="text-[10px] text-steel-400 font-mono" dir="ltr">
+                                          {formatNotifTime(pb.created_at, entry.sortMs)}
+                                        </span>
+                                      </div>
+                                    </div>
+                                    <div className="text-[11px] text-steel-600 flex items-center gap-2">
+                                      <span className="font-bold">{pb.client_name || 'زبون مقاولة'}</span>
+                                      {pb.client_phone && (
+                                        <span dir="ltr" className="font-mono text-steel-500">
+                                          ({pb.client_phone})
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="text-[10px] text-steel-500 font-mono" dir="ltr">
+                                      {pb.start_at?.slice(0, 10)} → {pb.end_at?.slice(0, 10)}
+                                    </div>
+                                    <div className="flex items-center gap-2 pt-1 border-t border-amber-200/60">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setIsNotificationsOpen(false);
+                                          navigate('/owner/bookings?tab=pending');
+                                        }}
+                                        className="px-2.5 py-1 rounded-lg bg-primary text-ink font-bold text-[11px] hover:bg-primary-hover transition-colors cursor-pointer"
+                                      >
+                                        {lang === 'fr' ? 'Voir et Confirmer' : 'مراجعة وتأكيد'}
+                                      </button>
+                                      {pb.client_phone && (
+                                        <a
+                                          href={`https://wa.me/${pb.client_phone.replace(/\D/g, '')}`}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="px-2.5 py-1 rounded-lg bg-[#25D366] text-white font-bold text-[11px] hover:bg-[#20bd5a] flex items-center gap-1 cursor-pointer"
+                                        >
+                                          <MessageSquare className="w-3 h-3" />
+                                          <span>{lang === 'fr' ? 'WhatsApp' : 'واتساب'}</span>
+                                        </a>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              }
+
+                              if (entry.kind === 'operational') {
+                                const alert = entry.alert;
+                                const isRead = readOpAlertIds.includes(alert.id);
+                                const isDebt = alert.kind === 'booking_unpaid_balance';
+                                const isOverdue = alert.kind === 'booking_overdue';
+                                return (
+                                  <div
+                                    key={entry.id}
+                                    onClick={() => {
+                                      markOperationalAlertRead(alert.id);
                                       setIsNotificationsOpen(false);
-                                      if (isChatNotif) {
-                                        const baseMsgRoute = isDriver
-                                          ? '/driver/messages'
-                                          : isContractor
-                                          ? '/entreprise/messages'
-                                          : '/owner/messages';
-                                        navigate(
-                                          chatConvId
-                                            ? `${baseMsgRoute}?conv=${encodeURIComponent(chatConvId)}`
-                                            : baseMsgRoute
-                                        );
-                                      } else if (notif.type === 'driver_job_offer') {
-                                        cacheDriverOfferFromNotification(notif);
-                                        const targetUrl = targetOfferId
-                                          ? `/driver/joboffer?offer=${encodeURIComponent(targetOfferId)}`
-                                          : '/driver/joboffer';
-                                        navigate(targetUrl);
-                                      } else if (
-                                        notif.type === 'driver_deal_closed' ||
-                                        notif.type === 'driver_work_ended'
-                                      ) {
-                                        if (isDriver) {
-                                          navigate(
-                                            targetOfferId
-                                              ? `/driver/joboffer?tab=agreed&offer=${encodeURIComponent(targetOfferId)}`
-                                              : '/driver/joboffer?tab=agreed'
-                                          );
-                                        } else {
-                                          navigate(
-                                            targetOfferId
-                                              ? `/owner/drivers?offer=${encodeURIComponent(targetOfferId)}`
-                                              : '/owner/drivers'
-                                          );
-                                        }
-                                      } else if (notif.type === 'driver_application') {
-                                        navigate('/owner/machines');
-                                      } else if (notif.type === 'booking_breakdown') {
-                                        navigate('/owner/bookings?tab=active');
-                                      } else if (
-                                        notif.type === 'booking_breakdown_resolved' ||
-                                        notif.type === 'booking_paused' ||
-                                        notif.type === 'booking_resumed'
-                                      ) {
-                                        navigate('/entreprise/bookings');
-                                      } else {
-                                        navigate(
-                                          isDriver
-                                            ? '/driver/joboffer'
-                                            : isContractor
-                                            ? '/entreprise/bookings'
-                                            : '/owner/bookings?tab=pending'
-                                        );
-                                      }
+                                      navigate(alert.targetUrl);
                                     }}
                                     className={`p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
-                                      !notif.is_read && notif.type === 'booking_breakdown'
+                                      !isRead && isOverdue
                                         ? 'bg-rose-50 border-rose-300 font-medium'
-                                        : !notif.is_read && notif.type === 'booking_paused'
+                                        : !isRead && isDebt
+                                        ? 'bg-red-50/80 border-red-300 font-medium'
+                                        : !isRead
                                         ? 'bg-amber-50 border-amber-300 font-medium'
-                                        : !notif.is_read
-                                        ? 'bg-primary/10 border-primary/40 font-medium'
                                         : 'bg-steel-50/70 border-steel-200 text-steel-600'
                                     }`}
                                   >
                                     <div className="flex items-center justify-between text-ink font-bold mb-1 gap-2">
                                       <span className="flex items-center gap-1.5 min-w-0 truncate">
-                                        {isChatNotif && (
-                                          <MessageSquare className="w-3.5 h-3.5 text-primary-dark shrink-0" />
+                                        {isDebt ? (
+                                          <Banknote className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                                        ) : isOverdue ? (
+                                          <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                                        ) : (
+                                          <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                                         )}
-                                        {isDriverOfferNotif && (
-                                          <HardHat className="w-3.5 h-3.5 text-primary-dark shrink-0" />
-                                        )}
-                                        {isBreakdownNotif && (
-                                          <AlertTriangle
-                                            className={`w-3.5 h-3.5 shrink-0 ${
-                                              notif.type === 'booking_breakdown'
-                                                ? 'text-rose-600'
-                                                : 'text-emerald-600'
-                                            }`}
-                                          />
-                                        )}
-                                        {isPauseNotif &&
-                                          (notif.type === 'booking_paused' ? (
-                                            <Pause className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                                          ) : (
-                                            <Play className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                                          ))}
                                         <span className="truncate">
-                                          {lang === 'fr' ? notif.title_fr : notif.title_ar}
+                                          {lang === 'fr' ? alert.titleFr : alert.titleAr}
                                         </span>
                                       </span>
-                                      <span className="text-[10px] text-steel-400 font-mono shrink-0">
-                                        {notif.created_at?.slice(11, 16) || ''}
+                                      <span className="text-[10px] text-steel-400 font-mono shrink-0" dir="ltr">
+                                        {formatNotifTime(alert.createdAt, alert.sortMs)}
                                       </span>
                                     </div>
                                     <p className="text-[11px] text-steel-600 line-clamp-2">
-                                      {lang === 'fr' ? notif.body_fr : notif.body_ar}
+                                      {lang === 'fr' ? alert.bodyFr : alert.bodyAr}
                                     </p>
                                   </div>
                                 );
-                              })}
-                            </>
+                              }
+
+                              const notif = entry.notif;
+                              const isBreakdownNotif =
+                                notif.type === 'booking_breakdown' ||
+                                notif.type === 'booking_breakdown_resolved';
+                              const isPauseNotif =
+                                notif.type === 'booking_paused' ||
+                                notif.type === 'booking_resumed';
+                              const isDriverOfferNotif =
+                                notif.type === 'driver_job_offer' ||
+                                notif.type === 'driver_deal_closed' ||
+                                notif.type === 'driver_work_ended' ||
+                                notif.type === 'driver_application';
+                              const targetOfferId = notif.data?.offer_id || '';
+                              return (
+                                <div
+                                  key={entry.id}
+                                  onClick={async () => {
+                                    if (!notif.is_read) {
+                                      await serverApi.markNotificationRead(notif.id);
+                                      if (isSupabaseConfigured) {
+                                        Promise.resolve(
+                                          supabase
+                                            .from('notifications')
+                                            .update({ is_read: true })
+                                            .eq('id', notif.id)
+                                        ).catch(() => {});
+                                      }
+                                      setSystemNotifications((prev) =>
+                                        prev.map((n) => (n.id === notif.id ? { ...n, is_read: true, read: true } : n))
+                                      );
+                                    }
+                                    setIsNotificationsOpen(false);
+                                    if (notif.type === 'driver_job_offer') {
+                                      cacheDriverOfferFromNotification(notif);
+                                      const targetUrl = targetOfferId
+                                        ? `/driver/joboffer?offer=${encodeURIComponent(targetOfferId)}`
+                                        : '/driver/joboffer';
+                                      navigate(targetUrl);
+                                    } else if (
+                                      notif.type === 'driver_deal_closed' ||
+                                      notif.type === 'driver_work_ended'
+                                    ) {
+                                      if (isDriver) {
+                                        navigate(
+                                          targetOfferId
+                                            ? `/driver/joboffer?tab=agreed&offer=${encodeURIComponent(targetOfferId)}`
+                                            : '/driver/joboffer?tab=agreed'
+                                        );
+                                      } else {
+                                        navigate(
+                                          targetOfferId
+                                            ? `/owner/drivers?offer=${encodeURIComponent(targetOfferId)}`
+                                            : '/owner/drivers'
+                                        );
+                                      }
+                                    } else if (notif.type === 'driver_application') {
+                                      navigate('/owner/machines');
+                                    } else if (notif.type === 'booking_breakdown') {
+                                      navigate('/owner/bookings?tab=active');
+                                    } else if (
+                                      notif.type === 'booking_breakdown_resolved' ||
+                                      notif.type === 'booking_paused' ||
+                                      notif.type === 'booking_resumed'
+                                    ) {
+                                      navigate('/entreprise/bookings');
+                                    } else {
+                                      navigate(
+                                        isDriver
+                                          ? '/driver/joboffer'
+                                          : isContractor
+                                          ? '/entreprise/bookings'
+                                          : '/owner/bookings?tab=pending'
+                                      );
+                                    }
+                                  }}
+                                  className={`p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
+                                    !notif.is_read && notif.type === 'booking_breakdown'
+                                      ? 'bg-rose-50 border-rose-300 font-medium'
+                                      : !notif.is_read && notif.type === 'booking_paused'
+                                      ? 'bg-amber-50 border-amber-300 font-medium'
+                                      : !notif.is_read
+                                      ? 'bg-primary/10 border-primary/40 font-medium'
+                                      : 'bg-steel-50/70 border-steel-200 text-steel-600'
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between text-ink font-bold mb-1 gap-2">
+                                    <span className="flex items-center gap-1.5 min-w-0 truncate">
+                                      {isDriverOfferNotif && (
+                                        <HardHat className="w-3.5 h-3.5 text-primary-dark shrink-0" />
+                                      )}
+                                      {isBreakdownNotif && (
+                                        <AlertTriangle
+                                          className={`w-3.5 h-3.5 shrink-0 ${
+                                            notif.type === 'booking_breakdown'
+                                              ? 'text-rose-600'
+                                              : 'text-emerald-600'
+                                          }`}
+                                        />
+                                      )}
+                                      {isPauseNotif &&
+                                        (notif.type === 'booking_paused' ? (
+                                          <Pause className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                        ) : (
+                                          <Play className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                        ))}
+                                      <span className="truncate">
+                                        {lang === 'fr' ? notif.title_fr : notif.title_ar}
+                                      </span>
+                                    </span>
+                                    <span className="text-[10px] text-steel-400 font-mono shrink-0" dir="ltr">
+                                      {formatNotifTime(notif.created_at, entry.sortMs)}
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-steel-600 line-clamp-2">
+                                    {lang === 'fr' ? notif.body_fr : notif.body_ar}
+                                  </p>
+                                </div>
+                              );
+                            })
                           )}
                         </div>
 
@@ -1525,7 +1955,7 @@ export const DashboardLayout: React.FC = () => {
                                 isDriver
                                   ? '/driver/joboffer'
                                   : isContractor
-                                  ? '/entreprise/messages'
+                                  ? '/entreprise/bookings'
                                   : '/owner/bookings?tab=pending'
                               );
                             }}
@@ -1537,8 +1967,8 @@ export const DashboardLayout: React.FC = () => {
                                 : 'الانتقال إلى عروض العمل ←'
                               : isContractor
                               ? lang === 'fr'
-                                ? 'Ouvrir mes messages →'
-                                : 'الانتقال إلى المحادثات ←'
+                                ? 'Accéder à mes locations →'
+                                : 'الانتقال إلى حجوزاتي ←'
                               : lang === 'fr'
                               ? 'Accéder au gestionnaire des réservations →'
                               : 'الانتقال إلى سجل الحجوزات الكامل ←'}
@@ -1655,7 +2085,9 @@ export const DashboardLayout: React.FC = () => {
                   >
                     {item.icon}
                     {typeof item.badge === 'number' && item.badge > 0 && (
-                      <span className="absolute -top-1 -end-1 w-2.5 h-2.5 rounded-full bg-primary ring-2 ring-white" />
+                      <span className="absolute -top-1.5 -end-2 min-w-[17px] h-[17px] px-1 rounded-full bg-primary text-ink text-[9px] font-black flex items-center justify-center ring-2 ring-white tabular-nums">
+                        {item.badge > 99 ? '99+' : item.badge}
+                      </span>
                     )}
                   </div>
                   <span className="text-[10px] mt-0.5 tracking-tight truncate max-w-full">
@@ -1714,7 +2146,9 @@ export const DashboardLayout: React.FC = () => {
                   >
                     {item.icon}
                     {typeof item.badge === 'number' && item.badge > 0 && (
-                      <span className="absolute -top-1 -end-1 w-2.5 h-2.5 rounded-full bg-primary ring-2 ring-white" />
+                      <span className="absolute -top-1.5 -end-2 min-w-[17px] h-[17px] px-1 rounded-full bg-primary text-ink text-[9px] font-black flex items-center justify-center ring-2 ring-white tabular-nums">
+                        {item.badge > 99 ? '99+' : item.badge}
+                      </span>
                     )}
                   </div>
                   <span className="text-[10px] mt-0.5 tracking-tight truncate max-w-full">
@@ -1777,7 +2211,9 @@ export const DashboardLayout: React.FC = () => {
                   <div className={`p-1 rounded-xl transition-all relative ${isActive ? 'bg-primary text-ink' : ''}`}>
                     <CalendarCheck className="w-5 h-5" />
                     {pendingBookingsCount > 0 && (
-                      <span className="absolute -top-1 -end-1 w-2.5 h-2.5 rounded-full bg-primary ring-2 ring-white" />
+                      <span className="absolute -top-1.5 -end-2 min-w-[17px] h-[17px] px-1 rounded-full bg-primary text-ink text-[9px] font-black flex items-center justify-center ring-2 ring-white tabular-nums">
+                        {pendingBookingsCount > 99 ? '99+' : pendingBookingsCount}
+                      </span>
                     )}
                   </div>
                   <span className="text-[10px] mt-0.5 tracking-tight truncate max-w-full">
@@ -1849,7 +2285,9 @@ export const DashboardLayout: React.FC = () => {
                   <div className={`p-1 rounded-xl transition-all relative ${isMoreActive ? 'bg-primary text-ink' : ''}`}>
                     <MoreHorizontal className="w-5 h-5" />
                     {unreadMessagesCount > 0 && (
-                      <span className="absolute -top-1 -end-1 w-2.5 h-2.5 rounded-full bg-primary ring-2 ring-white" />
+                      <span className="absolute -top-1.5 -end-2 min-w-[17px] h-[17px] px-1 rounded-full bg-primary text-ink text-[9px] font-black flex items-center justify-center ring-2 ring-white tabular-nums">
+                        {unreadMessagesCount > 99 ? '99+' : unreadMessagesCount}
+                      </span>
                     )}
                   </div>
                   <span className="text-[10px] mt-0.5 tracking-tight truncate max-w-full">
@@ -2089,7 +2527,6 @@ export const DashboardLayout: React.FC = () => {
         <ChatAlertListener
           userId={profile?.id || user?.id || ''}
           userRole={profile?.role || 'owner'}
-          onNotificationsChanged={refreshSystemNotifications}
         />
       )}
     </div>

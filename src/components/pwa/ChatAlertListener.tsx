@@ -227,7 +227,8 @@ export const ChatAlertListener: React.FC<ChatAlertListenerProps> = ({
         if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
         bannerTimerRef.current = setTimeout(() => {
           setFloatingBanner(null);
-        }, 7000);
+          window.dispatchEvent(new CustomEvent('jadijcb_chat_unread_updated'));
+        }, 6000);
       }
     },
     [userId, lang, messagesBaseRoute, resolveSenderName]
@@ -615,7 +616,7 @@ export const ChatAlertListener: React.FC<ChatAlertListenerProps> = ({
     <div
       role="alert"
       aria-live="assertive"
-      className="fixed top-18 sm:top-20 inset-x-3 sm:inset-x-auto sm:end-6 sm:w-[390px] z-[75] animate-in slide-in-from-top duration-200"
+      className="fixed bottom-20 md:bottom-6 end-3 sm:end-6 w-[calc(100vw-1.5rem)] max-w-[360px] z-[75] animate-in slide-in-from-bottom duration-200"
     >
       <div className="bg-ink text-white rounded-2xl border-2 border-primary shadow-2xl overflow-hidden">
         <div className="p-3.5 flex items-start gap-3">

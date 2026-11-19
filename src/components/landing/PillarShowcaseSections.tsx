@@ -7,18 +7,18 @@ import {
   Bell,
   Boxes,
   CheckCircle2,
-  Clock,
   Compass,
   FileCheck2,
   HardHat,
+  LayoutDashboard,
   MapPin,
+  MapPinned,
   PackageSearch,
   PauseCircle,
   QrCode,
   Radar,
   ShieldCheck,
   Store,
-  TrendingUp,
   Truck,
   UserCheck,
   Wallet,
@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { useLanguage } from '../../hooks/useLanguage';
 import { PillarKey } from './HeroSection';
+import { OwnerPhoneShowcase } from './OwnerPhoneShowcase';
 import heroExcavatorImg from '../../assets/images/hero_excavator_1795030081800.jpg';
 import heroDumpTruckImg from '../../assets/images/hero_dump_truck_1795030081385.jpg';
 import marrakechRadarImg from '../../assets/images/marrakech_radar_map_ui_1795124219885.jpg';
@@ -143,7 +144,7 @@ export const PillarShowcaseSections: React.FC<PillarShowcaseSectionsProps> = ({
               <p className="text-sm sm:text-base text-steel-600 mt-3 leading-relaxed max-w-2xl">
                 {lang === 'fr'
                   ? 'Consultez la disponibilité en direct sur la carte GPS, diffusez un besoin urgent aux loueurs voisins et protégez votre budget en cas de panne.'
-                  : 'تصفح الآليات المتاحة حول ورشك على خريطة GPS، أرسل طلباً عاجلاً لجميع الملاك القريبين، وتابع مصاريفك وحماية العداد من هاتفك.'}
+                  : 'تصفح الآليات المتاحة حول ورشك على خريطة GPS، أرسل طلب بحث لجميع الملاك القريبين، وتابع مصاريفك وحماية العداد من هاتفك.'}
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-7">
@@ -159,7 +160,7 @@ export const PillarShowcaseSections: React.FC<PillarShowcaseSectionsProps> = ({
                     icon: Radar,
                     titleAr: 'إرسال طلب للبحث في المنصة',
                     titleFr: 'Envoyer une demande sur la plateforme',
-                    descAr: 'طلب واحد يصل فوراً لكل مالك مناسب في مدينتك لتقارن الأثمنة وتختار الأنسب.',
+                    descAr: 'طلب واحد يصل في الحين لكل مالك مناسب في مدينتك لتقارن الأثمنة وتختار الأنسب.',
                     descFr: 'Un seul envoi alerte tous les propriétaires qualifiés de votre zone.',
                   },
                   {
@@ -173,7 +174,7 @@ export const PillarShowcaseSections: React.FC<PillarShowcaseSectionsProps> = ({
                     icon: ShieldCheck,
                     titleAr: 'مجاني 100% وعقود موثقة',
                     titleFr: '100% gratuit & contrats clairs',
-                    descAr: 'أسعار شفافة بالساعة واليوم والشهر، طلب التمديد إلكترونياً، وعقود وفواتير رسمية.',
+                    descAr: 'أسعار شفافة بالساعة واليوم والشهر، طلب التمديد عبر المنصة، وعقود وفواتير رسمية.',
                     descFr: 'Tarifs transparents, prolongation en ligne et documents B2B conformes.',
                   },
                 ].map((item, idx) => {
@@ -279,7 +280,7 @@ export const PillarShowcaseSections: React.FC<PillarShowcaseSectionsProps> = ({
         variant="light"
         promptAr="عندك ورش بناء، أشغال فلاحية أو مشروع وتبحث عن آلية موثوقة؟"
         promptFr="Vous avez un chantier ou un projet agricole et cherchez un engin fiable ?"
-        ctaAr="سجّل كزبون مجاناً الآن"
+        ctaAr="سجل كزبون مجانا الآن"
         ctaFr="Créer un compte client gratuit"
       />
 
@@ -312,7 +313,7 @@ export const PillarShowcaseSections: React.FC<PillarShowcaseSectionsProps> = ({
 
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-stretch">
-            {/* Visual Fleet Command Card */}
+            {/* Visual Owner Mobile Dashboard & Incoming Rental Popups Card (Full Arabic) */}
             <motion.div
               initial={{ opacity: 0, y: 18 }}
               whileInView={{ opacity: 1, y: 0 }}
@@ -320,75 +321,7 @@ export const PillarShowcaseSections: React.FC<PillarShowcaseSectionsProps> = ({
               transition={{ duration: 0.45, delay: 0.08, ease: [0.16, 1, 0.3, 1] }}
               className="lg:col-span-5 order-2 lg:order-1 flex"
             >
-              <div className="w-full rounded-2xl bg-[#0F172A]/95 border border-primary/35 p-6 shadow-2xl flex flex-col justify-between text-start">
-                <div>
-                  <div className="flex items-center justify-between gap-3 pb-4 border-b border-slate-800">
-                    <div>
-                      <span className="text-xs text-primary font-bold block">
-                        {lang === 'fr' ? 'Pilotage Flotte & Trésorerie' : 'لوحة قيادة الأسطول والأرباح'}
-                      </span>
-                      <span className="text-base font-black text-white">
-                        {lang === 'fr' ? 'Suivi complet de vos engins' : 'تحكم كامل في المداخيل والعقود'}
-                      </span>
-                    </div>
-                    <div className="w-10 h-10 rounded-xl bg-primary/15 text-primary flex items-center justify-center shrink-0">
-                      <TrendingUp className="w-5 h-5" />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3 mt-5">
-                    <div className="p-3.5 rounded-xl bg-ink border border-slate-800">
-                      <span className="text-[11px] text-slate-400 block">
-                        {lang === 'fr' ? 'Revenus du mois' : 'مداخيل الشهر'}
-                      </span>
-                      <div className="text-xl font-black text-white font-mono latin-nums mt-1">
-                        148 500 <span className="text-xs text-primary">MAD</span>
-                      </div>
-                    </div>
-
-                    <div className="p-3.5 rounded-xl bg-ink border border-slate-800">
-                      <span className="text-[11px] text-slate-400 block">
-                        {lang === 'fr' ? 'Fin de contrat proche' : 'عداد انتهاء الكراء'}
-                      </span>
-                      <div className="text-sm font-black text-primary font-mono latin-nums mt-2 flex items-center gap-1.5">
-                        <Clock className="w-4 h-4 shrink-0" />
-                        <span>04d 18h 32m</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 p-3.5 rounded-xl bg-ink border border-slate-800 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2.5">
-                      <Radar className="w-4 h-4 text-primary shrink-0" />
-                      <div>
-                        <div className="text-xs font-bold text-white">
-                          {lang === 'fr' ? 'Radar Marchés Publics' : 'رادار الصفقات العمومية المغربية'}
-                        </div>
-                        <div className="text-[11px] text-slate-400">
-                          {lang === 'fr'
-                            ? 'Contacts directs des entreprises attributaires'
-                            : 'شركات فائزة بصفقات الأشغال وإحداثيات التواصل معها'}
-                        </div>
-                      </div>
-                    </div>
-                    <Link
-                      to="/tenders"
-                      className="text-xs font-bold text-primary hover:underline whitespace-nowrap shrink-0"
-                    >
-                      {lang === 'fr' ? 'Voir' : 'معاينة'}
-                    </Link>
-                  </div>
-                </div>
-
-                <div className="mt-5 pt-4 border-t border-slate-800 flex items-center justify-between gap-3 text-xs">
-                  <span className="text-emerald-300 font-semibold">
-                    {lang === 'fr' ? '3 jours gratuits · puis 290 MAD/mois' : '3 أيام تجربة مجانية · 290 د.م/شهر'}
-                  </span>
-                  <span className="text-slate-400 font-semibold">
-                    {lang === 'fr' ? '0% commission' : '0% عمولة'}
-                  </span>
-                </div>
-              </div>
+              <OwnerPhoneShowcase />
             </motion.div>
 
             {/* Content Column */}
@@ -406,17 +339,31 @@ export const PillarShowcaseSections: React.FC<PillarShowcaseSectionsProps> = ({
               </div>
               <h2 className="font-display text-2xl sm:text-4xl font-black text-white leading-tight text-balance">
                 {lang === 'fr'
-                  ? 'Rentabilisez votre flotte et gérez contrats, clients et chauffeurs'
-                  : 'ضاعف تشغيل آلياتك وأدر عقودك، زبناءك وسائقيك باحترافية'}
+                  ? 'Des clients vous recherchent, recevez des alertes directes et recrutez des chauffeurs prêts à démarrer'
+                  : 'زبناء يبحثون عنك، تصلك إشعارات مباشرة من الباحثين عن آلياتك، وسائقون ينتظرون أن ترسل لهم'}
               </h2>
               <p className="text-sm sm:text-base text-slate-300 mt-3 leading-relaxed max-w-2xl">
                 {lang === 'fr'
-                  ? 'Recevez les demandes de chantiers voisins, accédez aux marchés publics attribués et émettez vos contrats B2B avec ICE en un clic.'
-                  : 'توصّل بطلبات الأوراش القريبة، استكشف الشركات الفائزة بالصفقات العمومية، وأصدر عقودك وفواتيرك برقم ICE بضغطة زر.'}
+                  ? 'Recevez les demandes de chantiers voisins, accédez aux marchés publics attribués et émettez vos contrats et factures en un clic.'
+                  : 'توصل بطلبات الأوراش القريبة، استكشف الشركات الفائزة بالصفقات العمومية، وأصدر عقودك وفواتيرك بضغطة زر.'}
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-7">
                 {[
+                  {
+                    icon: LayoutDashboard,
+                    titleAr: 'لوحة تحكم شاملة للأعمال',
+                    titleFr: 'Tableau de bord complet',
+                    descAr: 'تظهر كل شيء في مكان واحد: طلبات الكراء، الزبناء، رقم المعاملات، المصاريف والأرباح الصافية.',
+                    descFr: 'Centralisez demandes de location, clients, chiffre d’affaires, dépenses et bénéfices nets.',
+                  },
+                  {
+                    icon: MapPinned,
+                    titleAr: 'استعراض الأسطول على الخريطة',
+                    titleFr: 'Affichage de la flotte sur carte',
+                    descAr: 'اعرض آلياتك المتاحة على خريطة المغرب التفاعلية ليراها الزبناء القريبون منك ويتواصلوا معك مباشرة.',
+                    descFr: 'Positionnez vos engins disponibles sur la carte interactive pour capter les chantiers voisins.',
+                  },
                   {
                     icon: QrCode,
                     titleAr: 'متجر إلكتروني خاص + QR Code',
@@ -432,18 +379,18 @@ export const PillarShowcaseSections: React.FC<PillarShowcaseSectionsProps> = ({
                     descFr: 'Repérez les entreprises gagnantes de marchés BTP et leurs coordonnées.',
                   },
                   {
-                    icon: FileCheck2,
-                    titleAr: 'عقود وفواتير برقم ICE',
-                    titleFr: 'Contrats & Factures ICE',
-                    descAr: 'توليد تلقائي لعقود الكراء، الفواتير ووصولات التسليم مطابقة للقانون المغربي.',
-                    descFr: 'Génération instantanée de contrats, factures et bons de livraison B2B.',
+                    icon: PackageSearch,
+                    titleAr: 'مئات موردي قطع الغيار',
+                    titleFr: 'Des centaines de fournisseurs de pièces',
+                    descAr: 'أطلق حملة مباشرة للبحث عن قطع الغيار في المنصة تصل إشعارات مباشرة بمواصفاتك في حسابات الموردين.',
+                    descFr: 'Lancez une demande directe de pièces de rechange : les fournisseurs reçoivent instantanément vos spécifications dans leur espace.',
                   },
                   {
                     icon: Wallet,
-                    titleAr: 'المداخيل، الزبناء وتوظيف السائقين',
-                    titleFr: 'Finances, clients & chauffeurs',
-                    descAr: 'تتبع الديون والمصاريف، عداد انتهاء الكراء، وأرشيف الزبناء مع توظيف سائقين محترفين.',
-                    descFr: 'Suivi des impayés, fin de location, archive clients et recrutement chauffeurs.',
+                    titleAr: 'المداخيل، العقود وتوظيف السائقين',
+                    titleFr: 'Finances, contrats & chauffeurs',
+                    descAr: 'توليد العقود والفواتير، تتبع الديون والمصاريف، عداد انتهاء الكراء، وأرشيف الزبناء مع توظيف سائقين محترفين.',
+                    descFr: 'Contrats et factures, suivi des impayés, fin de location, archive clients et recrutement chauffeurs.',
                   },
                 ].map((item, idx) => {
                   const Icon = item.icon;
@@ -476,7 +423,7 @@ export const PillarShowcaseSections: React.FC<PillarShowcaseSectionsProps> = ({
         variant="dark"
         promptAr="عندك آلية أو أسطول وتريد تشغيله بدون عمولة مع 3 أيام تجربة مجانية؟"
         promptFr="Propriétaire d'engins ? Activez votre essai gratuit de 3 jours sans carte bancaire."
-        ctaAr="سجّل آلياتك الآن (3 أيام مجاناً)"
+        ctaAr="سجل آلياتك الآن (3 أيام مجانا)"
         ctaFr="Inscrire mes engins (3j gratuits)"
       />
 
@@ -513,12 +460,12 @@ export const PillarShowcaseSections: React.FC<PillarShowcaseSectionsProps> = ({
               <h2 className="font-display text-2xl sm:text-4xl font-black text-ink leading-tight text-balance">
                 {lang === 'fr'
                   ? 'Recevez des offres de chantier en direct et signez votre contrat'
-                  : 'توصّل بعروض عمل فورية في مدينتك ووثّق اتفاقك بعقد رقمي'}
+                  : 'توصل بعروض عمل فورية في مدينتك ووثق اتفاقك بعقد رقمي'}
               </h2>
               <p className="text-sm sm:text-base text-steel-600 mt-3 leading-relaxed max-w-2xl">
                 {lang === 'fr'
                   ? 'Inscrivez gratuitement vos engins maîtrisés et soyez alerté dès qu’un propriétaire cherche un chauffeur près de chez vous.'
-                  : 'سجّل أصناف الآليات التي تتقن قيادتها وسنوات خبرتك مجاناً، وتلقّ تنبيهات صوتية فورية عند احتياج المالكين لسائق.'}
+                  : 'سجل أصناف الآليات التي تتقن قيادتها وسنوات خبرتك مجانا، واستقبل تنبيهات صوتية فورية عند احتياج المالكين لسائق.'}
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-7">
@@ -541,14 +488,14 @@ export const PillarShowcaseSections: React.FC<PillarShowcaseSectionsProps> = ({
                     icon: UserCheck,
                     titleAr: 'حالة توفر تلقائية أثناء العمل',
                     titleFr: 'Statut automatique en mission',
-                    descAr: 'تتحول حالتك إلى «في مهمة عمل» طيلة العقد وتعود «متاح للعمل» تلقائياً عند الانتهاء.',
+                    descAr: 'تتحول حالتك إلى «في مهمة عمل» طيلة العقد وتعود «متاح للعمل» بشكل تلقائي عند الانتهاء.',
                     descFr: 'Votre profil passe en « En mission » durant le contrat puis redevient libre.',
                   },
                   {
                     icon: HardHat,
                     titleAr: 'ملف مهني مجاني بدون وسطاء',
                     titleFr: 'Profil pro 100% gratuit',
-                    descAr: 'تقديم طلبات العمل والتواصل مع مالكي الآليات في جميع المدن المغربية مجاناً تماماً.',
+                    descAr: 'تقديم طلبات العمل والتواصل مع مالكي الآليات في جميع المدن المغربية بالمجان بالكامل.',
                     descFr: 'Postulez librement et échangez directement avec les propriétaires d’engins.',
                   },
                 ].map((item, idx) => {
@@ -646,7 +593,7 @@ export const PillarShowcaseSections: React.FC<PillarShowcaseSectionsProps> = ({
         variant="light"
         promptAr="هل أنت سائق جرافة، حفارة، رافعة أو شاحنة ثقيلة وتبحث عن فرص عمل دائمة؟"
         promptFr="Chauffeur d'engins qualifié ? Recevez les opportunités de votre ville gratuitement."
-        ctaAr="سجّل حساب سائق مجاناً الآن"
+        ctaAr="سجل حساب سائق مجانا الآن"
         ctaFr="Créer mon profil conducteur"
       />
 
@@ -694,7 +641,7 @@ export const PillarShowcaseSections: React.FC<PillarShowcaseSectionsProps> = ({
                       <span className="text-xs text-primary font-bold block">
                         {lang === 'fr'
                           ? 'Espace Fournisseur · Bientôt disponible'
-                          : 'فضاء موردي قطع الغيار · قريباً في المنصة'}
+                          : 'فضاء موردي قطع الغيار · قريبا في المنصة'}
                       </span>
                       <span className="text-base font-black text-white">
                         {lang === 'fr'
@@ -785,7 +732,7 @@ export const PillarShowcaseSections: React.FC<PillarShowcaseSectionsProps> = ({
               <p className="text-sm sm:text-base text-slate-300 mt-3 leading-relaxed max-w-2xl">
                 {lang === 'fr'
                   ? 'Préparez l’ouverture de votre espace fournisseur : recevez les demandes de pièces en temps réel, créez votre boutique et pilotez stock et bénéfices.'
-                  : 'منظومة متكاملة نُعدّها لمحلات وموزعي قطع الغيار لربطهم مباشرة بمالكي الآليات المتوقفين في الأوراش وإدارة مبيعاتهم من مكان واحد.'}
+                  : 'منظومة متكاملة نجهزها لمحلات وموزعي قطع الغيار لربطهم مباشرة بمالكي الآليات المتوقفين في الأوراش وإدارة مبيعاتهم من مكان واحد.'}
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-7">
@@ -794,21 +741,21 @@ export const PillarShowcaseSections: React.FC<PillarShowcaseSectionsProps> = ({
                     icon: Truck,
                     titleAr: 'سوق مفتوح من المالكين والزبناء',
                     titleFr: 'Marché ouvert B2B ciblé',
-                    descAr: 'اعرض قطع الغيار، الفلاتر، الخراطيم، الزيوت والجنازير أمام الباحثين عنها فعلياً كل يوم.',
+                    descAr: 'اعرض قطع الغيار، الفلاتر، الخراطيم، الزيوت والجنازير أمام الباحثين عنها كل يوم.',
                     descFr: 'Connectez votre catalogue aux loueurs d’engins et chantiers qui recherchent vos pièces.',
                   },
                   {
                     icon: Bell,
                     titleAr: 'إشعارات فورية في حينها',
                     titleFr: 'Alertes demandes en direct',
-                    descAr: 'تلقّ إشعاراً لحظياً فور بحث أي مالك آلية عن قطعة غيار محددة لتجيب بالثمن والتوصيل.',
+                    descAr: 'تتوصل بإشعار فوري بمجرد بحث أي مالك آلية عن قطعة غيار محددة لتجيب بالثمن والتوصيل.',
                     descFr: 'Recevez une alerte instantanée lorsqu’un propriétaire recherche une référence précise.',
                   },
                   {
                     icon: Store,
                     titleAr: 'متجر خاص وتوليد عقود البيع',
                     titleFr: 'Boutique dédiée & Contrats de vente',
-                    descAr: 'صمّم متجرك الخاص داخل المنصة مع إمكانية توليد عقود بيع وفواتير احترافية لزبنائك.',
+                    descAr: 'صمم متجرك الخاص داخل المنصة مع إمكانية توليد عقود بيع وفواتير احترافية لزبنائك.',
                     descFr: 'Créez votre boutique en ligne et émettez factures et contrats de vente depuis la plateforme.',
                   },
                   {
@@ -867,7 +814,7 @@ export const PillarShowcaseSections: React.FC<PillarShowcaseSectionsProps> = ({
               className="min-h-[48px] px-8 py-3 rounded-xl bg-primary hover:bg-primary-hover active:scale-[0.98] text-ink font-black text-sm sm:text-base shadow-yellow-glow transition-all inline-flex items-center justify-center gap-2 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
               <span>
-                {lang === 'fr' ? 'Créer mon compte maintenant' : 'سجّل حسابك الآن مجاناً'}
+                {lang === 'fr' ? 'Créer mon compte maintenant' : 'سجل حسابك الآن مجانا'}
               </span>
               <ArrowIcon className="w-4 h-4 shrink-0" />
             </Link>

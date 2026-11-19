@@ -99,9 +99,13 @@ export const Footer: React.FC = () => {
               </div>
               <div className="p-3 rounded-xl bg-steel-900 border border-steel-800 text-[11px] leading-relaxed">
                 <span className="text-primary font-bold block mb-0.5">
-                  ICE : 003294821000045
+                  {lang === 'fr' ? 'Réseau National Vérifié' : 'شبكة وطنية موثوقة'}
                 </span>
-                <span>Registre de Commerce : Casablanca N° 584920</span>
+                <span>
+                  {lang === 'fr'
+                    ? 'Couverture complète de toutes les régions du Maroc · Support direct'
+                    : 'تغطية شاملة لجميع جهات المملكة · دعم مباشر عبر المنصة'}
+                </span>
               </div>
             </div>
           </div>

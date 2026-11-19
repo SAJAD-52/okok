@@ -39,7 +39,7 @@ export const StickyMobileCta: React.FC = () => {
             >
               <Truck className="w-4 h-4 shrink-0" />
               <span className="truncate">
-                {lang === 'fr' ? 'Inscrire mes engins' : 'سجّل فـ 30 ثانية'}
+                {lang === 'fr' ? 'Inscrire mes engins' : 'سجل فـ 30 ثانية'}
               </span>
             </Link>
 

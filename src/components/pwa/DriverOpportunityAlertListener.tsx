@@ -280,7 +280,7 @@ export const DriverOpportunityAlertListener: React.FC<DriverOpportunityAlertList
       if (document.visibilityState === 'visible') {
         syncOffersAndCheckUnread(true);
       }
-    }, 30000);
+    }, 90000);
 
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {

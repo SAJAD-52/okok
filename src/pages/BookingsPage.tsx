@@ -332,10 +332,10 @@ export const BookingsPage: React.FC = () => {
       }
     }
 
-    // Auto-refresh silently (45s) while visible
+    // Auto-refresh fallback silently (120s) while visible
     const pollInterval = setInterval(() => {
       if (document.visibilityState === 'visible') loadData(true);
-    }, 45000);
+    }, 120000);
 
     const onVisible = () => {
       if (document.visibilityState === 'visible') loadData(true);

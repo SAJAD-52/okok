@@ -216,7 +216,8 @@ export const DashboardOverviewPage: React.FC = () => {
             const { data: allData, error: allErr } = await supabase
               .from('bookings')
               .select('*')
-              .order('start_at', { ascending: false });
+              .order('start_at', { ascending: false })
+              .limit(200);
             if (!allErr && allData) {
               bookingsDbOk = true;
               for (const row of allData) fetchedMap.set(row.id, row);
@@ -228,7 +229,8 @@ export const DashboardOverviewPage: React.FC = () => {
                 .from('bookings')
                 .select('*')
                 .eq('owner_id', userId)
-                .order('start_at', { ascending: false });
+                .order('start_at', { ascending: false })
+                .limit(200);
               if (!ownerErr && ownerData) {
                 ownerQueryOk = true;
                 for (const row of ownerData) fetchedMap.set(row.id, row);
@@ -241,7 +243,8 @@ export const DashboardOverviewPage: React.FC = () => {
                 .from('bookings')
                 .select('*')
                 .in('machine_id', ownerMachineIds)
-                .order('start_at', { ascending: false });
+                .order('start_at', { ascending: false })
+                .limit(200);
               if (!mErr && machineData) {
                 machineQueryOk = true;
                 for (const row of machineData) fetchedMap.set(row.id, row);
@@ -374,10 +377,12 @@ export const DashboardOverviewPage: React.FC = () => {
       }
     }
 
-    // Silent background auto-refresh (30s)
+    // Silent background auto-refresh fallback while tab is visible (Realtime handles live changes)
     const pollInterval = setInterval(() => {
-      loadDashboardData(true);
-    }, 30000);
+      if (document.visibilityState === 'visible') {
+        loadDashboardData(true);
+      }
+    }, 120000);
 
     const onVisible = () => {
       if (document.visibilityState === 'visible') scheduleSilentUpdate();

@@ -292,12 +292,12 @@ export function useChatRealtime(activeConversation: ChatConversationItem | null)
     };
     window.addEventListener('jadijcb_sse_chat_message', onSseChatMessage);
 
-    // Lightweight 25s silent sync fallback while viewing a thread (Realtime delivers instantly)
+    // Lightweight 60s silent sync fallback while viewing a thread (Realtime delivers instantly)
     const syncTimer = setInterval(() => {
       if (document.visibilityState === 'visible') {
         loadMessages(true);
       }
-    }, 25000);
+    }, 60000);
 
     return () => {
       clearInterval(syncTimer);

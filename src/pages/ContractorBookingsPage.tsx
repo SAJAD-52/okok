@@ -273,10 +273,10 @@ export const ContractorBookingsPage: React.FC = () => {
       }
     }
 
-    // Auto-refresh while visible so owner approval / pause / resume shows up promptly
+    // Auto-refresh fallback while visible (Realtime delivers live updates immediately)
     const poll = setInterval(() => {
       if (document.visibilityState === 'visible') loadContractorBookings();
-    }, 25000);
+    }, 90000);
     const onVisible = () => {
       if (document.visibilityState === 'visible') loadContractorBookings();
     };

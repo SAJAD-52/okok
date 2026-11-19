@@ -289,12 +289,12 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
         .subscribe();
     }
 
-    // 4. Lightweight 30s fallback polling while tab is visible (Realtime handles instant push)
+    // 4. Lightweight 90s fallback polling while tab is visible (Realtime handles instant push)
     const pollTimer = setInterval(() => {
       if (document.visibilityState === 'visible') {
         syncFromSource(true);
       }
-    }, 30000);
+    }, 90000);
 
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {

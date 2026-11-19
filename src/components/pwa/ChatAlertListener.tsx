@@ -582,12 +582,12 @@ export const ChatAlertListener: React.FC<ChatAlertListenerProps> = ({
         .subscribe();
     }
 
-    // 4. Lightweight 30s fallback poll while visible (Realtime + Broadcast handle instant alerts)
+    // 4. Lightweight 90s fallback poll while visible (Realtime + Broadcast handle instant alerts)
     const pollInterval = setInterval(() => {
       if (document.visibilityState === 'visible') {
         syncUnreadAndAlert(false);
       }
-    }, 30000);
+    }, 90000);
 
     const onVisible = () => {
       if (document.visibilityState === 'visible') {

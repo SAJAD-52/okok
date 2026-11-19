@@ -34,6 +34,28 @@ export const DRIVER_CONTRACT_MARKER = '\n#DRIVER_CONTRACT:';
 export const DRIVER_CONTRACT_AGREE_MARKER = '\n#DRIVER_CONTRACT_AGREE:';
 export const DRIVER_WORK_END_MARKER = '\n#DRIVER_WORK_END:';
 
+let driverOffersDbBackoffUntil = 0;
+
+function isDriverOffersDbBackedOff(): boolean {
+  return Date.now() < driverOffersDbBackoffUntil;
+}
+
+function recordDriverOffersDbError(err: any): void {
+  if (!err) return;
+  const code = String(err.code || err.status || '');
+  const msg = String(err.message || '').toLowerCase();
+  if (
+    code === '42P17' ||
+    code === '42P01' ||
+    code === '500' ||
+    msg.includes('infinite recursion') ||
+    msg.includes('does not exist')
+  ) {
+    // Pause repeated background DB reads for 2 minutes on structural/RLS errors
+    driverOffersDbBackoffUntil = Date.now() + 120_000;
+  }
+}
+
 export interface MatchedDriverTarget {
   id: string;
   full_name: string;
@@ -548,7 +570,7 @@ export async function fetchDriverJobOffers(driverId?: string): Promise<DriverJob
 
   const knownOfferIds = new Set<string>();
 
-  if (isSupabaseConfigured) {
+  if (isSupabaseConfigured && !isDriverOffersDbBackedOff()) {
     try {
       const { data, error } = await supabase
         .from('driver_job_offers')
@@ -559,6 +581,7 @@ export async function fetchDriverJobOffers(driverId?: string): Promise<DriverJob
 
       if (error) {
         offersTableError = true;
+        recordDriverOffersDbError(error);
       } else if (Array.isArray(data)) {
         for (const r of data) {
           const mapped = mapDbRowToDriverOffer(r);
@@ -822,7 +845,7 @@ export async function fetchOwnerDriverOffers(
   if (!ownerId) return [];
   const merged = new Map<string, OwnerDriverOfferWithApps>();
 
-  if (isSupabaseConfigured) {
+  if (isSupabaseConfigured && !isDriverOffersDbBackedOff()) {
     try {
       const { data, error } = await supabase
         .from('driver_job_offers')
@@ -831,16 +854,19 @@ export async function fetchOwnerDriverOffers(
         .order('created_at', { ascending: false })
         .limit(30);
 
-      if (!error && Array.isArray(data)) {
+      if (error) {
+        recordDriverOffersDbError(error);
+      } else if (Array.isArray(data)) {
         const offerIds = data.map((r: any) => r.id).filter(Boolean);
         let appsByOffer: Record<string, DriverJobApplicationItem[]> = {};
 
         if (offerIds.length > 0) {
-          const { data: appRows } = await supabase
+          const { data: appRows, error: appErr } = await supabase
             .from('driver_job_applications')
             .select('*')
             .in('offer_id', offerIds)
             .order('created_at', { ascending: false });
+          if (appErr) recordDriverOffersDbError(appErr);
 
           if (Array.isArray(appRows)) {
             appsByOffer = appRows.reduce((acc: Record<string, DriverJobApplicationItem[]>, a: any) => {
@@ -2633,39 +2659,44 @@ export async function fetchDriverAgreedDeals(driverId: string): Promise<AgreedDr
   }
 
   // 2. Query Supabase for authoritative accepted applications & offers
-  if (isSupabaseConfigured && !driverId.startsWith('driver-')) {
+  if (isSupabaseConfigured && !driverId.startsWith('driver-') && !isDriverOffersDbBackedOff()) {
     try {
-      const { data: apps } = await supabase
+      const { data: apps, error: appsErr } = await supabase
         .from('driver_job_applications')
         .select('*')
         .eq('driver_id', driverId)
         .eq('status', 'accepted')
         .order('created_at', { ascending: false });
+      if (appsErr) recordDriverOffersDbError(appsErr);
 
       const appOfferIds = Array.isArray(apps) ? apps.map((a: any) => a.offer_id).filter(Boolean) : [];
       const dbOffersById = new Map<string, DriverJobOffer>();
 
-      if (appOfferIds.length > 0) {
-        const { data: offerRows } = await supabase
+      if (appOfferIds.length > 0 && !isDriverOffersDbBackedOff()) {
+        const { data: offerRows, error: offerErr } = await supabase
           .from('driver_job_offers')
           .select('*')
           .in('id', appOfferIds);
+        if (offerErr) recordDriverOffersDbError(offerErr);
         if (Array.isArray(offerRows)) {
           offerRows.forEach((r: any) => dbOffersById.set(r.id, mapDbRowToDriverOffer(r)));
         }
       }
 
-      try {
-        const { data: wonRows } = await supabase
-          .from('driver_job_offers')
-          .select('*')
-          .eq('won_driver_id', driverId)
-          .eq('status', 'accepted');
-        if (Array.isArray(wonRows)) {
-          wonRows.forEach((r: any) => dbOffersById.set(r.id, mapDbRowToDriverOffer(r)));
+      if (!isDriverOffersDbBackedOff()) {
+        try {
+          const { data: wonRows, error: wonErr } = await supabase
+            .from('driver_job_offers')
+            .select('*')
+            .eq('won_driver_id', driverId)
+            .eq('status', 'accepted');
+          if (wonErr) recordDriverOffersDbError(wonErr);
+          if (Array.isArray(wonRows)) {
+            wonRows.forEach((r: any) => dbOffersById.set(r.id, mapDbRowToDriverOffer(r)));
+          }
+        } catch {
+          // ignore if won_driver_id column not yet migrated
         }
-      } catch {
-        // ignore if won_driver_id column not yet migrated
       }
 
       // Enrich missing machine thumbnails from Supabase machines table
@@ -2883,22 +2914,24 @@ export async function fetchOwnerAgreedDriverDeals(
   }
 
   // 2. Query Supabase for owner's accepted offers + winning applications + driver profiles + machine photos
-  if (isSupabaseConfigured) {
+  if (isSupabaseConfigured && !isDriverOffersDbBackedOff()) {
     try {
-      const { data: offerRows } = await supabase
+      const { data: offerRows, error: offerErr } = await supabase
         .from('driver_job_offers')
         .select('*')
         .eq('owner_id', ownerId)
         .eq('status', 'accepted')
         .order('created_at', { ascending: false })
         .limit(100);
+      if (offerErr) recordDriverOffersDbError(offerErr);
 
       if (Array.isArray(offerRows) && offerRows.length > 0) {
         const offerIds = offerRows.map((r: any) => r.id).filter(Boolean);
-        const { data: appRows } = await supabase
+        const { data: appRows, error: appErr } = await supabase
           .from('driver_job_applications')
           .select('*')
           .in('offer_id', offerIds);
+        if (appErr) recordDriverOffersDbError(appErr);
 
         const driverIds = Array.from(
           new Set([

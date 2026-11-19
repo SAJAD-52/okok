@@ -218,7 +218,7 @@ export const DashboardLayout: React.FC = () => {
     updateUnread();
     const interval = setInterval(() => {
       if (document.visibilityState === 'visible') updateUnread();
-    }, 60000);
+    }, 120000);
     const onVisibleUnread = () => {
       if (document.visibilityState === 'visible') updateUnread();
     };
@@ -325,7 +325,7 @@ export const DashboardLayout: React.FC = () => {
     refreshSystemNotifications();
     const timer = setInterval(() => {
       if (document.visibilityState === 'visible') refreshSystemNotifications();
-    }, 60000);
+    }, 120000);
 
     const activeId = profile?.id || user?.id;
     let notifChannel: any = null;
@@ -932,10 +932,10 @@ export const DashboardLayout: React.FC = () => {
       }
     }
 
-    // 4. Relaxed silent refresh (45s) while tab is visible
+    // 4. Relaxed silent refresh fallback (120s) while tab is visible
     const timer = setInterval(() => {
       if (document.visibilityState === 'visible') checkPending();
-    }, 45000);
+    }, 120000);
     const onVisible = () => {
       if (document.visibilityState === 'visible') checkPending();
     };

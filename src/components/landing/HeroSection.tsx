@@ -44,9 +44,9 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
       <div className="absolute top-1/3 start-1/2 -translate-x-1/2 -translate-y-1/2 w-[480px] sm:w-[760px] h-[340px] bg-primary/15 rounded-full blur-[130px] pointer-events-none" />
       <div className="absolute bottom-0 start-0 end-0 h-20 bg-gradient-to-t from-ink to-transparent pointer-events-none" />
 
-      {/* Left Flanking Excavator Backdrop */}
+      {/* Left Flanking Excavator Backdrop (Visible on Mobile, App & Desktop) */}
       {!excavatorImgFailed && (
-        <div className="hidden md:block absolute top-4 left-0 w-[300px] lg:w-[440px] xl:w-[520px] h-[270px] lg:h-[360px] pointer-events-none opacity-45 lg:opacity-60 select-none [mask-image:radial-gradient(ellipse_at_center,black_38%,transparent_75%)] [-webkit-mask-image:radial-gradient(ellipse_at_center,black_38%,transparent_75%)]">
+        <div className="block absolute top-3 -left-6 sm:left-0 md:top-4 w-[195px] sm:w-[250px] md:w-[310px] lg:w-[440px] xl:w-[520px] h-[185px] sm:h-[230px] md:h-[270px] lg:h-[360px] pointer-events-none opacity-40 sm:opacity-45 lg:opacity-60 select-none [mask-image:radial-gradient(ellipse_at_center,black_38%,transparent_76%)] [-webkit-mask-image:radial-gradient(ellipse_at_center,black_38%,transparent_76%)]">
           <img
             src={heroExcavatorImg}
             alt=""
@@ -58,9 +58,9 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
         </div>
       )}
 
-      {/* Right Flanking Dump Truck Backdrop */}
+      {/* Right Flanking Dump Truck Backdrop (Visible on Mobile, App & Desktop) */}
       {!truckImgFailed && (
-        <div className="hidden md:block absolute top-4 right-0 w-[300px] lg:w-[440px] xl:w-[520px] h-[270px] lg:h-[360px] pointer-events-none opacity-45 lg:opacity-60 select-none [mask-image:radial-gradient(ellipse_at_center,black_38%,transparent_75%)] [-webkit-mask-image:radial-gradient(ellipse_at_center,black_38%,transparent_75%)]">
+        <div className="block absolute top-3 -right-6 sm:right-0 md:top-4 w-[195px] sm:w-[250px] md:w-[310px] lg:w-[440px] xl:w-[520px] h-[185px] sm:h-[230px] md:h-[270px] lg:h-[360px] pointer-events-none opacity-40 sm:opacity-45 lg:opacity-60 select-none [mask-image:radial-gradient(ellipse_at_center,black_38%,transparent_76%)] [-webkit-mask-image:radial-gradient(ellipse_at_center,black_38%,transparent_76%)]">
           <img
             src={heroDumpTruckImg}
             alt=""
@@ -81,7 +81,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
             transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
             className="flex flex-col items-center mb-4 w-full max-w-xl"
           >
-            <span className="font-display text-lg sm:text-2xl lg:text-[1.95rem] font-black text-primary tracking-tight leading-snug">
+            <span className="font-display text-lg sm:text-2xl lg:text-[1.95rem] font-black text-primary tracking-tight leading-snug drop-shadow-[0_2px_10px_rgba(9,15,29,0.95)]">
               {lang === 'fr'
                 ? "Tout l'univers des engins lourds... réuni ici."
                 : 'كل عالم الآليات الثقيلة... يجتمع هنا.'}
@@ -107,7 +107,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}
-            className="font-display text-[1.65rem] sm:text-4xl lg:text-[2.9rem] font-black tracking-tight text-white leading-[1.42] sm:leading-[1.32] text-balance max-w-4xl"
+            className="font-display text-[1.65rem] sm:text-4xl lg:text-[2.9rem] font-black tracking-tight text-white leading-[1.42] sm:leading-[1.32] text-balance max-w-4xl drop-shadow-[0_2px_14px_rgba(9,15,29,0.95)]"
           >
             {lang === 'fr' ? (
               <>

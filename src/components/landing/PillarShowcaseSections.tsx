@@ -299,7 +299,7 @@ export const PillarShowcaseSections: React.FC<PillarShowcaseSectionsProps> = ({
           aria-hidden="true"
         />
         {!ownerImgErr && (
-          <div className="hidden lg:block absolute bottom-0 start-0 w-[440px] h-[280px] opacity-20 pointer-events-none select-none [mask-image:radial-gradient(ellipse_at_bottom_left,black_30%,transparent_75%)] [-webkit-mask-image:radial-gradient(ellipse_at_bottom_left,black_30%,transparent_75%)]">
+          <div className="block absolute bottom-0 start-0 w-[220px] sm:w-[320px] lg:w-[440px] h-[160px] sm:h-[220px] lg:h-[280px] opacity-15 lg:opacity-20 pointer-events-none select-none [mask-image:radial-gradient(ellipse_at_bottom_left,black_30%,transparent_75%)] [-webkit-mask-image:radial-gradient(ellipse_at_bottom_left,black_30%,transparent_75%)]">
             <img
               src={heroExcavatorImg}
               alt=""
@@ -612,7 +612,7 @@ export const PillarShowcaseSections: React.FC<PillarShowcaseSectionsProps> = ({
           aria-hidden="true"
         />
         {!partsImgErr && (
-          <div className="hidden lg:block absolute bottom-0 end-0 w-[440px] h-[280px] opacity-20 pointer-events-none select-none [mask-image:radial-gradient(ellipse_at_bottom_right,black_30%,transparent_75%)] [-webkit-mask-image:radial-gradient(ellipse_at_bottom_right,black_30%,transparent_75%)]">
+          <div className="block absolute bottom-0 end-0 w-[220px] sm:w-[320px] lg:w-[440px] h-[160px] sm:h-[220px] lg:h-[280px] opacity-15 lg:opacity-20 pointer-events-none select-none [mask-image:radial-gradient(ellipse_at_bottom_right,black_30%,transparent_75%)] [-webkit-mask-image:radial-gradient(ellipse_at_bottom_right,black_30%,transparent_75%)]">
             <img
               src={heroDumpTruckImg}
               alt=""

@@ -24,6 +24,7 @@ import {
   MessageSquare,
   Truck,
   RotateCcw,
+  RefreshCw,
 } from 'lucide-react';
 import { PublicHeader } from '../components/layout/PublicHeader';
 import { Footer } from '../components/layout/Footer';
@@ -69,6 +70,7 @@ export const PublicTendersRadarPage: React.FC = () => {
 
   const [tenders, setTenders] = useState<PublicTenderRecord[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [isServerScanRunning, setIsServerScanRunning] = useState<boolean>(false);
   const [apiError, setApiError] = useState<string | null>(null);
 
@@ -84,13 +86,17 @@ export const PublicTendersRadarPage: React.FC = () => {
   const lastSignatureRef = React.useRef('');
 
   const loadTenders = useCallback(
-    async (silent = false) => {
-      if (!silent) {
+    async (silent = false, forceRefresh = false) => {
+      if (!silent && !forceRefresh) {
         setIsLoading(true);
         setApiError(null);
       }
+      if (forceRefresh) {
+        setIsRefreshing(true);
+        setApiError(null);
+      }
       try {
-        const res = await serverApi.getPublicTenders();
+        const res = await serverApi.getPublicTenders(undefined, forceRefresh);
         if (!res.success && res.error) {
           if (!silent) {
             setApiError(
@@ -101,7 +107,7 @@ export const PublicTendersRadarPage: React.FC = () => {
             );
           }
           setIsServerScanRunning(false);
-          return;
+          return false;
         }
         const nextTenders = res.tenders || [];
         const sig = nextTenders.map((t: PublicTenderRecord) => t.id).join(',');
@@ -113,12 +119,25 @@ export const PublicTendersRadarPage: React.FC = () => {
         setIsServerScanRunning(
           Boolean(res.isServerScanRunning || res.lastRun?.status === 'running')
         );
+        return true;
       } finally {
-        if (!silent) setIsLoading(false);
+        if (!silent && !forceRefresh) setIsLoading(false);
+        if (forceRefresh) setIsRefreshing(false);
       }
     },
     [lang]
   );
+
+  const handleRefreshFromServer = async () => {
+    const ok = await loadTenders(false, true);
+    if (ok) {
+      toast.success(
+        lang === 'fr'
+          ? 'Liste actualisée depuis le serveur.'
+          : 'تم تحديث قائمة الصفقات من الخادم.'
+      );
+    }
+  };
 
   useEffect(() => {
     if (hasLoadedOnceRef.current) return;
@@ -288,10 +307,23 @@ export const PublicTendersRadarPage: React.FC = () => {
             </p>
           </div>
 
-          <span className="text-xs sm:text-sm font-bold text-steel-700 font-mono tabular-nums whitespace-nowrap shrink-0">
-            {filteredTenders.length}{' '}
-            {lang === 'fr' ? 'marché(s) affiché(s)' : 'صفقة معروضة'}
-          </span>
+          <div className="flex items-center gap-3 shrink-0">
+            <span className="text-xs sm:text-sm font-bold text-steel-700 font-mono tabular-nums whitespace-nowrap shrink-0">
+              {filteredTenders.length}{' '}
+              {lang === 'fr' ? 'marché(s) affiché(s)' : 'صفقة معروضة'}
+            </span>
+            <button
+              type="button"
+              disabled={isRefreshing || isLoading}
+              onClick={handleRefreshFromServer}
+              className="px-3.5 py-2 rounded-xl border border-steel-200 bg-white hover:bg-steel-50 text-ink font-bold text-xs inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60 transition-colors"
+            >
+              <RefreshCw
+                className={`w-3.5 h-3.5 text-primary-dark ${isRefreshing ? 'animate-spin' : ''}`}
+              />
+              <span>{lang === 'fr' ? 'Actualiser' : 'تحديث'}</span>
+            </button>
+          </div>
         </div>
 
         {/* Simple Filter Bar (Search + City + Work Type) */}

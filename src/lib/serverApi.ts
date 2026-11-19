@@ -312,8 +312,11 @@ export const serverApi = {
     return res.data?.message || null;
   },
 
-  // 14. Owner-Only: Fetch Scraped Moroccan Public Works Tenders & Schedule Status
-  async getPublicTenders(sector?: string): Promise<{
+  // 14. Public Tenders Radar (Automated daily 00:00 Morocco web scrape results)
+  async getPublicTenders(
+    sector?: string,
+    forceRefresh = false
+  ): Promise<{
     success: boolean;
     tenders: any[];
     runs: any[];
@@ -325,9 +328,13 @@ export const serverApi = {
     message_fr?: string;
   }> {
     try {
-      const qs = sector && sector !== 'all' ? `?sector=${encodeURIComponent(sector)}` : '';
+      const params = new URLSearchParams();
+      if (sector && sector !== 'all') params.set('sector', sector);
+      if (forceRefresh) params.set('_t', String(Date.now()));
+      const qs = params.toString() ? `?${params.toString()}` : '';
       const res = await fetch(`${BASE_URL}/api/tenders${qs}`, {
         headers: await getAuthHeaders(false),
+        cache: 'no-store',
       });
       const ct = (res.headers.get('content-type') || '').toLowerCase();
       if (!ct.includes('application/json')) {

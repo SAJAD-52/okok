@@ -31,6 +31,7 @@ import {
   Play,
   Clock,
   Banknote,
+  Radar,
 } from 'lucide-react';
 import { Logo } from '../ui/Logo';
 import { LanguageSwitcher } from '../ui/LanguageSwitcher';
@@ -1009,6 +1010,11 @@ export const DashboardLayout: React.FC = () => {
       to: '/owner/clients',
       label: lang === 'fr' ? 'Clients' : 'الزبائن',
       icon: <Users className="w-5 h-5" />,
+    },
+    {
+      to: '/owner/tenders',
+      label: lang === 'fr' ? 'Radar Marchés Publics' : 'رادار الصفقات العمومية',
+      icon: <Radar className="w-5 h-5" />,
     },
     {
       to: '/owner/drivers',
@@ -2361,6 +2367,30 @@ export const DashboardLayout: React.FC = () => {
             </div>
 
             <div className="space-y-1.5">
+              {/* Public Tenders Radar ("رادار الصفقات العمومية") */}
+              <NavLink
+                to="/owner/tenders"
+                onClick={() => setIsMoreMenuOpen(false)}
+                className={({ isActive }) =>
+                  `flex items-center justify-between p-3 rounded-2xl text-xs font-bold transition-colors ${
+                    isActive ? 'bg-primary text-ink font-black' : 'bg-surface hover:bg-steel-100 text-steel-700'
+                  }`
+                }
+              >
+                <div className="flex items-center gap-3">
+                  <Radar className="w-5 h-5 text-primary-dark" />
+                  <div>
+                    <span className="block">
+                      {lang === 'fr' ? 'Radar Marchés Publics' : 'رادار الصفقات العمومية'}
+                    </span>
+                    <span className="text-[10px] text-steel-400 font-normal block">
+                      marchespublics.gov.ma · 00:00
+                    </span>
+                  </div>
+                </div>
+                <ChevronLeft className="w-4 h-4 rtl:rotate-0 ltr:rotate-180 text-steel-400" />
+              </NavLink>
+
               {/* Agreed Drivers ("السائقون") */}
               <NavLink
                 to="/owner/drivers"

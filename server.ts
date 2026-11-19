@@ -12,6 +12,13 @@ import crypto from 'crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { createServer as createViteServer } from 'vite';
 import * as webpush from 'web-push';
+import {
+  runPublicTendersScrape,
+  startMidnightTendersScheduler,
+  getNextMidnightCasablancaIso,
+  mapRowToTender,
+  mapRowToRun,
+} from './src/server/tendersScraper';
 
 const app = express();
 const PRIMARY_PORT = 3000;
@@ -143,6 +150,46 @@ function createTables(database: DatabaseSync) {
       used INTEGER DEFAULT 0,
       expires_at TEXT NOT NULL,
       created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS public_tenders (
+      id TEXT PRIMARY KEY,
+      reference_code TEXT NOT NULL,
+      dedup_key TEXT UNIQUE NOT NULL,
+      title_ar TEXT NOT NULL,
+      title_fr TEXT NOT NULL,
+      contracting_authority TEXT,
+      sector TEXT DEFAULT 'other',
+      city TEXT,
+      region TEXT,
+      award_date TEXT,
+      amount_mad REAL DEFAULT 0,
+      winning_company TEXT NOT NULL,
+      company_city TEXT,
+      contact_phone TEXT,
+      contact_email TEXT,
+      company_website TEXT,
+      source_url TEXT,
+      source_domain TEXT,
+      machinery_needed_json TEXT,
+      summary_ar TEXT,
+      summary_fr TEXT,
+      scraped_at TEXT NOT NULL,
+      scan_batch_id TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS tender_scrape_runs (
+      id TEXT PRIMARY KEY,
+      trigger_type TEXT NOT NULL,
+      status TEXT NOT NULL,
+      sector_filter TEXT,
+      region_filter TEXT,
+      found_count INTEGER DEFAULT 0,
+      new_count INTEGER DEFAULT 0,
+      sources_json TEXT,
+      error_message TEXT,
+      started_at TEXT NOT NULL,
+      finished_at TEXT
     );
   `);
 }
@@ -2228,10 +2275,178 @@ app.post('/api/admin/toggle-suspend', apiMutationLimiter, async (req, res) => {
 });
 
 // ============================================================================
+// OWNER-ONLY MOROCCAN PUBLIC WORKS TENDERS RADAR (/api/tenders)
+// ============================================================================
+
+async function verifyOwnerOrAdminAccess(req: AuthedRequest): Promise<{ allowed: boolean; role: string }> {
+  if (!req.authUser) {
+    return { allowed: !isSupabaseAuthEnabled, role: 'owner' };
+  }
+  if (req.authUser.isAdmin) {
+    return { allowed: true, role: 'admin' };
+  }
+  let resolvedRole = String(req.authUser.role || '').toLowerCase();
+  const token = extractBearerToken(req);
+
+  if (isSupabaseAuthEnabled && token && req.authUser.id) {
+    try {
+      const profRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(req.authUser.id)}&select=role`,
+        {
+          headers: {
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+      if (profRes.ok) {
+        const rows: any = await profRes.json();
+        if (Array.isArray(rows) && rows[0]?.role) {
+          resolvedRole = String(rows[0].role).toLowerCase();
+        }
+      }
+    } catch {
+      // Fallback to metadata role
+    }
+  }
+
+  const forbiddenRoles = new Set(['client', 'contractor', 'driver']);
+  if (forbiddenRoles.has(resolvedRole)) {
+    return { allowed: false, role: resolvedRole };
+  }
+  return { allowed: true, role: resolvedRole || 'owner' };
+}
+
+let activeManualScrapeInFlight = false;
+
+app.get('/api/tenders', requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    const access = await verifyOwnerOrAdminAccess(req);
+    if (!access.allowed) {
+      return res.status(403).json({
+        success: false,
+        error: 'OWNER_ONLY_FEATURE',
+        message_ar: 'هذه الميزة مخصصة لأصحاب الآليات فقط.',
+        message_fr: 'Cette fonctionnalité est réservée exclusivement aux propriétaires d’engins.',
+      });
+    }
+
+    const sector = String(req.query.sector || '').trim();
+    const limit = Math.min(200, Math.max(10, Number(req.query.limit) || 120));
+
+    let rows: any[] = [];
+    if (sector && sector !== 'all') {
+      rows = db
+        .prepare(
+          `SELECT * FROM public_tenders WHERE sector = ? ORDER BY scraped_at DESC, award_date DESC LIMIT ?`
+        )
+        .all(sector, limit);
+    } else {
+      rows = db
+        .prepare(
+          `SELECT * FROM public_tenders ORDER BY scraped_at DESC, award_date DESC LIMIT ?`
+        )
+        .all(limit);
+    }
+
+    const runRows: any[] = db
+      .prepare(`SELECT * FROM tender_scrape_runs ORDER BY started_at DESC LIMIT 8`)
+      .all();
+
+    return res.json({
+      success: true,
+      tenders: rows.map(mapRowToTender),
+      runs: runRows.map(mapRowToRun),
+      lastRun: runRows[0] ? mapRowToRun(runRows[0]) : null,
+      nextMidnightAt: getNextMidnightCasablancaIso(),
+      scheduleTimezone: 'Africa/Casablanca',
+      scheduleTime: '00:00',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'INTERNAL_ERROR' });
+  }
+});
+
+app.post('/api/tenders/scan', requireAuth, apiMutationLimiter, async (req: AuthedRequest, res) => {
+  try {
+    const access = await verifyOwnerOrAdminAccess(req);
+    if (!access.allowed) {
+      return res.status(403).json({
+        success: false,
+        error: 'OWNER_ONLY_FEATURE',
+        message_ar: 'هذه الميزة مخصصة لأصحاب الآليات فقط.',
+        message_fr: 'Cette fonctionnalité est réservée exclusivement aux propriétaires d’engins.',
+      });
+    }
+
+    if (activeManualScrapeInFlight) {
+      return res.status(409).json({
+        success: false,
+        error: 'SCAN_ALREADY_RUNNING',
+        message_ar: 'عملية مسح الويب المغربي قيد التنفيذ حالياً، يرجى الانتظار بضع ثوانٍ.',
+        message_fr: 'Une analyse du web marocain est déjà en cours, veuillez patienter quelques secondes.',
+      });
+    }
+
+    activeManualScrapeInFlight = true;
+    try {
+      const sectorFilter = String(req.body?.sector || 'all').trim();
+      const regionFilter = String(req.body?.region || 'all').trim();
+      const result = await runPublicTendersScrape(db, {
+        triggerType: 'manual',
+        sectorFilter,
+        regionFilter,
+      });
+
+      const allRows: any[] = db
+        .prepare(`SELECT * FROM public_tenders ORDER BY scraped_at DESC, award_date DESC LIMIT 120`)
+        .all();
+
+      return res.json({
+        success: true,
+        run: result.run,
+        newCount: result.newCount,
+        updatedCount: result.updatedCount,
+        tenders: allRows.map(mapRowToTender),
+        nextMidnightAt: getNextMidnightCasablancaIso(),
+      });
+    } finally {
+      activeManualScrapeInFlight = false;
+    }
+  } catch (err: any) {
+    const code = String(err?.code || '');
+    const status = Number(err?.status) || (code === 'GEMINI_API_KEY_MISSING' ? 503 : 500);
+    return res.status(status).json({
+      success: false,
+      error: code || 'SCRAPE_ERROR',
+      message_ar:
+        code === 'GEMINI_API_KEY_MISSING'
+          ? 'خدمة المسح الذكي غير مفعلة على الخادم حالياً (مفتاح الخدمة غير مضبوط).'
+          : `تعذر إتمام مسح الصفقات العمومية حالياً: ${err?.message || 'خطأ في الخادم'}`,
+      message_fr:
+        code === 'GEMINI_API_KEY_MISSING'
+          ? 'Le service d’extraction intelligente n’est pas configuré sur le serveur.'
+          : `Impossible de finaliser l’analyse des marchés publics : ${err?.message || 'Erreur serveur'}`,
+    });
+  }
+});
+
+// ============================================================================
 // FRONTEND SERVING (Vite Middleware in Dev, Static in Prod)
 // ============================================================================
 
 async function startServer() {
+  // Start daily 00:00 (Africa/Casablanca) Moroccan Public Works Tenders Scraper
+  startMidnightTendersScheduler(db, (result) => {
+    for (const [uid] of sseClients.entries()) {
+      pushSseEvent(uid, 'tenders_updated', {
+        newCount: result.newCount,
+        totalProcessed: result.tenders.length,
+        finishedAt: result.run.finished_at,
+      });
+    }
+  });
+
   if (isProd) {
     const distPath = path.resolve(process.cwd(), 'dist');
     app.use(express.static(distPath));

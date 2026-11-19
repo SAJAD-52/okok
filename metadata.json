@@ -2,5 +2,6 @@
   "name": "JADIJCB",
   "description": "Bilingual (Arabic RTL / French LTR) B2B heavy construction machinery rental/sale and spare parts marketplace in Morocco.",
   "permissions": [],
-  "capabilities": []
+  "capabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

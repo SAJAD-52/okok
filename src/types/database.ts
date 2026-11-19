@@ -650,3 +650,50 @@ export interface DriverDealContext {
   contract?: DriverContractData | null;
 }
 
+export type TenderSector =
+  | 'routes_vrd'
+  | 'terrassement'
+  | 'hydraulique'
+  | 'batiment'
+  | 'genie_civil'
+  | 'other';
+
+export interface PublicTenderRecord {
+  id: string;
+  reference_code: string;
+  dedup_key: string;
+  title_ar: string;
+  title_fr: string;
+  contracting_authority: string;
+  sector: TenderSector;
+  city: string;
+  region: string;
+  award_date: string;
+  amount_mad: number;
+  winning_company: string;
+  company_city: string;
+  contact_phone: string;
+  contact_email: string;
+  company_website: string;
+  source_url: string;
+  source_domain: string;
+  machinery_needed: string[];
+  summary_ar: string;
+  summary_fr: string;
+  scraped_at: string;
+  scan_batch_id: string;
+}
+
+export interface TenderScrapeRunRecord {
+  id: string;
+  trigger_type: 'scheduled_midnight' | 'manual';
+  status: 'running' | 'completed' | 'error';
+  sector_filter: string;
+  region_filter: string;
+  found_count: number;
+  new_count: number;
+  sources: Array<{ uri: string; title: string }>;
+  error_message?: string;
+  started_at: string;
+  finished_at?: string;
+}

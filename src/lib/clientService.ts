@@ -4,9 +4,34 @@
 // ============================================================================
 
 import { supabase, isSupabaseConfigured } from './supabase';
-import { Client, Booking } from '../types/database';
+import { Client, Booking, BookingPayment } from '../types/database';
+import { paymentService } from './paymentService';
 
 const LOCAL_CLIENTS_KEY = 'jadijcb_owner_clients';
+
+export function normalizeClientPhoneKey(phone?: string): string {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (!digits) return '';
+  return digits.length >= 9 ? digits.slice(-9) : digits;
+}
+
+export function doesBookingMatchClient(booking: Booking, client: Pick<Client, 'id' | 'name' | 'phone'> & { linked_profile_id?: string }): boolean {
+  if (booking.client_ref_id && booking.client_ref_id === client.id) return true;
+  if (client.linked_profile_id && booking.client_id && booking.client_id === client.linked_profile_id) {
+    return true;
+  }
+  const bPhone = normalizeClientPhoneKey(booking.client_phone);
+  const cPhone = normalizeClientPhoneKey(client.phone);
+  if (bPhone && cPhone && bPhone === cPhone) return true;
+  if (
+    booking.client_name &&
+    client.name &&
+    booking.client_name.trim().toLowerCase() === client.name.trim().toLowerCase()
+  ) {
+    return true;
+  }
+  return false;
+}
 
 export const clientService = {
   getLocalClients(ownerId: string): Client[] {
@@ -30,7 +55,11 @@ export const clientService = {
     }
   },
 
-  async getClients(ownerId: string, bookings: Booking[] = []): Promise<Client[]> {
+  async getClients(
+    ownerId: string,
+    bookings: Booking[] = [],
+    payments: BookingPayment[] = []
+  ): Promise<Client[]> {
     let clients: Client[] = this.getLocalClients(ownerId);
 
     if (isSupabaseConfigured && ownerId) {
@@ -66,17 +95,22 @@ export const clientService = {
       }
     }
 
-    // Compute live metrics from bookings
+    // Compute live metrics from bookings + payments (excluding cancelled bookings from financial dues)
     return clients.map((client) => {
-      const clientBookings = bookings.filter((b) => {
-        if (b.client_ref_id && b.client_ref_id === client.id) return true;
-        if (b.client_phone && client.phone && b.client_phone.replace(/\D/g, '').endsWith(client.phone.replace(/\D/g, '').slice(-8))) return true;
-        if (b.client_name && client.name && b.client_name.trim().toLowerCase() === client.name.trim().toLowerCase()) return true;
-        return false;
-      });
+      const clientBookings = bookings.filter((b) => doesBookingMatchClient(b, client));
+      const billableBookings = clientBookings.filter((b) => b.status !== 'cancelled');
 
-      const totalBilled = clientBookings.reduce((sum, b) => sum + (Number(b.total_price) || 0), 0);
-      const totalPaid = clientBookings.reduce((sum, b) => sum + (Number(b.paid_amount) || 0), 0);
+      let totalBilled = 0;
+      let totalPaid = 0;
+
+      for (const b of billableBookings) {
+        const price = Number(b.total_price) || 0;
+        const stats = paymentService.computeBookingPaymentStats(b, payments);
+        const paid = Math.max(stats.paidAmount, Number(b.paid_amount) || 0);
+        totalBilled += price;
+        totalPaid += Math.min(price > 0 ? price : paid, paid);
+      }
+
       const unpaidBalance = Math.max(0, totalBilled - totalPaid);
 
       return {

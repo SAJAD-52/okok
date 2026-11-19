@@ -318,6 +318,7 @@ export const serverApi = {
     tenders: any[];
     runs: any[];
     lastRun: any | null;
+    isServerScanRunning?: boolean;
     nextMidnightAt?: string;
     error?: string;
     message_ar?: string;
@@ -338,6 +339,7 @@ export const serverApi = {
         tenders: Array.isArray(data?.tenders) ? data.tenders : [],
         runs: Array.isArray(data?.runs) ? data.runs : [],
         lastRun: data?.lastRun || null,
+        isServerScanRunning: Boolean(data?.isServerScanRunning),
         nextMidnightAt: data?.nextMidnightAt,
         error: data?.error,
         message_ar: data?.message_ar,
@@ -351,74 +353,6 @@ export const serverApi = {
         lastRun: null,
         error: err?.message || 'FETCH_ERROR',
       };
-    }
-  },
-
-  // 15. Owner-Only: Trigger Immediate Live Moroccan Web & marchespublics.gov.ma Scan
-  async triggerPublicTendersScan(params?: {
-    sector?: string;
-    region?: string;
-  }): Promise<{
-    success: boolean;
-    tenders: any[];
-    run?: any;
-    newCount?: number;
-    updatedCount?: number;
-    nextMidnightAt?: string;
-    error?: string;
-    message_ar?: string;
-    message_fr?: string;
-  }> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 75000);
-    try {
-      const res = await fetch(`${BASE_URL}/api/tenders/scan`, {
-        method: 'POST',
-        headers: await getAuthHeaders(true),
-        body: JSON.stringify({
-          sector: params?.sector || 'all',
-          region: params?.region || 'all',
-        }),
-        signal: controller.signal,
-      });
-      const ct = (res.headers.get('content-type') || '').toLowerCase();
-      if (!ct.includes('application/json')) {
-        return {
-          success: false,
-          tenders: [],
-          error: 'BACKEND_UNAVAILABLE',
-          message_ar: 'الخادم غير متصل حالياً.',
-          message_fr: 'Serveur indisponible.',
-        };
-      }
-      const data = await res.json();
-      return {
-        success: Boolean(res.ok && data?.success),
-        tenders: Array.isArray(data?.tenders) ? data.tenders : [],
-        run: data?.run,
-        newCount: data?.newCount,
-        updatedCount: data?.updatedCount,
-        nextMidnightAt: data?.nextMidnightAt,
-        error: data?.error,
-        message_ar: data?.message_ar,
-        message_fr: data?.message_fr,
-      };
-    } catch (err: any) {
-      return {
-        success: false,
-        tenders: [],
-        error: err?.name === 'AbortError' ? 'TIMEOUT' : err?.message || 'SCAN_ERROR',
-        message_ar:
-          err?.name === 'AbortError'
-            ? 'استغرق مسح الويب المغربي وقتاً أطول من المعتاد، أعد المحاولة أو تفقد النتائج بعد قليل.'
-            : 'تعذر الاتصال بخدمة مسح الصفقات العمومية.',
-        message_fr:
-          err?.name === 'AbortError'
-            ? 'Le scan a pris plus de temps que prévu, veuillez réessayer.'
-            : 'Erreur de connexion au service de scan.',
-      };
-    } finally {
-      clearTimeout(timer);
     }
   },
 };

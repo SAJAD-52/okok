@@ -686,7 +686,7 @@ export interface PublicTenderRecord {
 
 export interface TenderScrapeRunRecord {
   id: string;
-  trigger_type: 'scheduled_midnight' | 'manual';
+  trigger_type: 'scheduled_midnight' | 'initial_server_boot' | 'manual';
   status: 'running' | 'completed' | 'error';
   sector_filter: string;
   region_filter: string;

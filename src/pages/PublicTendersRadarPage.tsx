@@ -10,7 +10,6 @@ import { Navigate } from 'react-router-dom';
 import {
   Radar,
   Search,
-  RefreshCw,
   Phone,
   Mail,
   Globe,
@@ -27,13 +26,13 @@ import {
   ChevronDown,
   ChevronUp,
   Truck,
+  Server,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useLanguage } from '../hooks/useLanguage';
 import { serverApi } from '../lib/serverApi';
 import { clientService } from '../lib/clientService';
 import { Card } from '../components/ui/Card';
-import { Button } from '../components/ui/Button';
 import { Skeleton } from '../components/ui/Skeleton';
 import { toast } from '../components/ui/Toast';
 import type { PublicTenderRecord, TenderScrapeRunRecord, TenderSector } from '../types/database';
@@ -98,7 +97,7 @@ export const PublicTendersRadarPage: React.FC = () => {
   const [countdownText, setCountdownText] = useState<string>('--:--:--');
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [isScanning, setIsScanning] = useState<boolean>(false);
+  const [isServerScanRunning, setIsServerScanRunning] = useState<boolean>(false);
   const [apiError, setApiError] = useState<string | null>(null);
 
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -110,8 +109,8 @@ export const PublicTendersRadarPage: React.FC = () => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [savedClientKeys, setSavedClientKeys] = useState<Record<string, boolean>>({});
 
-  const loadTenders = useCallback(async () => {
-    setIsLoading(true);
+  const loadTenders = useCallback(async (silent = false) => {
+    if (!silent) setIsLoading(true);
     setApiError(null);
     try {
       const res = await serverApi.getPublicTenders();
@@ -126,19 +125,30 @@ export const PublicTendersRadarPage: React.FC = () => {
       setTenders(res.tenders || []);
       setRuns(res.runs || []);
       setLastRun(res.lastRun || null);
+      setIsServerScanRunning(Boolean(res.isServerScanRunning || res.lastRun?.status === 'running'));
       if (res.nextMidnightAt) {
         setNextMidnightAt(res.nextMidnightAt);
       }
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   }, [lang]);
 
   useEffect(() => {
     if (isOwnerOrAdmin) {
-      loadTenders();
+      loadTenders(false);
     }
   }, [isOwnerOrAdmin, loadTenders]);
+
+  // Auto-refresh while server boot/scheduled scan is running or if no tenders loaded yet
+  useEffect(() => {
+    if (!isOwnerOrAdmin) return;
+    if (!isServerScanRunning && (tenders.length > 0 || isLoading)) return;
+    const poll = setInterval(() => {
+      loadTenders(true);
+    }, 4500);
+    return () => clearInterval(poll);
+  }, [isOwnerOrAdmin, isServerScanRunning, tenders.length, isLoading, loadTenders]);
 
   // Preload saved owner client names to mark already-added companies
   useEffect(() => {
@@ -160,45 +170,6 @@ export const PublicTendersRadarPage: React.FC = () => {
     }, 1000);
     return () => clearInterval(timer);
   }, [nextMidnightAt]);
-
-  const handleRunScanNow = async () => {
-    setIsScanning(true);
-    setApiError(null);
-    try {
-      const res = await serverApi.triggerPublicTendersScan({
-        sector: selectedSector,
-        region: selectedRegion,
-      });
-
-      if (!res.success) {
-        const msg =
-          (lang === 'fr' ? res.message_fr : res.message_ar) ||
-          (lang === 'fr'
-            ? 'Échec du scan du portail marocain.'
-            : 'تعذر إتمام مسح الويب المغربي حالياً.');
-        setApiError(msg);
-        toast.error(msg);
-        return;
-      }
-
-      setTenders(res.tenders || []);
-      if (res.run) {
-        setLastRun(res.run);
-        setRuns((prev) => [res.run, ...prev.filter((r) => r.id !== res.run.id)].slice(0, 8));
-      }
-      if (res.nextMidnightAt) {
-        setNextMidnightAt(res.nextMidnightAt);
-      }
-
-      toast.success(
-        lang === 'fr'
-          ? `Scan terminé : ${res.newCount ?? 0} nouveau(x) marché(s) extrait(s).`
-          : `اكتمل مسح الويب المغربي: تم استخراج ${res.newCount ?? 0} صفقة جديدة وتحديث ${res.updatedCount ?? 0} صفقة.`
-      );
-    } finally {
-      setIsScanning(false);
-    }
-  };
 
   const handleCopyCoordinates = async (tender: PublicTenderRecord) => {
     const lines = [
@@ -368,26 +339,24 @@ export const PublicTendersRadarPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex flex-col sm:flex-row lg:flex-col xl:flex-row items-stretch sm:items-center gap-2.5 shrink-0">
-          <Button
-            type="button"
-            variant="primary"
-            size="md"
-            disabled={isScanning}
-            onClick={handleRunScanNow}
-            leftIcon={
-              <RefreshCw className={`w-4 h-4 ${isScanning ? 'animate-spin' : ''}`} />
-            }
-            className="whitespace-nowrap shrink-0 font-black"
-          >
-            {isScanning
-              ? lang === 'fr'
-                ? 'Analyse du web marocain...'
-                : 'جاري مسح الصفقات بالويب المغربي...'
-              : lang === 'fr'
-              ? 'Lancer un scan maintenant'
-              : 'تشغيل مسح فوري الآن'}
-          </Button>
+        <div className="shrink-0 bg-surface border border-steel-200 rounded-xl px-4 py-3 flex items-center gap-3">
+          <Server className="w-5 h-5 text-primary-dark shrink-0" />
+          <div className="text-xs leading-snug">
+            <p className="font-black text-ink">
+              {isServerScanRunning
+                ? lang === 'fr'
+                  ? 'Scan serveur en cours...'
+                  : 'جاري المسح التلقائي من الخادم...'
+                : lang === 'fr'
+                ? 'Automatisation serveur active'
+                : 'المسح التلقائي مُدار من الخادم'}
+            </p>
+            <p className="text-steel-500 font-mono tabular-nums mt-0.5">
+              {lang === 'fr'
+                ? 'Prochaine exécution : 00:00 (Maroc)'
+                : 'التشغيل المجدول: 00:00 يومياً'}
+            </p>
+          </div>
         </div>
       </div>
 
@@ -525,42 +494,31 @@ export const PublicTendersRadarPage: React.FC = () => {
           <div className="max-w-lg mx-auto space-y-1.5">
             <h2 className="text-base sm:text-lg font-black text-ink">
               {tenders.length === 0
-                ? lang === 'fr'
+                ? isServerScanRunning
+                  ? lang === 'fr'
+                    ? 'Analyse du web marocain en cours par le serveur...'
+                    : 'جاري مسح الويب المغربي ومنصة الصفقات من الخادم الآن...'
+                  : lang === 'fr'
                   ? 'Aucun marché public extrait pour le moment'
-                  : 'لا توجد صفقات مستخرجة بعد في سجل الرادار'
+                  : 'لا توجد صفقات مستخرجة حالياً في سجل الرادار'
                 : lang === 'fr'
                 ? 'Aucun marché ne correspond à vos filtres'
                 : 'لا توجد صفقات تطابق بحثك الحالي'}
             </h2>
             <p className="text-xs sm:text-sm text-steel-500 leading-relaxed">
               {tenders.length === 0
-                ? lang === 'fr'
-                  ? 'Le scan automatique s’exécute chaque nuit à 00:00 (heure du Maroc). Vous pouvez lancer votre premier scan en direct dès maintenant.'
-                  : 'يقوم الرادار بمسح الويب المغربي ومنصة الصفقات العمومية يومياً عند الساعة 00:00 ليلاً، ويمكنك تشغيل أول مسح مباشر الآن.'
+                ? isServerScanRunning
+                  ? lang === 'fr'
+                    ? 'Les marchés de travaux attribués et les coordonnées des sociétés gagnantes apparaîtront automatiquement dans quelques secondes.'
+                    : 'ستظهر صفقات الأشغال العمومية والشركات الفائزة وإحداثيات التواصل معها تلقائياً فور انتهاء المسح على الخادم.'
+                  : lang === 'fr'
+                  ? 'Le scan est géré automatiquement par le serveur chaque jour à 00:00 (heure du Maroc).'
+                  : 'يتم مسح منصة الصفقات العمومية والويب المغربي تلقائياً من الخادم كل يوم على الساعة 00:00 بتوقيت المغرب.'
                 : lang === 'fr'
                 ? 'Essayez de modifier vos critères de recherche ou de secteur.'
                 : 'جرّب تغيير كلمات البحث أو اختيار جميع القطاعات والجهات.'}
             </p>
           </div>
-          {tenders.length === 0 && (
-            <Button
-              type="button"
-              variant="primary"
-              size="md"
-              disabled={isScanning}
-              onClick={handleRunScanNow}
-              leftIcon={<RefreshCw className={`w-4 h-4 ${isScanning ? 'animate-spin' : ''}`} />}
-              className="mx-auto font-black"
-            >
-              {isScanning
-                ? lang === 'fr'
-                  ? 'Scan en cours...'
-                  : 'جاري مسح الويب المغربي...'
-                : lang === 'fr'
-                ? 'Lancer le premier scan maintenant'
-                : 'تشغيل أول مسح للويب المغربي الآن'}
-            </Button>
-          )}
         </Card>
       ) : (
         <div className="w-full space-y-4">
@@ -911,9 +869,13 @@ export const PublicTendersRadarPage: React.FC = () => {
                         ? lang === 'fr'
                           ? 'Scan automatique 00:00'
                           : 'مسح تلقائي 00:00'
+                        : r.trigger_type === 'initial_server_boot'
+                        ? lang === 'fr'
+                          ? 'Scan initial serveur'
+                          : 'مسح استثنائي أولي من الخادم'
                         : lang === 'fr'
-                        ? 'Scan manuel'
-                        : 'مسح فوري يدوي'}
+                        ? 'Scan serveur'
+                        : 'مسح من الخادم'}
                     </span>
                     <span aria-hidden="true">·</span>
                     <span className="font-mono tabular-nums text-steel-500">

@@ -2358,6 +2358,7 @@ app.get('/api/tenders', requireAuth, async (req: AuthedRequest, res) => {
       tenders: rows.map(mapRowToTender),
       runs: runRows.map(mapRowToRun),
       lastRun: runRows[0] ? mapRowToRun(runRows[0]) : null,
+      isServerScanRunning: Boolean(runRows[0]?.status === 'running'),
       nextMidnightAt: getNextMidnightCasablancaIso(),
       scheduleTimezone: 'Africa/Casablanca',
       scheduleTime: '00:00',
@@ -2369,13 +2370,12 @@ app.get('/api/tenders', requireAuth, async (req: AuthedRequest, res) => {
 
 app.post('/api/tenders/scan', requireAuth, apiMutationLimiter, async (req: AuthedRequest, res) => {
   try {
-    const access = await verifyOwnerOrAdminAccess(req);
-    if (!access.allowed) {
+    if (!req.authUser?.isAdmin) {
       return res.status(403).json({
         success: false,
-        error: 'OWNER_ONLY_FEATURE',
-        message_ar: 'هذه الميزة مخصصة لأصحاب الآليات فقط.',
-        message_fr: 'Cette fonctionnalité est réservée exclusivement aux propriétaires d’engins.',
+        error: 'SERVER_AUTOMATED_ONLY',
+        message_ar: 'يتم مسح الصفقات العمومية تلقائياً من الخادم يومياً عند الساعة 00:00 فقط.',
+        message_fr: 'Le scan des marchés publics est exécuté automatiquement par le serveur à 00h00.',
       });
     }
 

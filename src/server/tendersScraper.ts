@@ -276,6 +276,18 @@ const KNOWN_COMPANY_WEB_CANDIDATES: Array<{
     city: 'القنيطرة / مراكش',
     urls: ['https://www.crec4.com/'],
   },
+  {
+    pattern: /SOGEA\s*Maroc/i,
+    canonicalName: 'SOGEA Maroc (VINCI Construction)',
+    city: 'الدار البيضاء',
+    urls: ['https://www.sogeamaroc.com/contact/', 'https://www.sogeamaroc.com/'],
+  },
+  {
+    pattern: /\bCRBC\b/i,
+    canonicalName: 'CRBC Maroc (China Road and Bridge Corporation)',
+    city: 'الرباط / الناظور',
+    urls: ['https://www.crbc.com/'],
+  },
 ];
 
 const contactCache = new Map<
@@ -573,14 +585,14 @@ function parseAmountMadFromText(text: string): number {
 function extractCityAndRegion(text: string): { city: string; region: string } {
   const mappings: Array<{ rx: RegExp; city: string; region: string }> = [
     { rx: /benslimane|stade\s*hassan\s*ii|بنسليمان/i, city: 'بنسليمان', region: 'الدار البيضاء - سطات' },
-    { rx: /casablanca|mohammed\s*v|casa|الدار البيضاء/i, city: 'الدار البيضاء', region: 'الدار البيضاء - سطات' },
+    { rx: /casablanca|mohammed\s*v|casa|azemmour|الدار البيضاء/i, city: 'الدار البيضاء', region: 'الدار البيضاء - سطات' },
     { rx: /rabat|salé|kénitra|bouregreg|الرباط|القنيطرة/i, city: 'الرباط / القنيطرة', region: 'الرباط - سلا - القنيطرة' },
     { rx: /marrakech|al\s*haouz|ouirgane|مراكش|الحوز/i, city: 'مراكش', region: 'مراكش - آسفي' },
     { rx: /fès|fes|فاس/i, city: 'فاس', region: 'فاس - مكناس' },
-    { rx: /tanger|tétouan|al\s*hoceima|طنجة/i, city: 'طنجة', region: 'طنجة - تطوان - الحسيمة' },
+    { rx: /tanger|tétouan|al\s*hoceima|ksar\s*sghir|طنجة/i, city: 'طنجة / تطوان', region: 'طنجة - تطوان - الحسيمة' },
     { rx: /agadir|souss|أكادير/i, city: 'أكادير', region: 'سوس - ماسة' },
-    { rx: /nador|oujda|oriental|الناظور|وجدة/i, city: 'الناظور / وجدة', region: 'الشرق' },
-    { rx: /azilal|béni\s*mellal|أزيلال|بني ملال/i, city: 'أزيلال', region: 'بني ملال - خنيفرة' },
+    { rx: /nador|guercif|oujda|oriental|الناظور|وجدة/i, city: 'الناظور / وجدة', region: 'الشرق' },
+    { rx: /azilal|béni\s*mellal|béni-mellal|أزيلال|بني ملال/i, city: 'بني ملال', region: 'بني ملال - خنيفرة' },
     { rx: /dakhla|الداخلة/i, city: 'الداخلة', region: 'الداخلة - وادي الذهب' },
     { rx: /\blgv\b/i, city: 'القنيطرة / مراكش', region: 'الرباط - سلا - القنيطرة' },
   ];
@@ -628,6 +640,8 @@ async function scrapeMoroccanWebTenderAwards(): Promise<{
   const rssUrls = [
     'https://news.google.com/rss/search?q=(%22march%C3%A9%22+OR+%22lot%22)+(%22attribu%C3%A9%22+OR+%22remport%C3%A9%22+OR+%22d%C3%A9croche%22)+(%22travaux%22+OR+%22terrassement%22+OR+%22barrage%22+OR+%22routes%22+OR+%22VRD%22)+Maroc&hl=fr&gl=MA&ceid=MA:fr',
     'https://news.google.com/rss/search?q=(%22SGTM%22+OR+%22TGCC%22+OR+%22STAM%22+OR+%22Jet+Contractors%22+OR+%22Lamalif%22+OR+%22Houar%22+OR+%22Somagec%22)+(%22march%C3%A9%22+OR+%22travaux%22)+Maroc&hl=fr&gl=MA&ceid=MA:fr',
+    'https://news.google.com/rss/search?q=(%22Bioui%22+OR+%22SBTX%22+OR+%22Houar%22+OR+%22GTR%22+OR+%22Mojazine%22+OR+%22NGE%22+OR+%22Colas%22+OR+%22SNCE%22)+(%22march%C3%A9%22+OR+%22travaux%22+OR+%22route%22+OR+%22barrage%22)+Maroc&hl=fr&gl=MA&ceid=MA:fr',
+    'https://news.google.com/rss/search?q=(%22autoroute%22+OR+%22barrage%22+OR+%22port%22+OR+%22tramway%22+OR+%22rocade%22+OR+%22CHU%22+OR+%22tr%C3%A9mie%22)+(%22attribu%C3%A9%22+OR+%22remport%C3%A9%22+OR+%22d%C3%A9croche%22)+Maroc&hl=fr&gl=MA&ceid=MA:fr',
   ];
 
   const rawEntries: Array<{ title: string; link: string; pubDate: string }> = [];
@@ -671,17 +685,20 @@ async function scrapeMoroccanWebTenderAwards(): Promise<{
     { rx: /\bSGTM\b/i, name: 'SGTM' },
     { rx: /\bTGCC\b/i, name: 'TGCC' },
     { rx: /\bSTAM\b/i, name: 'STAM' },
+    { rx: /SOGEA\s*Maroc/i, name: 'SOGEA Maroc' },
     { rx: /Lamalif/i, name: 'Lamalif Group' },
     { rx: /Jet\s*Contractors/i, name: 'Jet Contractors' },
-    { rx: /NGE\s*Contracting/i, name: 'NGE Contracting' },
+    { rx: /NGE\s*Contracting|\bNGE\b/i, name: 'NGE Contracting' },
     { rx: /Colas\s*Rail/i, name: 'Colas Rail' },
+    { rx: /\bGTR\b/i, name: 'GTR / Colas' },
     { rx: /\bHouar\b/i, name: 'Houar' },
     { rx: /Bioui|SBTX/i, name: 'Bioui Travaux / SBTX' },
     { rx: /Somagec/i, name: 'Somagec' },
     { rx: /Mojazine/i, name: 'Mojazine' },
     { rx: /Egis\s*Rail/i, name: 'Egis Rail' },
     { rx: /\bAlstom\b/i, name: 'Alstom' },
-    { rx: /\bCREC\s*4\b/i, name: 'CREC 4' },
+    { rx: /\bCREC\s*4\b|\bCREC4\b/i, name: 'CREC 4' },
+    { rx: /\bCRBC\b/i, name: 'CRBC' },
     { rx: /\bSOREMAR\b/i, name: 'SOREMAR' },
   ];
 
@@ -707,15 +724,17 @@ async function scrapeMoroccanWebTenderAwards(): Promise<{
   for (const entry of rawEntries) {
     const cleanTitle = entry.title.replace(/\s+-\s+[^-]+(?:\s+-\s+[^-]+)?$/, '').trim();
     const isBtpAward =
-      /(marché|lot|travaux|terrassement|barrage|stade|lgv|terminal|gare|aménagement|corniche|trémie|cité sportive)/i.test(
+      /(marché|lot|travaux|terrassement|barrage|stade|lgv|terminal|gare|aménagement|corniche|trémie|cité sportive|autoroute|pont|port|chu|dragage|ligne ferroviaire)/i.test(
         cleanTitle
       ) &&
-      /(attribué|remporté|décroche|retenu|adjudicataire)/i.test(cleanTitle);
+      /(attribué|remporté|remporte|décroche|décrochent|confié|retenu|retenues|adjudicataire|achève|lance les travaux)/i.test(
+        cleanTitle
+      );
 
     if (!isBtpAward) continue;
 
-    // Skip non-heavy-machinery interior lots like ascenseurs / mobilier urbain
-    if (/ascenseurs|bus amphibies/i.test(cleanTitle)) continue;
+    // Skip non-heavy-machinery interior lots, sports or financial/stock articles
+    if (/ascenseurs|bus amphibies|bourse|ipo|résultat net|chiffre d['’]affaires|acquiert 60%|dons?|fonds spécial|pablo escobar/i.test(cleanTitle)) continue;
 
     let detectedCompany = '';
     for (const det of companyDetectors) {
@@ -797,7 +816,7 @@ async function scrapeMoroccanWebTenderAwards(): Promise<{
   const results = Array.from(clusterMap.values()).sort((a, b) =>
     b.award_date.localeCompare(a.award_date)
   );
-  return { items: results.slice(0, 20), sources: sources.slice(0, 15) };
+  return { items: results.slice(0, 26), sources: sources.slice(0, 15) };
 }
 
 /**
@@ -1121,15 +1140,21 @@ export function makeTenderClusterKey(title: string, company: string, city: strin
     .replace(/[^a-z0-9\u0600-\u06FF]+/g, '')
     .trim();
 
-  if (/stade.*f[eè]s|complexe sportif.*f[eè]s|(?:2,8[0-9]|f[eè]s).*f[eè]s|(?:sgtm.*2,8[0-9].*f[eè]s)/i.test(s) || (compKey === 'sgtm' && /f[eè]s/i.test(s) && /2,8/.test(s))) {
+  if (
+    /stade.*f[eè]s|complexe sportif.*f[eè]s/i.test(s) ||
+    (compKey === 'sgtm' && /f[eè]s/i.test(s) && /2,8/.test(s))
+  ) {
     return `stade_fes::${compKey}`;
   }
   if (/stade.*marrakech/i.test(s)) return `stade_marrakech::${compKey}`;
   if (/gare.*hassan\s*ii/i.test(s)) return `gare_hassan_ii::${compKey}`;
   if (/terrassement.*hassan\s*ii/i.test(s)) return `terrassement_hassan_ii::${compKey}`;
+  if (/lot\s*3|3,7/i.test(s) && /hassan\s*ii|benslimane/i.test(s)) return `stade_hassan_ii_lot3::${compKey}`;
   if (/stade\s*hassan\s*ii/i.test(s)) return `stade_hassan_ii::${compKey}`;
   if (/a[eé]roport.*mohammed\s*v|terminal.*casablanca/i.test(s)) return `aeroport_cmn::${compKey}`;
+  if (/\blgv\b/i.test(s) && /ksar\s*sghir|162\s*mdh/i.test(s)) return `lgv_ksar_sghir::${compKey}`;
   if (/\blgv\b/i.test(s)) return `lgv_maroc::${compKey}`;
+  if (/nador\s*west/i.test(s) && /sbtx|bioui/i.test(s)) return `nador_west_sbtx`;
 
   const cleanTitle = s
     .replace(/[^a-z0-9\u0600-\u06FF]+/g, ' ')
@@ -1283,7 +1308,7 @@ export function startMidnightTendersScheduler(
     const countRow: any = db
       .prepare(`SELECT COUNT(*) AS cnt FROM public_tenders`)
       .get();
-    if (Number(countRow?.cnt || 0) > 0) return;
+    if (Number(countRow?.cnt || 0) >= 20) return;
 
     isRunning = true;
     console.log(

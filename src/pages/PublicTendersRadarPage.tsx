@@ -79,21 +79,37 @@ export const PublicTendersRadarPage: React.FC = () => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [savedClientKeys, setSavedClientKeys] = useState<Record<string, boolean>>({});
 
+  const hasLoadedOnceRef = React.useRef(false);
+  const pollAttemptsRef = React.useRef(0);
+  const lastSignatureRef = React.useRef('');
+
   const loadTenders = useCallback(
     async (silent = false) => {
-      if (!silent) setIsLoading(true);
-      setApiError(null);
+      if (!silent) {
+        setIsLoading(true);
+        setApiError(null);
+      }
       try {
         const res = await serverApi.getPublicTenders();
         if (!res.success && res.error) {
-          setApiError(
-            (lang === 'fr' ? res.message_fr : res.message_ar) ||
-              (lang === 'fr'
-                ? 'Impossible de charger les marchés publics.'
-                : 'تعذر تحميل بيانات رادار الصفقات العمومية.')
-          );
+          if (!silent) {
+            setApiError(
+              (lang === 'fr' ? res.message_fr : res.message_ar) ||
+                (lang === 'fr'
+                  ? 'Impossible de charger les marchés publics.'
+                  : 'تعذر تحميل بيانات رادار الصفقات العمومية.')
+            );
+          }
+          setIsServerScanRunning(false);
+          return;
         }
-        setTenders(res.tenders || []);
+        const nextTenders = res.tenders || [];
+        const sig = nextTenders.map((t: PublicTenderRecord) => t.id).join(',');
+        if (sig !== lastSignatureRef.current || !silent) {
+          lastSignatureRef.current = sig;
+          setTenders(nextTenders);
+        }
+        setApiError(null);
         setIsServerScanRunning(
           Boolean(res.isServerScanRunning || res.lastRun?.status === 'running')
         );
@@ -105,17 +121,21 @@ export const PublicTendersRadarPage: React.FC = () => {
   );
 
   useEffect(() => {
+    if (hasLoadedOnceRef.current) return;
+    hasLoadedOnceRef.current = true;
     loadTenders(false);
   }, [loadTenders]);
 
-  // Auto-refresh quietly while initial/scheduled server scan is still running
+  // Bounded check ONLY if server boot scan is actively running and results are not ready yet (max 4 checks)
   useEffect(() => {
-    if (!isServerScanRunning && (tenders.length > 0 || isLoading)) return;
-    const poll = setInterval(() => {
+    if (!isServerScanRunning || tenders.length > 0 || apiError) return;
+    if (pollAttemptsRef.current >= 4) return;
+    const timer = setTimeout(() => {
+      pollAttemptsRef.current += 1;
       loadTenders(true);
-    }, 4500);
-    return () => clearInterval(poll);
-  }, [isServerScanRunning, tenders.length, isLoading, loadTenders]);
+    }, 6000);
+    return () => clearTimeout(timer);
+  }, [isServerScanRunning, tenders.length, apiError, loadTenders]);
 
   // Preload saved owner client names to mark already-added companies
   useEffect(() => {

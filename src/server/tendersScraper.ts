@@ -522,14 +522,14 @@ async function scrapeMarchesPublicsPortalLive(): Promise<{
 function inferSectorFromText(text: string): TenderSector {
   const s = text.toLowerCase();
   if (/terrassement|déblai|remblai|excavation|حفر|ردم/.test(s)) return 'terrassement';
-  if (/route|autoroute|voirie|vrd|piste|échangeur|طرق|تزفيت|تهيئة/.test(s))
+  if (/\b(route|autoroute|voirie|vrd|piste|échangeur|trémie|corniche)\b|طرق|تزفيت|تهيئة/.test(s))
     return 'routes_vrd';
-  if (/barrage|eau|assainissement|irrigation|réseau|canal|سدود|ماء|تطهير/.test(s))
+  if (/\b(barrage|eau|assainissement|irrigation|canal)\b|سدود|ماء|تطهير/.test(s))
     return 'hydraulique';
-  if (/pont|viaduc|lgv|port|terminal|tunnel|génie civil|قناطر|ميناء|قطار|سكة/.test(s))
-    return 'genie_civil';
-  if (/stade|hôpital|aéroport|bâtiment|gare|complexe|construction|ملعب|مطار|بناء/.test(s))
+  if (/stade|complexe sportif|cité sportive|hôpital|aéroport|terminal|bâtiment|gare|ملعب|مطار|بناء/.test(s))
     return 'batiment';
+  if (/pont|viaduc|lgv|port|tunnel|génie civil|قناطر|ميناء|قطار|سكة/.test(s))
+    return 'genie_civil';
   return 'other';
 }
 
@@ -572,7 +572,7 @@ function parseAmountMadFromText(text: string): number {
 
 function extractCityAndRegion(text: string): { city: string; region: string } {
   const mappings: Array<{ rx: RegExp; city: string; region: string }> = [
-    { rx: /benslimane|بنسليمان/i, city: 'بنسليمان', region: 'الدار البيضاء - سطات' },
+    { rx: /benslimane|stade\s*hassan\s*ii|بنسليمان/i, city: 'بنسليمان', region: 'الدار البيضاء - سطات' },
     { rx: /casablanca|mohammed\s*v|casa|الدار البيضاء/i, city: 'الدار البيضاء', region: 'الدار البيضاء - سطات' },
     { rx: /rabat|salé|kénitra|bouregreg|الرباط|القنيطرة/i, city: 'الرباط / القنيطرة', region: 'الرباط - سلا - القنيطرة' },
     { rx: /marrakech|al\s*haouz|ouirgane|مراكش|الحوز/i, city: 'مراكش', region: 'مراكش - آسفي' },
@@ -582,6 +582,7 @@ function extractCityAndRegion(text: string): { city: string; region: string } {
     { rx: /nador|oujda|oriental|الناظور|وجدة/i, city: 'الناظور / وجدة', region: 'الشرق' },
     { rx: /azilal|béni\s*mellal|أزيلال|بني ملال/i, city: 'أزيلال', region: 'بني ملال - خنيفرة' },
     { rx: /dakhla|الداخلة/i, city: 'الداخلة', region: 'الداخلة - وادي الذهب' },
+    { rx: /\blgv\b/i, city: 'القنيطرة / مراكش', region: 'الرباط - سلا - القنيطرة' },
   ];
   for (const m of mappings) {
     if (m.rx.test(text)) return { city: m.city, region: m.region };
@@ -684,23 +685,24 @@ async function scrapeMoroccanWebTenderAwards(): Promise<{
     { rx: /\bSOREMAR\b/i, name: 'SOREMAR' },
   ];
 
-  const results: Array<{
-    reference_code: string;
-    title_ar: string;
-    title_fr: string;
-    contracting_authority: string;
-    sector: TenderSector;
-    city: string;
-    region: string;
-    award_date: string;
-    amount_mad: number;
-    winning_company: string;
-    source_url: string;
-    summary_fr: string;
-    summary_ar: string;
-  }> = [];
-
-  const seenHeadlineKey = new Set<string>();
+  const clusterMap = new Map<
+    string,
+    {
+      reference_code: string;
+      title_ar: string;
+      title_fr: string;
+      contracting_authority: string;
+      sector: TenderSector;
+      city: string;
+      region: string;
+      award_date: string;
+      amount_mad: number;
+      winning_company: string;
+      source_url: string;
+      summary_fr: string;
+      summary_ar: string;
+    }
+  >();
 
   for (const entry of rawEntries) {
     const cleanTitle = entry.title.replace(/\s+-\s+[^-]+(?:\s+-\s+[^-]+)?$/, '').trim();
@@ -724,10 +726,6 @@ async function scrapeMoroccanWebTenderAwards(): Promise<{
     }
     if (!detectedCompany) continue;
 
-    const hk = `${cleanTitle.slice(0, 35).toLowerCase()}::${detectedCompany.toLowerCase()}`;
-    if (seenHeadlineKey.has(hk)) continue;
-    seenHeadlineKey.add(hk);
-
     const parsedDate = entry.pubDate ? new Date(entry.pubDate) : null;
     const awardDate =
       parsedDate && !Number.isNaN(parsedDate.getTime())
@@ -739,9 +737,10 @@ async function scrapeMoroccanWebTenderAwards(): Promise<{
     const amountMad = parseAmountMadFromText(cleanTitle);
     const authority = inferAuthorityFromText(cleanTitle);
 
+    const clusterKey = makeTenderClusterKey(cleanTitle, detectedCompany, city);
     const refHash = crypto
       .createHash('md5')
-      .update(`${cleanTitle}:${detectedCompany}`)
+      .update(clusterKey)
       .digest('hex')
       .slice(0, 6)
       .toUpperCase();
@@ -760,7 +759,7 @@ async function scrapeMoroccanWebTenderAwards(): Promise<{
         : 'البناء والتجهيز العمومي'
     } — ${city}.`;
 
-    results.push({
+    const candidate = {
       reference_code: refCode,
       title_ar: cleanTitle,
       title_fr: cleanTitle,
@@ -774,15 +773,31 @@ async function scrapeMoroccanWebTenderAwards(): Promise<{
       source_url: entry.link,
       summary_fr: `Marché public attribué à ${detectedCompany} (${city}).`,
       summary_ar: summaryAr,
-    });
+    };
 
-    sources.push({
-      uri: entry.link,
-      title: cleanTitle.slice(0, 80),
-    });
+    const existingCluster = clusterMap.get(clusterKey);
+    if (!existingCluster) {
+      clusterMap.set(clusterKey, candidate);
+      sources.push({
+        uri: entry.link,
+        title: cleanTitle.slice(0, 80),
+      });
+    } else {
+      // Keep the most complete record (with amount & newest date)
+      const shouldReplace =
+        (candidate.amount_mad > 0 && existingCluster.amount_mad === 0) ||
+        (candidate.amount_mad === existingCluster.amount_mad &&
+          candidate.award_date > existingCluster.award_date);
+      if (shouldReplace) {
+        clusterMap.set(clusterKey, candidate);
+      }
+    }
   }
 
-  return { items: results.slice(0, 18), sources: sources.slice(0, 15) };
+  const results = Array.from(clusterMap.values()).sort((a, b) =>
+    b.award_date.localeCompare(a.award_date)
+  );
+  return { items: results.slice(0, 20), sources: sources.slice(0, 15) };
 }
 
 /**
@@ -1098,6 +1113,91 @@ export async function runPublicTendersScrape(
   }
 }
 
+export function makeTenderClusterKey(title: string, company: string, city: string): string {
+  const s = `${title}`.toLowerCase();
+  const compKey = String(company || '')
+    .toLowerCase()
+    .split(/[(/]/)[0]
+    .replace(/[^a-z0-9\u0600-\u06FF]+/g, '')
+    .trim();
+
+  if (/stade.*f[eè]s|complexe sportif.*f[eè]s|(?:2,8[0-9]|f[eè]s).*f[eè]s|(?:sgtm.*2,8[0-9].*f[eè]s)/i.test(s) || (compKey === 'sgtm' && /f[eè]s/i.test(s) && /2,8/.test(s))) {
+    return `stade_fes::${compKey}`;
+  }
+  if (/stade.*marrakech/i.test(s)) return `stade_marrakech::${compKey}`;
+  if (/gare.*hassan\s*ii/i.test(s)) return `gare_hassan_ii::${compKey}`;
+  if (/terrassement.*hassan\s*ii/i.test(s)) return `terrassement_hassan_ii::${compKey}`;
+  if (/stade\s*hassan\s*ii/i.test(s)) return `stade_hassan_ii::${compKey}`;
+  if (/a[eé]roport.*mohammed\s*v|terminal.*casablanca/i.test(s)) return `aeroport_cmn::${compKey}`;
+  if (/\blgv\b/i.test(s)) return `lgv_maroc::${compKey}`;
+
+  const cleanTitle = s
+    .replace(/[^a-z0-9\u0600-\u06FF]+/g, ' ')
+    .trim()
+    .slice(0, 40);
+  return `${cleanTitle}::${compKey}::${String(city || '').toLowerCase()}`;
+}
+
+export function deduplicateAndSortTenders(tenders: PublicTenderRecord[]): PublicTenderRecord[] {
+  const byCluster = new Map<string, PublicTenderRecord>();
+  for (const t of tenders) {
+    const combinedText = `${t.title_fr} ${t.title_ar}`;
+    const fixedSector = inferSectorFromText(combinedText);
+    const normalizedSector: TenderSector = fixedSector !== 'other' ? fixedSector : t.sector;
+    const item: PublicTenderRecord = {
+      ...t,
+      sector: normalizedSector,
+    };
+
+    const key = makeTenderClusterKey(combinedText, item.winning_company, item.city);
+    const prev = byCluster.get(key);
+    if (!prev) {
+      byCluster.set(key, item);
+      continue;
+    }
+
+    const itemScore =
+      (item.amount_mad > 0 ? 10 : 0) +
+      (item.contact_phone ? 3 : 0) +
+      (item.contact_email ? 2 : 0) +
+      (item.award_date ? 1 : 0);
+    const prevScore =
+      (prev.amount_mad > 0 ? 10 : 0) +
+      (prev.contact_phone ? 3 : 0) +
+      (prev.contact_email ? 2 : 0) +
+      (prev.award_date ? 1 : 0);
+
+    if (
+      itemScore > prevScore ||
+      (itemScore === prevScore && item.award_date > prev.award_date)
+    ) {
+      byCluster.set(key, {
+        ...item,
+        contact_phone: item.contact_phone || prev.contact_phone,
+        contact_email: item.contact_email || prev.contact_email,
+        company_website: item.company_website || prev.company_website,
+        amount_mad: item.amount_mad || prev.amount_mad,
+        award_date: item.award_date > prev.award_date ? item.award_date : prev.award_date,
+      });
+    } else {
+      byCluster.set(key, {
+        ...prev,
+        contact_phone: prev.contact_phone || item.contact_phone,
+        contact_email: prev.contact_email || item.contact_email,
+        company_website: prev.company_website || item.company_website,
+        amount_mad: prev.amount_mad || item.amount_mad,
+        award_date: prev.award_date > item.award_date ? prev.award_date : item.award_date,
+      });
+    }
+  }
+
+  return Array.from(byCluster.values()).sort((a, b) => {
+    const dateDiff = String(b.award_date || '').localeCompare(String(a.award_date || ''));
+    if (dateDiff !== 0) return dateDiff;
+    return String(b.scraped_at || '').localeCompare(String(a.scraped_at || ''));
+  });
+}
+
 export function mapRowToTender(row: any): PublicTenderRecord {
   let machinery: string[] = [];
   try {
@@ -1106,14 +1206,21 @@ export function mapRowToTender(row: any): PublicTenderRecord {
   } catch {
     machinery = [];
   }
+  const titleFr = String(row.title_fr || '');
+  const titleAr = String(row.title_ar || '');
+  const inferredSector = inferSectorFromText(`${titleFr} ${titleAr}`);
+  const sector =
+    inferredSector !== 'other'
+      ? inferredSector
+      : ((row.sector || 'other') as TenderSector);
   return {
     id: String(row.id),
     reference_code: String(row.reference_code || ''),
     dedup_key: String(row.dedup_key || ''),
-    title_ar: String(row.title_ar || ''),
-    title_fr: String(row.title_fr || ''),
+    title_ar: titleAr,
+    title_fr: titleFr,
     contracting_authority: String(row.contracting_authority || ''),
-    sector: (row.sector || 'other') as TenderSector,
+    sector,
     city: String(row.city || ''),
     region: String(row.region || ''),
     award_date: String(row.award_date || ''),

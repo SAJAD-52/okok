@@ -1012,11 +1012,6 @@ export const DashboardLayout: React.FC = () => {
       icon: <Users className="w-5 h-5" />,
     },
     {
-      to: '/owner/tenders',
-      label: lang === 'fr' ? 'Radar Marchés Publics' : 'رادار الصفقات العمومية',
-      icon: <Radar className="w-5 h-5" />,
-    },
-    {
       to: '/owner/drivers',
       label: lang === 'fr' ? 'Chauffeurs' : 'السائقون',
       icon: <HardHat className="w-5 h-5" />,
@@ -1299,12 +1294,22 @@ export const DashboardLayout: React.FC = () => {
                 <span className="hidden sm:inline">{lang === 'fr' ? 'Radar Engins' : 'رادار الآليات القريبة'}</span>
               </NavLink>
             ) : (
-              <NavLink
-                to="/marketplace"
-                className="text-xs font-semibold text-steel-700 hover:text-ink px-2.5 sm:px-3 py-1.5 rounded-lg border border-steel-200 bg-steel-50 hover:bg-steel-100 min-h-[40px] sm:min-h-[44px] flex items-center whitespace-nowrap shrink-0"
-              >
-                {t('nav.marketplace')}
-              </NavLink>
+              <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                <NavLink
+                  to="/marketplace"
+                  className="text-xs font-semibold text-steel-700 hover:text-ink px-2.5 sm:px-3 py-1.5 rounded-lg border border-steel-200 bg-steel-50 hover:bg-steel-100 min-h-[40px] sm:min-h-[44px] flex items-center whitespace-nowrap shrink-0"
+                >
+                  {t('nav.marketplace')}
+                </NavLink>
+                <NavLink
+                  to="/tenders"
+                  className="text-xs font-bold text-ink hover:bg-primary-hover px-2.5 sm:px-3 py-1.5 rounded-lg border border-primary/50 bg-primary/90 min-h-[40px] sm:min-h-[44px] flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-colors"
+                >
+                  <Radar className="w-3.5 h-3.5 shrink-0" />
+                  <span className="sm:hidden">{lang === 'fr' ? 'Marchés' : 'الصفقات'}</span>
+                  <span className="hidden sm:inline">{lang === 'fr' ? 'Radar Marchés Publics' : 'رادار الصفقات العمومية'}</span>
+                </NavLink>
+              </div>
             )}
 
             {/* Profile Settings Quick Button with Avatar */}
@@ -2367,30 +2372,6 @@ export const DashboardLayout: React.FC = () => {
             </div>
 
             <div className="space-y-1.5">
-              {/* Public Tenders Radar ("رادار الصفقات العمومية") */}
-              <NavLink
-                to="/owner/tenders"
-                onClick={() => setIsMoreMenuOpen(false)}
-                className={({ isActive }) =>
-                  `flex items-center justify-between p-3 rounded-2xl text-xs font-bold transition-colors ${
-                    isActive ? 'bg-primary text-ink font-black' : 'bg-surface hover:bg-steel-100 text-steel-700'
-                  }`
-                }
-              >
-                <div className="flex items-center gap-3">
-                  <Radar className="w-5 h-5 text-primary-dark" />
-                  <div>
-                    <span className="block">
-                      {lang === 'fr' ? 'Radar Marchés Publics' : 'رادار الصفقات العمومية'}
-                    </span>
-                    <span className="text-[10px] text-steel-400 font-normal block">
-                      marchespublics.gov.ma · 00:00
-                    </span>
-                  </div>
-                </div>
-                <ChevronLeft className="w-4 h-4 rtl:rotate-0 ltr:rotate-180 text-steel-400" />
-              </NavLink>
-
               {/* Agreed Drivers ("السائقون") */}
               <NavLink
                 to="/owner/drivers"

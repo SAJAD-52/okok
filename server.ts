@@ -18,6 +18,7 @@ import {
   getNextMidnightCasablancaIso,
   mapRowToTender,
   mapRowToRun,
+  deduplicateAndSortTenders,
 } from './src/server/tendersScraper';
 
 const app = express();
@@ -2275,87 +2276,36 @@ app.post('/api/admin/toggle-suspend', apiMutationLimiter, async (req, res) => {
 });
 
 // ============================================================================
-// OWNER-ONLY MOROCCAN PUBLIC WORKS TENDERS RADAR (/api/tenders)
+// PUBLIC MOROCCAN PUBLIC WORKS TENDERS RADAR (/api/tenders)
+// Automated server-side daily 00:00 (Africa/Casablanca) scan
 // ============================================================================
-
-async function verifyOwnerOrAdminAccess(req: AuthedRequest): Promise<{ allowed: boolean; role: string }> {
-  if (!req.authUser) {
-    return { allowed: !isSupabaseAuthEnabled, role: 'owner' };
-  }
-  if (req.authUser.isAdmin) {
-    return { allowed: true, role: 'admin' };
-  }
-  let resolvedRole = String(req.authUser.role || '').toLowerCase();
-  const token = extractBearerToken(req);
-
-  if (isSupabaseAuthEnabled && token && req.authUser.id) {
-    try {
-      const profRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(req.authUser.id)}&select=role`,
-        {
-          headers: {
-            apikey: SUPABASE_ANON_KEY,
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-      if (profRes.ok) {
-        const rows: any = await profRes.json();
-        if (Array.isArray(rows) && rows[0]?.role) {
-          resolvedRole = String(rows[0].role).toLowerCase();
-        }
-      }
-    } catch {
-      // Fallback to metadata role
-    }
-  }
-
-  const forbiddenRoles = new Set(['client', 'contractor', 'driver']);
-  if (forbiddenRoles.has(resolvedRole)) {
-    return { allowed: false, role: resolvedRole };
-  }
-  return { allowed: true, role: resolvedRole || 'owner' };
-}
 
 let activeManualScrapeInFlight = false;
 
-app.get('/api/tenders', requireAuth, async (req: AuthedRequest, res) => {
+app.get('/api/tenders', async (req, res) => {
   try {
-    const access = await verifyOwnerOrAdminAccess(req);
-    if (!access.allowed) {
-      return res.status(403).json({
-        success: false,
-        error: 'OWNER_ONLY_FEATURE',
-        message_ar: 'هذه الميزة مخصصة لأصحاب الآليات فقط.',
-        message_fr: 'Cette fonctionnalité est réservée exclusivement aux propriétaires d’engins.',
-      });
-    }
-
     const sector = String(req.query.sector || '').trim();
     const limit = Math.min(200, Math.max(10, Number(req.query.limit) || 120));
 
-    let rows: any[] = [];
+    const allRows: any[] = db
+      .prepare(
+        `SELECT * FROM public_tenders ORDER BY award_date DESC, scraped_at DESC LIMIT 200`
+      )
+      .all();
+
+    let tenders = deduplicateAndSortTenders(allRows.map(mapRowToTender));
     if (sector && sector !== 'all') {
-      rows = db
-        .prepare(
-          `SELECT * FROM public_tenders WHERE sector = ? ORDER BY scraped_at DESC, award_date DESC LIMIT ?`
-        )
-        .all(sector, limit);
-    } else {
-      rows = db
-        .prepare(
-          `SELECT * FROM public_tenders ORDER BY scraped_at DESC, award_date DESC LIMIT ?`
-        )
-        .all(limit);
+      tenders = tenders.filter((t) => t.sector === sector);
     }
+    tenders = tenders.slice(0, limit);
 
     const runRows: any[] = db
-      .prepare(`SELECT * FROM tender_scrape_runs ORDER BY started_at DESC LIMIT 8`)
+      .prepare(`SELECT * FROM tender_scrape_runs ORDER BY started_at DESC LIMIT 5`)
       .all();
 
     return res.json({
       success: true,
-      tenders: rows.map(mapRowToTender),
+      tenders,
       runs: runRows.map(mapRowToRun),
       lastRun: runRows[0] ? mapRowToRun(runRows[0]) : null,
       isServerScanRunning: Boolean(runRows[0]?.status === 'running'),

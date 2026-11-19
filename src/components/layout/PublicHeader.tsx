@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, Link, useNavigate } from 'react-router-dom';
-import { PlusCircle, User, Menu, X, Compass, Wrench, MapPin, Building2, HardHat, ShieldCheck, Briefcase } from 'lucide-react';
+import { PlusCircle, User, Menu, X, Compass, Wrench, MapPin, HardHat, ShieldCheck, Briefcase, Radar } from 'lucide-react';
 import { Logo } from '../ui/Logo';
 import { LanguageSwitcher } from '../ui/LanguageSwitcher';
 import { Button } from '../ui/Button';
@@ -16,10 +16,12 @@ export const PublicHeader: React.FC = () => {
 
   const isContractor = profile?.role === 'client' || profile?.role === 'contractor';
   const isDriver = profile?.role === 'driver';
+  const tendersLabel = lang === 'fr' ? 'Radar Marchés Publics' : 'رادار الصفقات العمومية';
 
   const navLinks = isSuperAdmin
     ? [
         { to: '/marketplace', label: t('nav.marketplace'), icon: <Compass className="w-4 h-4" /> },
+        { to: '/tenders', label: tendersLabel, icon: <Radar className="w-4 h-4" /> },
         { to: '/admin', label: '👑 Super Admin' },
       ]
     : isDriver
@@ -27,16 +29,18 @@ export const PublicHeader: React.FC = () => {
         { to: '/driver', label: lang === 'fr' ? 'Espace Conducteur' : 'لوحة السائق', icon: <HardHat className="w-4 h-4" /> },
         { to: '/driver/joboffer', label: lang === 'fr' ? 'Offres d’emploi' : 'عروض العمل', icon: <Briefcase className="w-4 h-4" /> },
         { to: '/marketplace', label: t('nav.marketplace'), icon: <Compass className="w-4 h-4" /> },
+        { to: '/tenders', label: tendersLabel, icon: <Radar className="w-4 h-4" /> },
       ]
     : isContractor
     ? [
         { to: '/marketplace', label: t('nav.marketplace'), icon: <Compass className="w-4 h-4" /> },
+        { to: '/tenders', label: tendersLabel, icon: <Radar className="w-4 h-4" /> },
         { to: '/entreprise/map', label: lang === 'fr' ? 'Radar Engins' : 'رادار الآليات 📍', icon: <MapPin className="w-4 h-4" /> },
-        { to: '/entreprise/bookings', label: lang === 'fr' ? 'Mes Locations' : 'حجوزاتي', icon: <Building2 className="w-4 h-4" /> },
         { to: '/entreprise', label: lang === 'fr' ? 'Espace Client' : 'بوابة الزبون' },
       ]
     : [
         { to: '/marketplace', label: t('nav.marketplace'), icon: <Compass className="w-4 h-4" /> },
+        { to: '/tenders', label: tendersLabel, icon: <Radar className="w-4 h-4" /> },
         { to: '/owner/machines', label: t('nav.machines'), icon: <Wrench className="w-4 h-4" /> },
         { to: '/owner', label: t('nav.dashboard') },
       ];

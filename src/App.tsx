@@ -57,6 +57,7 @@ export const App: React.FC = () => {
             <Route path="/admin/login" element={<AdminLoginPage />} />
             <Route path="/marketplace" element={<MarketplacePage />} />
             <Route path="/marketplace/:id" element={<MachineDetailPage />} />
+            <Route path="/tenders" element={<PublicTendersRadarPage />} />
             <Route path="/s/:slug" element={<PublicStorefrontPage />} />
 
             {/* Standalone Printable Document View */}
@@ -103,7 +104,7 @@ export const App: React.FC = () => {
               <Route path="machines" element={<MachinesPage />} />
               <Route path="bookings" element={<BookingsPage />} />
               <Route path="clients" element={<ClientsPage />} />
-              <Route path="tenders" element={<PublicTendersRadarPage />} />
+              <Route path="tenders" element={<Navigate to="/tenders" replace />} />
               <Route path="drivers" element={<OwnerDriversPage />} />
               <Route path="analytics" element={<AnalyticsPage />} />
               <Route path="storefront" element={<StorefrontPage />} />

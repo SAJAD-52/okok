@@ -49,6 +49,7 @@ import { useLanguage } from '../hooks/useLanguage';
 import { useAuth } from '../hooks/useAuth';
 import { CreateBookingModal } from '../components/bookings/CreateBookingModal';
 import { RecordPaymentModal } from '../components/bookings/RecordPaymentModal';
+import { MachineHoverThumbnail } from '../components/bookings/MachineHoverThumbnail';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { bookingStore } from '../lib/bookingStore';
 import { paymentService } from '../lib/paymentService';
@@ -145,8 +146,12 @@ export const BookingsPage: React.FC = () => {
             title_ar: m.title_ar,
             title_fr: m.title_fr,
             category: m.category,
+            category_id: m.category,
             brand: m.brand,
             model: m.model,
+            year: m.year,
+            city: m.city,
+            city_id: m.city,
             ...(() => {
               const rates = resolveMachineRates(m);
               return {
@@ -828,9 +833,12 @@ export const BookingsPage: React.FC = () => {
                   {/* Top Bar: Machine Title, Status Badge, Payment Pill */}
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="flex items-start gap-3">
-                      <div className="w-11 h-11 rounded-2xl bg-amber-500/10 text-primary-dark flex items-center justify-center font-black shrink-0">
-                        <Truck className="w-5 h-5" />
-                      </div>
+                      <MachineHoverThumbnail
+                        machine={booking.machine}
+                        machineId={booking.machine_id}
+                        machines={machines}
+                        size="md"
+                      />
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
                           <h3 className="font-black text-sm text-ink">

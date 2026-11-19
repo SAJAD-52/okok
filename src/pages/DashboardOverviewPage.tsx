@@ -49,6 +49,7 @@ import { OwnerFleetLiveMap } from '../components/dashboard/OwnerFleetLiveMap';
 import { MachineStepperModal } from '../components/machines/MachineStepperModal';
 import { ProfileSettingsModal } from '../components/profile/ProfileSettingsModal';
 import { CreateBookingModal } from '../components/bookings/CreateBookingModal';
+import { MachineHoverThumbnail } from '../components/bookings/MachineHoverThumbnail';
 import { AddExpenseModal } from '../components/analytics/AddExpenseModal';
 import { Machine, Booking, Lead, MachineExpense } from '../types/database';
 import { bookingStore } from '../lib/bookingStore';
@@ -836,9 +837,12 @@ export const DashboardOverviewPage: React.FC = () => {
                 <div>
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="w-10 h-10 rounded-xl bg-amber-50 text-primary-dark flex items-center justify-center font-black shrink-0 border border-amber-200">
-                        <Truck className="w-5 h-5" />
-                      </div>
+                      <MachineHoverThumbnail
+                        machine={b.machine}
+                        machineId={b.machine_id}
+                        machines={machines}
+                        size="sm"
+                      />
                       <div className="min-w-0">
                         <h4 className="font-black text-xs text-ink truncate">
                           {b.machine?.title_ar || b.machine?.title_fr || 'آلية JCB'}

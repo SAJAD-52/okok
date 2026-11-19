@@ -576,8 +576,8 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
               user_id: targetOwnerId,
               title_ar: 'طلب كراء جديد وارد 🚜',
               title_fr: 'Nouvelle demande de location reçue 🚜',
-              body_ar: `طلب الزبون ${clientName.trim()} كراء (${targetMachine?.title_ar || targetMachine?.model || 'الآلية'}) بقيمة ${Number(totalPrice).toLocaleString('fr-FR')} د.م.`,
-              body_fr: `Le client ${clientName.trim()} a réservé ${targetMachine?.title_fr || targetMachine?.model || 'engin'} (${Number(totalPrice).toLocaleString('fr-FR')} MAD).`,
+              body_ar: `طلب الزبون ${finalClientName} كراء (${targetMachine?.title_ar || targetMachine?.model || 'الآلية'}) بقيمة ${Number(totalPrice).toLocaleString('fr-FR')} د.م.`,
+              body_fr: `Le client ${finalClientName} a réservé ${targetMachine?.title_fr || targetMachine?.model || 'engin'} (${Number(totalPrice).toLocaleString('fr-FR')} MAD).`,
               type: 'booking_request',
               data: {
                 booking_id: newBooking.id,

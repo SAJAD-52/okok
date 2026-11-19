@@ -330,6 +330,20 @@ export const DashboardLayout: React.FC = () => {
                     url: '/entreprise/bookings',
                   });
                 }
+              } else if (row?.type === 'booking_request') {
+                window.dispatchEvent(new CustomEvent('jadijcb_booking_event', { detail: row }));
+                playOpportunitySound();
+                const alertTitle =
+                  lang === 'fr'
+                    ? row.title_fr || 'Nouvelle demande de location reçue 🚜'
+                    : row.title_ar || 'طلب كراء جديد وارد 🚜';
+                const alertBody = lang === 'fr' ? row.body_fr : row.body_ar;
+                showBrowserChatNotification({
+                  title: alertTitle,
+                  body: alertBody || '',
+                  tag: `booking_req_${row.id || Date.now()}`,
+                  url: '/owner/bookings?tab=pending',
+                });
               } else if (
                 row?.type === 'driver_job_offer' ||
                 row?.type === 'driver_deal_closed' ||
@@ -404,28 +418,31 @@ export const DashboardLayout: React.FC = () => {
 
   // Sync pending bookings for owner notification badge with real-time updates
   useEffect(() => {
-    if (!profile?.id || isContractor || isDriver || (isSuperAdmin && !isImpersonating)) return;
+    const activeOwnerId = isImpersonating ? profile?.id : (user?.id || profile?.id);
+
+    if (!activeOwnerId || isContractor || isDriver || (isSuperAdmin && !isImpersonating)) {
+      setPendingBookingsCount(0);
+      setPendingBookingsList([]);
+      return;
+    }
 
     let previousCount = -1;
 
     const checkPending = async () => {
-      // Avoid interrupting the active chat experience with background booking polling
-      if (location.pathname.includes('/messages')) return;
-
       try {
-        let ownerMachineIds = machineStore
-          .getCachedMachines()
-          .filter((m) => m.owner_id === profile.id || !m.owner_id)
+        const cachedMachines = machineStore.getCachedMachines();
+        let ownerMachineIds = cachedMachines
+          .filter((m) => m.owner_id === activeOwnerId || !m.owner_id)
           .map((m) => m.id)
           .filter(Boolean);
 
         // Also fetch owner machine IDs from database to ensure fresh fleet list
-        if (isSupabaseConfigured && profile.id) {
+        if (isSupabaseConfigured && activeOwnerId) {
           try {
             const { data: dbMachs } = await supabase
               .from('machines')
               .select('id')
-              .eq('owner_id', profile.id);
+              .eq('owner_id', activeOwnerId);
             if (dbMachs && dbMachs.length > 0) {
               const freshIds = dbMachs.map((m: any) => m.id).filter(Boolean);
               ownerMachineIds = Array.from(new Set([...ownerMachineIds, ...freshIds]));
@@ -435,84 +452,84 @@ export const DashboardLayout: React.FC = () => {
           }
         }
 
-        let dbBookings: Booking[] = [];
+        const mergedMap = new Map<string, Booking>();
+        const resolvedNonPendingIds = new Set<string>();
 
-        // 1. Fetch from Server SQLite DB (shared across all devices & users)
+        // 1. Fetch from Server SQLite DB (all statuses so resolved ones are tracked too)
         try {
           const serverBookings = await serverApi.getBookings({
-            owner_id: profile.id,
-            status: 'pending',
+            owner_id: activeOwnerId,
           });
-          if (serverBookings && serverBookings.length > 0) {
-            dbBookings = serverBookings;
+          if (Array.isArray(serverBookings)) {
+            for (const sb of serverBookings) {
+              if (!sb?.id) continue;
+              if (sb.status !== 'pending') {
+                resolvedNonPendingIds.add(sb.id);
+              } else {
+                const matchedMachine =
+                  sb.machine || cachedMachines.find((m) => m.id === sb.machine_id);
+                mergedMap.set(sb.id, { ...sb, machine: matchedMachine });
+              }
+            }
           }
         } catch (serverErr) {
           console.warn('Server SQLite pending load notice:', serverErr);
         }
 
-        // 2. Fetch from Supabase (if configured)
+        // 2. Fetch from Supabase (authoritative DB, using select('*') to avoid missing-column 400 errors)
         if (isSupabaseConfigured) {
           try {
-            const fetchedMap = new Map<string, any>();
-
-            const BOOKING_PENDING_COLS =
-              'id, machine_id, owner_id, client_id, client_name, client_phone, start_at, end_at, total_price, status, notes, created_at, with_operator';
+            const sbRawMap = new Map<string, any>();
             let hadQueryError = false;
 
-            if (isSuperAdmin) {
-              // Super admin sees all pending bookings
-              const { data: allData, error: allErr } = await supabase
+            const { data: ownerData, error: ownerErr } = await supabase
+              .from('bookings')
+              .select('*')
+              .eq('owner_id', activeOwnerId)
+              .order('created_at', { ascending: false })
+              .limit(150);
+            if (ownerErr) hadQueryError = true;
+            if (!ownerErr && ownerData) {
+              for (const row of ownerData) sbRawMap.set(row.id, row);
+            }
+
+            if (ownerMachineIds.length > 0) {
+              const { data: machineData, error: mErr } = await supabase
                 .from('bookings')
-                .select(BOOKING_PENDING_COLS)
-                .eq('status', 'pending')
-                .limit(50);
-              if (!allErr && allData) {
-                for (const row of allData) fetchedMap.set(row.id, row);
-              }
-            } else {
-              // 1. Pending bookings where user is directly the booking owner
-              if (profile.id) {
-                const { data: ownerData, error: ownerErr } = await supabase
-                  .from('bookings')
-                  .select(BOOKING_PENDING_COLS)
-                  .eq('status', 'pending')
-                  .eq('owner_id', profile.id)
-                  .limit(50);
-                if (ownerErr) hadQueryError = true;
-                if (!ownerErr && ownerData) {
-                  for (const row of ownerData) fetchedMap.set(row.id, row);
-                }
-              }
-
-              // 2. Pending bookings for machines belonging to the owner's fleet
-              if (ownerMachineIds.length > 0) {
-                const { data: machineData, error: mErr } = await supabase
-                  .from('bookings')
-                  .select(BOOKING_PENDING_COLS)
-                  .eq('status', 'pending')
-                  .in('machine_id', ownerMachineIds)
-                  .limit(50);
-                if (mErr) hadQueryError = true;
-                if (!mErr && machineData) {
-                  for (const row of machineData) fetchedMap.set(row.id, row);
-                }
-              }
-
-              // 3. Fallback only if queries errored
-              if (hadQueryError && fetchedMap.size === 0) {
-                const { data: rlsData, error: rlsErr } = await supabase
-                  .from('bookings')
-                  .select(BOOKING_PENDING_COLS)
-                  .eq('status', 'pending')
-                  .limit(50);
-                if (!rlsErr && rlsData) {
-                  for (const row of rlsData) fetchedMap.set(row.id, row);
-                }
+                .select('*')
+                .in('machine_id', ownerMachineIds)
+                .order('created_at', { ascending: false })
+                .limit(150);
+              if (mErr) hadQueryError = true;
+              if (!mErr && machineData) {
+                for (const row of machineData) sbRawMap.set(row.id, row);
               }
             }
 
-            if (fetchedMap.size > 0) {
-              const mapped = Array.from(fetchedMap.values()).map((b: any) => ({
+            // Fallback RLS-filtered query if scoped queries errored
+            if (hadQueryError && sbRawMap.size === 0) {
+              const { data: rlsData, error: rlsErr } = await supabase
+                .from('bookings')
+                .select('*')
+                .order('created_at', { ascending: false })
+                .limit(150);
+              if (!rlsErr && rlsData) {
+                for (const row of rlsData) sbRawMap.set(row.id, row);
+              }
+            }
+
+            for (const b of sbRawMap.values()) {
+              if (!b?.id) continue;
+              if (b.status !== 'pending') {
+                resolvedNonPendingIds.add(b.id);
+                mergedMap.delete(b.id);
+                continue;
+              }
+              const matchedMachine =
+                cachedMachines.find((m) => m.id === b.machine_id) ||
+                b.machines ||
+                b.machine;
+              mergedMap.set(b.id, {
                 id: b.id,
                 machine_id: b.machine_id,
                 owner_id: b.owner_id,
@@ -525,32 +542,49 @@ export const DashboardLayout: React.FC = () => {
                 status: b.status,
                 notes: b.notes,
                 created_at: b.created_at,
-                machine: b.machines,
+                machine: matchedMachine,
                 with_operator: Boolean(b.with_operator ?? true),
-              }));
-              dbBookings = [...dbBookings, ...mapped];
+              });
             }
           } catch (e) {
             console.warn('DB pending check warning:', e);
           }
         }
 
-        const pendingList = dbBookings.filter((b) => b.status === 'pending');
+        // 3. Merge local bookingStore fallback (for instant optimistic / offline bookings)
+        const cachedOwnerBookings = bookingStore.mergeOwnerBookings(
+          Array.from(mergedMap.values()),
+          activeOwnerId,
+          ownerMachineIds,
+          false
+        );
+
+        const pendingList = cachedOwnerBookings
+          .filter((b) => b.status === 'pending' && !resolvedNonPendingIds.has(b.id))
+          .sort(
+            (a, b) =>
+              new Date(b.created_at || b.start_at || 0).getTime() -
+              new Date(a.created_at || a.start_at || 0).getTime()
+          );
         const count = pendingList.length;
 
         setPendingBookingsCount((prev) => (prev === count ? prev : count));
         setPendingBookingsList((prev) => {
           if (
             prev.length === count &&
-            prev.every((b, i) => b.id === pendingList[i]?.id)
+            prev.every((b, i) => b.id === pendingList[i]?.id && b.status === pendingList[i]?.status)
           ) {
             return prev;
           }
           return pendingList;
         });
 
-        // Notify user if a new booking just arrived
-        if (previousCount >= 0 && count > previousCount) {
+        // Notify user if a new booking just arrived (avoid interrupting active chat)
+        if (
+          previousCount >= 0 &&
+          count > previousCount &&
+          !window.location.pathname.includes('/messages')
+        ) {
           toast.info(
             lang === 'fr'
               ? '🚜 Nouvelle demande de location reçue ! Vérifiez vos notifications.'
@@ -565,10 +599,11 @@ export const DashboardLayout: React.FC = () => {
 
     checkPending();
 
-    // 1. In-tab custom event
+    // 1. In-tab custom events
     const handleEvent = () => checkPending();
     window.addEventListener('jadijcb_booking_event', handleEvent);
     window.addEventListener('jadijcb_bookings_updated', handleEvent);
+    window.addEventListener('jadijcb_machines_updated', handleEvent);
 
     // 2. Cross-tab storage event
     const handleStorage = (e: StorageEvent) => {
@@ -578,10 +613,29 @@ export const DashboardLayout: React.FC = () => {
     };
     window.addEventListener('storage', handleStorage);
 
-    // 3. Relaxed silent refresh (60s) only while tab is visible
+    // 3. Real-time Supabase subscription on public.bookings
+    let bookingsChannel: any = null;
+    if (isSupabaseConfigured && activeOwnerId) {
+      try {
+        bookingsChannel = supabase
+          .channel(`dashboard_pending_bookings_${activeOwnerId}`)
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'bookings' },
+            () => {
+              checkPending();
+            }
+          )
+          .subscribe();
+      } catch {
+        // Ignore realtime subscription errors
+      }
+    }
+
+    // 4. Relaxed silent refresh (45s) while tab is visible
     const timer = setInterval(() => {
       if (document.visibilityState === 'visible') checkPending();
-    }, 60000);
+    }, 45000);
     const onVisible = () => {
       if (document.visibilityState === 'visible') checkPending();
     };
@@ -590,11 +644,13 @@ export const DashboardLayout: React.FC = () => {
     return () => {
       window.removeEventListener('jadijcb_booking_event', handleEvent);
       window.removeEventListener('jadijcb_bookings_updated', handleEvent);
+      window.removeEventListener('jadijcb_machines_updated', handleEvent);
       window.removeEventListener('storage', handleStorage);
       clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisible);
+      if (bookingsChannel) supabase.removeChannel(bookingsChannel);
     };
-  }, [profile?.id, isContractor, isDriver, lang]);
+  }, [profile?.id, user?.id, isContractor, isDriver, isSuperAdmin, isImpersonating, lang]);
 
   const contractorNavigationItems = [
     {
@@ -775,12 +831,12 @@ export const DashboardLayout: React.FC = () => {
               >
                 <div className="relative shrink-0">
                   {item.icon}
-                  {item.badge && item.badge > 0 && !isItemActive && (
+                  {typeof item.badge === 'number' && item.badge > 0 && !isItemActive && (
                     <span className="absolute -top-1 -end-1 w-2.5 h-2.5 rounded-full bg-primary" />
                   )}
                 </div>
                 <span className="flex-1 text-start">{item.label}</span>
-                {item.badge && item.badge > 0 && (
+                {typeof item.badge === 'number' && item.badge > 0 && (
                   <span
                     className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
                       isItemActive ? 'bg-ink text-primary' : 'bg-primary text-ink'
@@ -1280,7 +1336,7 @@ export const DashboardLayout: React.FC = () => {
                                       {pb.machine?.title_ar || pb.machine?.title_fr || 'آلية JCB'}
                                     </span>
                                     <span className="text-primary-dark font-black font-mono">
-                                      {pb.total_price.toLocaleString('fr-FR')} MAD
+                                      {Number(pb.total_price || 0).toLocaleString('fr-FR')} MAD
                                     </span>
                                   </div>
                                   <div className="text-[11px] text-steel-600 flex items-center gap-2">
@@ -1598,7 +1654,7 @@ export const DashboardLayout: React.FC = () => {
                     }`}
                   >
                     {item.icon}
-                    {item.badge && item.badge > 0 && (
+                    {typeof item.badge === 'number' && item.badge > 0 && (
                       <span className="absolute -top-1 -end-1 w-2.5 h-2.5 rounded-full bg-primary ring-2 ring-white" />
                     )}
                   </div>
@@ -1657,7 +1713,7 @@ export const DashboardLayout: React.FC = () => {
                     }`}
                   >
                     {item.icon}
-                    {item.badge && item.badge > 0 && (
+                    {typeof item.badge === 'number' && item.badge > 0 && (
                       <span className="absolute -top-1 -end-1 w-2.5 h-2.5 rounded-full bg-primary ring-2 ring-white" />
                     )}
                   </div>

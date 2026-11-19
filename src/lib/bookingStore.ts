@@ -162,17 +162,11 @@ export const bookingStore = {
       const resolvedMachine = b.machine || allLocalMachines.find((m) => m.id === b.machine_id);
       map.set(b.id, { ...b, machine: resolvedMachine });
     }
-    // Then merge matching cached bookings (if newer or pending)
+    // Then merge matching cached bookings only when missing from authoritative DB results
     for (const b of matchingCached) {
       const resolvedMachine = b.machine || allLocalMachines.find((m) => m.id === b.machine_id);
       if (!map.has(b.id)) {
         map.set(b.id, { ...b, machine: resolvedMachine });
-      } else {
-        // If cached has different status, preserve latest
-        const existing = map.get(b.id)!;
-        if (b.status !== existing.status) {
-          map.set(b.id, { ...existing, status: b.status, machine: existing.machine || resolvedMachine });
-        }
       }
     }
 
@@ -202,11 +196,6 @@ export const bookingStore = {
       const resolvedMachine = b.machine || allLocalMachines.find((m) => m.id === b.machine_id);
       if (!map.has(b.id)) {
         map.set(b.id, { ...b, machine: resolvedMachine });
-      } else {
-        const existing = map.get(b.id)!;
-        if (b.status !== existing.status) {
-          map.set(b.id, { ...existing, status: b.status, machine: existing.machine || resolvedMachine });
-        }
       }
     }
 

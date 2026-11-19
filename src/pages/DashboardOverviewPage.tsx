@@ -184,10 +184,28 @@ export const DashboardOverviewPage: React.FC = () => {
         setMachines(realMachines);
       }
 
-      // 2. Bookings (Matches owner_id OR machine ownership directly from Supabase + local cache)
-      let bList: Booking[] = [];
+      // 2. Bookings (Matches owner_id OR machine ownership from Server SQLite + Supabase + local cache)
+      const combinedBookingsMap = new Map<string, Booking>();
       let bookingsDbOk = !isSupabaseConfigured;
       const ownerMachineIds = realMachines.map((m) => m.id).filter(Boolean);
+
+      if (userId && !(isSuperAdmin && !isImpersonating)) {
+        try {
+          const serverBookings = await serverApi.getBookings({ owner_id: userId });
+          if (Array.isArray(serverBookings)) {
+            for (const sb of serverBookings) {
+              if (!sb?.id) continue;
+              const matchedMachine =
+                realMachines.find((m) => m.id === sb.machine_id) ||
+                machineStore.getCachedMachines().find((m) => m.id === sb.machine_id) ||
+                sb.machine;
+              combinedBookingsMap.set(sb.id, { ...sb, machine: matchedMachine });
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
 
       if (isSupabaseConfigured) {
         try {
@@ -233,13 +251,13 @@ export const DashboardOverviewPage: React.FC = () => {
           }
 
           if (fetchedMap.size > 0) {
-            bList = Array.from(fetchedMap.values()).map((b: any) => {
+            for (const b of fetchedMap.values()) {
               const matchedMachine =
                 realMachines.find((m) => m.id === b.machine_id) ||
                 machineStore.getCachedMachines().find((m) => m.id === b.machine_id) ||
                 b.machines ||
                 b.machine;
-              return {
+              combinedBookingsMap.set(b.id, {
                 id: b.id,
                 machine_id: b.machine_id,
                 owner_id: b.owner_id,
@@ -258,17 +276,17 @@ export const DashboardOverviewPage: React.FC = () => {
                 pause_state: b.pause_state,
                 created_at: b.created_at,
                 machine: matchedMachine,
-              };
-            });
+              });
+            }
           }
         } catch (e) {
           console.warn('Dashboard bookings load exception:', e);
         }
       }
 
-      if (bookingsDbOk || !initialLoadedRef.current) {
+      if (bookingsDbOk || !initialLoadedRef.current || combinedBookingsMap.size > 0) {
         const mergedBookings = bookingStore.mergeOwnerBookings(
-          bList,
+          Array.from(combinedBookingsMap.values()),
           userId,
           ownerMachineIds,
           Boolean(isSuperAdmin && !isImpersonating)
@@ -339,6 +357,22 @@ export const DashboardOverviewPage: React.FC = () => {
     };
     window.addEventListener('storage', handleStorage);
 
+    let bookingsChannel: any = null;
+    if (isSupabaseConfigured && userId) {
+      try {
+        bookingsChannel = supabase
+          .channel(`dashboard_overview_bookings_${userId}`)
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'bookings' },
+            () => scheduleSilentUpdate()
+          )
+          .subscribe();
+      } catch {
+        // Ignore realtime errors
+      }
+    }
+
     // Silent background auto-refresh (30s)
     const pollInterval = setInterval(() => {
       loadDashboardData(true);
@@ -363,8 +397,9 @@ export const DashboardOverviewPage: React.FC = () => {
       window.removeEventListener('storage', handleStorage);
       clearInterval(pollInterval);
       document.removeEventListener('visibilitychange', onVisible);
+      if (bookingsChannel) supabase.removeChannel(bookingsChannel);
     };
-  }, [loadDashboardData]);
+  }, [loadDashboardData, userId]);
 
   // Pending incoming rental requests
   const pendingBookings = useMemo(() => {

@@ -167,8 +167,24 @@ export const BookingsPage: React.FC = () => {
       setMachines(realMachines);
       const ownerMachineIds = realMachines.map((m) => m.id).filter(Boolean);
 
-      // 2. Load bookings directly from Supabase (single source of truth)
-      let bList: Booking[] = [];
+      // 2. Load bookings from Supabase + Server SQLite + local store fallback
+      const combinedMap = new Map<string, Booking>();
+
+      try {
+        const serverBookings = await serverApi.getBookings({ owner_id: ownerId });
+        if (Array.isArray(serverBookings)) {
+          for (const sb of serverBookings) {
+            if (!sb?.id) continue;
+            const matchedMachine =
+              realMachines.find((m) => m.id === sb.machine_id) ||
+              machineStore.getCachedMachines().find((m) => m.id === sb.machine_id) ||
+              sb.machine;
+            combinedMap.set(sb.id, { ...sb, machine: matchedMachine });
+          }
+        }
+      } catch {
+        // ignore server SQLite fallback error
+      }
 
       if (isSupabaseConfigured) {
         try {
@@ -199,13 +215,13 @@ export const BookingsPage: React.FC = () => {
           }
 
           if (fetchedMap.size > 0) {
-            bList = Array.from(fetchedMap.values()).map((b: any) => {
+            for (const b of fetchedMap.values()) {
               const matchedMachine =
                 realMachines.find((m) => m.id === b.machine_id) ||
                 machineStore.getCachedMachines().find((m) => m.id === b.machine_id) ||
                 b.machines ||
                 b.machine;
-              return {
+              combinedMap.set(b.id, {
                 id: b.id,
                 machine_id: b.machine_id,
                 owner_id: b.owner_id,
@@ -224,15 +240,22 @@ export const BookingsPage: React.FC = () => {
                 created_at: b.created_at,
                 machine: matchedMachine,
                 with_operator: Boolean(b.with_operator),
-              };
-            });
+              });
+            }
           }
         } catch (e) {
           console.warn('Bookings load exception:', e);
         }
       }
 
-      // Supabase is single source of truth (no stale local cache)
+      const bList = bookingStore.mergeOwnerBookings(
+        Array.from(combinedMap.values()),
+        ownerId,
+        ownerMachineIds,
+        Boolean(isSuperAdmin && !isImpersonating)
+      );
+
+      // Update state if changed
       setBookings((prev) => {
         if (
           prev.length === bList.length &&
@@ -286,7 +309,7 @@ export const BookingsPage: React.FC = () => {
     };
     window.addEventListener('storage', handleStorage);
 
-    // Supabase Realtime channel
+    // Supabase Realtime channel (RLS limits delivery to authorized owner/machine bookings)
     let channel: any = null;
     if (isSupabaseConfigured && ownerId) {
       try {
@@ -294,7 +317,7 @@ export const BookingsPage: React.FC = () => {
           .channel('realtime_bookings_page_' + ownerId)
           .on(
             'postgres_changes',
-            { event: '*', schema: 'public', table: 'bookings', filter: `owner_id=eq.${ownerId}` },
+            { event: '*', schema: 'public', table: 'bookings' },
             () => loadData(true)
           )
           .subscribe();

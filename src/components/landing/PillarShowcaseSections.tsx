@@ -28,6 +28,7 @@ import { useLanguage } from '../../hooks/useLanguage';
 import { PillarKey } from './HeroSection';
 import heroExcavatorImg from '../../assets/images/hero_excavator_1795030081800.jpg';
 import heroDumpTruckImg from '../../assets/images/hero_dump_truck_1795030081385.jpg';
+import marrakechRadarImg from '../../assets/images/marrakech_radar_map_ui_1795124219885.jpg';
 
 interface PillarShowcaseSectionsProps {
   activePillar?: PillarKey | null;
@@ -86,6 +87,7 @@ export const PillarShowcaseSections: React.FC<PillarShowcaseSectionsProps> = ({
 }) => {
   const { lang, isRTL } = useLanguage();
   const ArrowIcon = isRTL ? ArrowLeft : ArrowRight;
+  const [clientsImgErr, setClientsImgErr] = useState(false);
   const [ownerImgErr, setOwnerImgErr] = useState(false);
   const [partsImgErr, setPartsImgErr] = useState(false);
 
@@ -148,24 +150,24 @@ export const PillarShowcaseSections: React.FC<PillarShowcaseSectionsProps> = ({
                 {[
                   {
                     icon: MapPin,
-                    titleAr: 'رادار الخريطة GPS (30 كلم)',
-                    titleFr: 'Radar GPS (rayon 30 km)',
+                    titleAr: 'بحث في الخريطة GPS',
+                    titleFr: 'Recherche sur carte GPS',
                     descAr: 'اكتشف الحفارات والجرافات والشاحنات القريبة من ورشك مع المسافة والتواصل المباشر.',
                     descFr: 'Repérez les machines disponibles autour de votre chantier avec distance exacte.',
                   },
                   {
                     icon: Radar,
-                    titleAr: 'بث طلب عاجل لكل الملاك',
-                    titleFr: 'Alerte urgente multi-loueurs',
+                    titleAr: 'إرسال طلب للبحث في المنصة',
+                    titleFr: 'Envoyer une demande sur la plateforme',
                     descAr: 'طلب واحد يصل فوراً لكل مالك مناسب في مدينتك لتقارن الأثمنة وتختار الأنسب.',
                     descFr: 'Un seul envoi alerte tous les propriétaires qualifiés de votre zone.',
                   },
                   {
                     icon: PauseCircle,
-                    titleAr: 'حماية العداد أثناء الأعطال',
-                    titleFr: 'Protection compteur en panne',
-                    descAr: 'يتوقف احتساب ساعات الكراء عند وقوع عطل مع زر «تم الإصلاح» لحفظ حقك المالي.',
-                    descFr: 'Le décompte est gelé pendant la panne jusqu’à votre confirmation de réparation.',
+                    titleAr: 'إدارة للكراء مع المالك',
+                    titleFr: 'Gestion de location avec le loueur',
+                    descAr: 'محادثة مباشرة مع المالك في المنصة وتوليد عقد كراء وفواتير وإمكانية إشعاره بالأعطاب وتعليق الكراء إلى حين الإصلاح كي تحفظ ساعات الكراء.',
+                    descFr: 'Discussion directe avec le loueur, génération de contrat et factures, signalement des pannes et suspension du décompte jusqu’à réparation pour préserver vos heures.',
                   },
                   {
                     icon: ShieldCheck,
@@ -198,7 +200,7 @@ export const PillarShowcaseSections: React.FC<PillarShowcaseSectionsProps> = ({
               </div>
             </motion.div>
 
-            {/* Visual Preview Card */}
+            {/* Visual Preview Card with Generated Marrakech GPS Radar + 3D Machine Showcase */}
             <motion.div
               initial={{ opacity: 0, y: 18 }}
               whileInView={{ opacity: 1, y: 0 }}
@@ -206,64 +208,53 @@ export const PillarShowcaseSections: React.FC<PillarShowcaseSectionsProps> = ({
               transition={{ duration: 0.45, delay: 0.08, ease: [0.16, 1, 0.3, 1] }}
               className="lg:col-span-5 flex"
             >
-              <div className="w-full rounded-2xl bg-ink text-white border border-steel-800 p-6 shadow-elevated flex flex-col justify-between text-start">
+              <div className="w-full rounded-2xl bg-ink text-white border border-steel-800 p-4 sm:p-5 shadow-elevated flex flex-col justify-between text-start">
                 <div>
-                  <div className="flex items-center justify-between gap-3 pb-4 border-b border-slate-800">
+                  <div className="flex items-center justify-between gap-3 pb-3.5 border-b border-slate-800">
                     <div>
                       <span className="text-xs text-primary font-bold block">
-                        {lang === 'fr' ? 'Radar Chantier GPS' : 'رادار الأوراش المباشر'}
+                        {lang === 'fr' ? 'Carte GPS · Exemple Marrakech' : 'خريطة GPS مباشرة · مثال مراكش'}
                       </span>
-                      <span className="text-base font-black text-white">
-                        {lang === 'fr' ? 'Engins disponibles à proximité' : 'آليات جاهزة بالقرب من ورشك'}
+                      <span className="text-sm sm:text-base font-black text-white">
+                        {lang === 'fr'
+                          ? 'Chantier entouré d’engins disponibles'
+                          : 'ورشك محاط بالآليات المتاحة للكراء'}
                       </span>
                     </div>
-                    <div className="w-10 h-10 rounded-xl bg-primary/15 text-primary flex items-center justify-center shrink-0">
-                      <Compass className="w-5 h-5" />
+                    <div className="w-9 h-9 rounded-xl bg-primary/15 text-primary flex items-center justify-center shrink-0">
+                      <Compass className="w-4 h-4" />
                     </div>
                   </div>
 
-                  <div className="space-y-3 mt-5">
-                    <div className="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-bold text-white">Pelle CAT 320D · 22T</div>
-                        <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-2">
-                          <span>2.8 km</span>
-                          <span aria-hidden="true">·</span>
-                          <span>{lang === 'fr' ? 'Avec chauffeur' : 'مع سائق معتمد'}</span>
-                        </div>
+                  {/* Generated 4:3 Marrakech Map & 3D JCB Showcase */}
+                  <div className="relative mt-4 aspect-[4/3] rounded-xl overflow-hidden border border-slate-700/80 bg-slate-900">
+                    {!clientsImgErr ? (
+                      <img
+                        src={marrakechRadarImg}
+                        alt={
+                          lang === 'fr'
+                            ? 'Interface carte GPS de Marrakech montrant le chantier et un engin JCB 3CX Eco en 3D disponible à la location'
+                            : 'واجهة خريطة GPS مراكش تظهر ورش الزبون والآليات القريبة مع مجسم ثلاثي الأبعاد لآلية JCB 3CX Eco متاحة للكراء'
+                        }
+                        referrerPolicy="no-referrer"
+                        onError={() => setClientsImgErr(true)}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-gradient-to-br from-[#0B1220] via-[#131F36] to-[#0B1220] flex flex-col items-center justify-center p-6 text-center">
+                        <MapPin className="w-10 h-10 text-primary mb-2" />
+                        <span className="text-sm font-black text-white">
+                          {lang === 'fr' ? 'Carte GPS Marrakech · JCB 3CX Eco' : 'خريطة مراكش · JCB 3CX Eco'}
+                        </span>
+                        <span className="text-xs text-primary font-mono latin-nums mt-1">
+                          1 800 MAD / {lang === 'fr' ? 'jour' : 'يوم'}
+                        </span>
                       </div>
-                      <div className="text-end shrink-0">
-                        <div className="text-sm font-black text-primary font-mono latin-nums">
-                          3 200 MAD
-                        </div>
-                        <div className="text-[11px] text-slate-400">
-                          / {lang === 'fr' ? 'jour' : 'يوم'}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-bold text-white">JCB 3CX Eco</div>
-                        <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-2">
-                          <span>4.1 km</span>
-                          <span aria-hidden="true">·</span>
-                          <span>{lang === 'fr' ? 'Livraison porte-char' : 'توصيل لباب الورش'}</span>
-                        </div>
-                      </div>
-                      <div className="text-end shrink-0">
-                        <div className="text-sm font-black text-primary font-mono latin-nums">
-                          1 800 MAD
-                        </div>
-                        <div className="text-[11px] text-slate-400">
-                          / {lang === 'fr' ? 'jour' : 'يوم'}
-                        </div>
-                      </div>
-                    </div>
+                    )}
                   </div>
                 </div>
 
-                <div className="mt-5 pt-4 border-t border-slate-800 flex items-center justify-between gap-3">
+                <div className="mt-4 pt-3.5 border-t border-slate-800 flex items-center justify-between gap-3">
                   <div className="text-xs text-emerald-300 font-semibold flex items-center gap-1.5">
                     <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                     <span>

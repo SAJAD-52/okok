@@ -197,6 +197,7 @@ export interface BookingBreakdownReport {
   reported_at: string;
   status: 'open' | 'resolved';
   resolved_at?: string;
+  resolved_by?: 'owner' | 'client';
 }
 
 export interface BookingPauseState {
@@ -206,6 +207,9 @@ export interface BookingPauseState {
   total_paused_ms?: number;
   pause_reason?: string;
   resumed_at?: string;
+  client_repair_confirmed?: boolean;
+  client_repair_confirmed_at?: string;
+  client_repair_confirmed_by?: string;
 }
 
 export interface Booking {

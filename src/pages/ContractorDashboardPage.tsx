@@ -2,7 +2,7 @@
 // JADIJCB: Contractor Portal Dashboard Overview (/entreprise)
 // ============================================================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   HardHat,
@@ -23,12 +23,14 @@ import {
   AlertCircle,
   AlertTriangle,
   Compass,
+  CheckCircle2,
 } from 'lucide-react';
 import { Booking, ContractorSite } from '../types/database';
 import { getClientSegmentOption } from '../data/clientSegments';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
+import { toast } from '../components/ui/Toast';
 import { useLanguage } from '../hooks/useLanguage';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabase';
@@ -37,7 +39,10 @@ import { ReportBreakdownModal } from '../components/bookings/ReportBreakdownModa
 import {
   extractBookingBreakdownsAndNotes,
   formatCompactRemaining,
+  confirmClientRepairCompleted,
 } from '../lib/breakdownService';
+import { machineStore } from '../lib/machineStore';
+import { serverApi } from '../lib/serverApi';
 import { ProfileSettingsModal } from '../components/profile/ProfileSettingsModal';
 
 export const ContractorDashboardPage: React.FC = () => {
@@ -55,9 +60,177 @@ export const ContractorDashboardPage: React.FC = () => {
   const [selectedBookingForBreakdown, setSelectedBookingForBreakdown] = useState<Booking | null>(null);
   const [isBreakdownModalOpen, setIsBreakdownModalOpen] = useState<boolean>(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState<boolean>(false);
+  const [confirmingRepairId, setConfirmingRepairId] = useState<string | null>(null);
+  const [failedImageIds, setFailedImageIds] = useState<Record<string, boolean>>({});
+
+  const normalizeMachineObj = (m: any) => {
+    if (!m || typeof m !== 'object') return undefined;
+    let imgs: string[] = [];
+    if (Array.isArray(m.images)) {
+      imgs = m.images.filter((u: any) => typeof u === 'string' && u.trim().length > 0);
+    } else if (typeof m.images === 'string' && m.images.trim()) {
+      try {
+        const parsed = JSON.parse(m.images);
+        if (Array.isArray(parsed)) {
+          imgs = parsed.filter((u: any) => typeof u === 'string' && u.trim().length > 0);
+        }
+      } catch {
+        imgs = [m.images.trim()];
+      }
+    }
+    return { ...m, images: imgs };
+  };
+
+  const loadData = useCallback(async () => {
+    if (!user?.id) {
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      const userPhone = profile?.phone || user.user_metadata?.phone;
+      const combinedMap = new Map<string, Booking>();
+
+      try {
+        const serverBookings = await serverApi.getBookings({ client_id: user.id });
+        if (Array.isArray(serverBookings)) {
+          for (const sb of serverBookings) {
+            if (!sb?.id) continue;
+            combinedMap.set(sb.id, {
+              ...sb,
+              machine: normalizeMachineObj(sb.machine),
+            });
+          }
+        }
+      } catch {
+        // ignore
+      }
+
+      try {
+        let query = supabase.from('bookings').select('*, machines(*)');
+        if (userPhone) {
+          query = query.or(`client_id.eq.${user.id},client_phone.eq.${userPhone}`);
+        } else {
+          query = query.eq('client_id', user.id);
+        }
+
+        let { data, error } = await query;
+        if (error) {
+          const fallbackRes = await supabase
+            .from('bookings')
+            .select('*')
+            .eq('client_id', user.id);
+          data = fallbackRes.data;
+        }
+
+        if (Array.isArray(data)) {
+          for (const b of data as any[]) {
+            if (!b?.id) continue;
+            combinedMap.set(b.id, {
+              id: b.id,
+              machine_id: b.machine_id,
+              owner_id: b.owner_id,
+              client_id: b.client_id,
+              client_name: b.client_name,
+              client_phone: b.client_phone,
+              start_at: b.start_at || b.start_date,
+              end_at: b.end_at || b.end_date,
+              start_date: b.start_date || b.start_at,
+              end_date: b.end_date || b.end_at,
+              total_price: Number(b.total_price) || 0,
+              status: b.status,
+              notes: b.notes,
+              breakdowns: Array.isArray(b.breakdowns) ? b.breakdowns : undefined,
+              pause_state: b.pause_state || null,
+              created_at: b.created_at,
+              machine: normalizeMachineObj(b.machines || b.machine),
+              with_operator: Boolean(b.with_operator ?? true),
+            });
+          }
+        }
+      } catch (qErr) {
+        console.warn('Contractor dashboard query error:', qErr);
+      }
+
+      const rawList = Array.from(combinedMap.values());
+      const cachedMachines = machineStore.getCachedMachines();
+      const missingIds = Array.from(
+        new Set(
+          rawList
+            .filter((b) => b.machine_id && (!(b.machine as any)?.images?.length || !(b.machine as any)?.title_ar))
+            .map((b) => b.machine_id)
+        )
+      );
+
+      const machineById = new Map<string, any>();
+      for (const cm of cachedMachines) {
+        if (cm?.id) machineById.set(cm.id, normalizeMachineObj(cm));
+      }
+
+      if (missingIds.length > 0) {
+        try {
+          const { data: dbMachs } = await supabase
+            .from('machines')
+            .select('*')
+            .in('id', missingIds);
+          if (Array.isArray(dbMachs)) {
+            for (const m of dbMachs) {
+              if (m?.id) machineById.set(m.id, normalizeMachineObj(m));
+            }
+          }
+        } catch {
+          // ignore
+        }
+
+        const stillMissing = missingIds.some((id) => !machineById.get(id)?.images?.length);
+        if (stillMissing) {
+          try {
+            const srvMachs = await serverApi.getMachines();
+            for (const m of srvMachs) {
+              if (m?.id && !machineById.get(m.id)?.images?.length) {
+                machineById.set(m.id, normalizeMachineObj(m));
+              }
+            }
+          } catch {
+            // ignore
+          }
+        }
+      }
+
+      const mapped = rawList.map((b) => {
+        const fallbackMachine = b.machine_id ? machineById.get(b.machine_id) : undefined;
+        const currentMachine = normalizeMachineObj(b.machine);
+        const mergedMachine =
+          currentMachine || fallbackMachine
+            ? {
+                ...(fallbackMachine || {}),
+                ...(currentMachine || {}),
+                images:
+                  currentMachine?.images && currentMachine.images.length > 0
+                    ? currentMachine.images
+                    : fallbackMachine?.images || [],
+              }
+            : undefined;
+        return { ...b, machine: mergedMachine };
+      });
+
+      const active = mapped.filter((b) => b.status === 'active');
+      const pending = mapped.filter((b) => b.status === 'pending');
+      const spent = mapped
+        .filter((b) => b.status !== 'cancelled')
+        .reduce((acc, curr) => acc + (curr.total_price || 0), 0);
+
+      setActiveBookings(active);
+      setPendingBookings(pending);
+      setTotalSpent(spent);
+    } catch (err) {
+      console.warn('Contractor dashboard data load error:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [user, profile]);
 
   useEffect(() => {
-    // Load contractor saved sites
     try {
       const stored = localStorage.getItem('jadijcb_contractor_sites');
       if (stored) {
@@ -67,63 +240,55 @@ export const ContractorDashboardPage: React.FC = () => {
       // Ignore
     }
 
-    async function loadData() {
-      if (!user?.id) {
-        setIsLoading(false);
-        return;
-      }
-      setIsLoading(true);
+    loadData();
 
+    const handleEvent = () => loadData();
+    window.addEventListener('jadijcb_booking_event', handleEvent);
+    window.addEventListener('jadijcb_bookings_updated', handleEvent);
+
+    let rtChannel: any = null;
+    if (user?.id) {
       try {
-        const userPhone = profile?.phone || user.user_metadata?.phone;
-        let query = supabase.from('bookings').select('*, machines(*)');
-
-        if (userPhone) {
-          query = query.or(`client_id.eq.${user.id},client_phone.eq.${userPhone}`);
-        } else {
-          query = query.eq('client_id', user.id);
-        }
-
-        const { data, error } = await query;
-        if (!error && data) {
-          const mapped: Booking[] = data.map((b: any) => ({
-            id: b.id,
-            machine_id: b.machine_id,
-            owner_id: b.owner_id,
-            client_id: b.client_id,
-            client_name: b.client_name,
-            client_phone: b.client_phone,
-            start_at: b.start_at,
-            end_at: b.end_at,
-            start_date: b.start_at,
-            end_date: b.end_at,
-            total_price: Number(b.total_price) || 0,
-            status: b.status,
-            notes: b.notes,
-            breakdowns: Array.isArray(b.breakdowns) ? b.breakdowns : undefined,
-            pause_state: b.pause_state || null,
-            created_at: b.created_at,
-            machine: b.machines,
-            with_operator: Boolean(b.with_operator ?? true),
-          }));
-
-          const active = mapped.filter((b) => b.status === 'active');
-          const pending = mapped.filter((b) => b.status === 'pending');
-          const spent = mapped.reduce((acc, curr) => acc + (curr.total_price || 0), 0);
-
-          setActiveBookings(active);
-          setPendingBookings(pending);
-          setTotalSpent(spent);
-        }
-      } catch (err) {
-        console.warn('Contractor dashboard data load error:', err);
-      } finally {
-        setIsLoading(false);
+        rtChannel = supabase
+          .channel(`contractor_dash_rt_${user.id}`)
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'bookings' },
+            () => loadData()
+          )
+          .subscribe();
+      } catch {
+        // ignore
       }
     }
 
-    loadData();
-  }, [user, profile]);
+    return () => {
+      window.removeEventListener('jadijcb_booking_event', handleEvent);
+      window.removeEventListener('jadijcb_bookings_updated', handleEvent);
+      if (rtChannel) supabase.removeChannel(rtChannel);
+    };
+  }, [loadData, user?.id]);
+
+  const handleConfirmRepair = async (booking: Booking) => {
+    setConfirmingRepairId(booking.id);
+    try {
+      const clientName =
+        profile?.company_name || profile?.full_name || booking.client_name || '';
+      const res = await confirmClientRepairCompleted(booking, user?.id || profile?.id, clientName);
+      setActiveBookings((prev) =>
+        prev.map((item) => (item.id === res.updatedBooking.id ? res.updatedBooking : item))
+      );
+      toast.success(
+        lang === 'fr'
+          ? 'Réparation confirmée ! Le propriétaire peut maintenant reprendre la location.'
+          : 'تم تأكيد «تم الإصلاح»! تم إشعار المالك ليتمكن الآن من الضغط على زر «مواصلة».'
+      );
+    } catch {
+      toast.error(t('common.error'));
+    } finally {
+      setConfirmingRepairId(null);
+    }
+  };
 
   const segmentOpt = getClientSegmentOption(profile?.client_segment);
   const clientSegmentBadge = profile?.client_segment
@@ -348,7 +513,8 @@ export const ContractorDashboardPage: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
             {activeBookings.map((b) => {
               const machine = b.machine as any;
-              const { pauseState } = extractBookingBreakdownsAndNotes(b);
+              const { breakdowns, pauseState } = extractBookingBreakdownsAndNotes(b);
+              const openBreakdownsCount = breakdowns.filter((f) => f.status === 'open').length;
               const isPaused = Boolean(b.status === 'active' && pauseState?.is_paused);
               return (
                 <Card
@@ -358,15 +524,19 @@ export const ContractorDashboardPage: React.FC = () => {
                   }`}
                 >
                   <div className="flex gap-3 min-w-0">
-                    <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl overflow-hidden bg-steel-100 shrink-0">
-                      <img
-                        src={
-                          machine?.images?.[0] ||
-                          'https://images.unsplash.com/photo-1579829366248-204fe8413f31?w=800&q=80'
-                        }
-                        alt="Machine"
-                        className="w-full h-full object-cover"
-                      />
+                    <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl overflow-hidden bg-amber-500/10 border border-steel-200 shrink-0 flex items-center justify-center">
+                      {machine?.images?.[0] && !failedImageIds[b.id] ? (
+                        <img
+                          src={machine.images[0]}
+                          alt={machine?.title_ar || machine?.title_fr || 'Machine'}
+                          onError={() =>
+                            setFailedImageIds((prev) => ({ ...prev, [b.id]: true }))
+                          }
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <Truck className="w-7 h-7 text-primary-dark" />
+                      )}
                     </div>
                     <div className="min-w-0 flex-1 space-y-1">
                       <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -386,15 +556,50 @@ export const ContractorDashboardPage: React.FC = () => {
                         </span>
                       </div>
                       <h4 className="text-xs sm:text-sm font-black text-ink truncate">
-                        {lang === 'fr' ? machine?.title_fr || machine?.brand : machine?.title_ar || machine?.brand}
+                        {(lang === 'fr'
+                          ? machine?.title_fr || machine?.title_ar
+                          : machine?.title_ar || machine?.title_fr) ||
+                          [machine?.brand, machine?.model].filter(Boolean).join(' ') ||
+                          (lang === 'fr' ? 'Engin loué' : 'آلية أشغال عمومية')}
                       </h4>
                       <p className="text-[11px] text-steel-500 truncate">
-                        {machine?.brand} {machine?.model} · {machine?.city || 'المغرب'}
+                        {[machine?.brand, machine?.model].filter(Boolean).join(' ') || 'JCB'} ·{' '}
+                        {machine?.city || 'المغرب'}
                       </p>
                     </div>
                   </div>
 
                   <div className="pt-2.5 border-t border-steel-100 flex items-center gap-2 flex-wrap">
+                    {((isPaused && !pauseState?.client_repair_confirmed) ||
+                      openBreakdownsCount > 0) && (
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="sm"
+                        disabled={confirmingRepairId === b.id}
+                        onClick={() => handleConfirmRepair(b)}
+                        leftIcon={<CheckCircle2 className="w-3.5 h-3.5" />}
+                        className="text-xs font-black bg-emerald-600! hover:bg-emerald-700! text-white! border-emerald-700! px-3!"
+                      >
+                        {confirmingRepairId === b.id
+                          ? '...'
+                          : lang === 'fr'
+                          ? 'Réparation terminée'
+                          : 'تم الإصلاح'}
+                      </Button>
+                    )}
+
+                    {isPaused && pauseState?.client_repair_confirmed && (
+                      <span className="px-2.5 py-1 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-800 text-[10px] font-black inline-flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                        <span>
+                          {lang === 'fr'
+                            ? 'Réparé confirmé — en attente de reprise'
+                            : '✓ تم تأكيد الإصلاح — بانتظار المالك'}
+                        </span>
+                      </span>
+                    )}
+
                     <Button
                       type="button"
                       variant="outline"

@@ -42,8 +42,11 @@ import {
   formatRemainingDuration,
   getBreakdownCategoryLabel,
   getBreakdownSeverityLabel,
+  confirmClientRepairCompleted,
 } from '../lib/breakdownService';
 import { bookingStore } from '../lib/bookingStore';
+import { machineStore } from '../lib/machineStore';
+import { serverApi } from '../lib/serverApi';
 
 export const ContractorBookingsPage: React.FC = () => {
   const { t, lang, isRTL } = useLanguage();
@@ -58,6 +61,8 @@ export const ContractorBookingsPage: React.FC = () => {
   const [isExtensionModalOpen, setIsExtensionModalOpen] = useState<boolean>(false);
   const [selectedBookingForBreakdown, setSelectedBookingForBreakdown] = useState<Booking | null>(null);
   const [isBreakdownModalOpen, setIsBreakdownModalOpen] = useState<boolean>(false);
+  const [confirmingRepairId, setConfirmingRepairId] = useState<string | null>(null);
+  const [failedImageIds, setFailedImageIds] = useState<Record<string, boolean>>({});
   const [now, setNow] = useState(Date.now());
 
   // Ticking countdown timer
@@ -67,6 +72,24 @@ export const ContractorBookingsPage: React.FC = () => {
     }, 1000);
     return () => clearInterval(timer);
   }, []);
+
+  const normalizeMachineObj = (m: any) => {
+    if (!m || typeof m !== 'object') return undefined;
+    let imgs: string[] = [];
+    if (Array.isArray(m.images)) {
+      imgs = m.images.filter((u: any) => typeof u === 'string' && u.trim().length > 0);
+    } else if (typeof m.images === 'string' && m.images.trim()) {
+      try {
+        const parsed = JSON.parse(m.images);
+        if (Array.isArray(parsed)) {
+          imgs = parsed.filter((u: any) => typeof u === 'string' && u.trim().length > 0);
+        }
+      } catch {
+        imgs = [m.images.trim()];
+      }
+    }
+    return { ...m, images: imgs };
+  };
 
   const loadContractorBookings = useCallback(async () => {
     if (!user?.id) {
@@ -78,30 +101,49 @@ export const ContractorBookingsPage: React.FC = () => {
 
     try {
       const userPhone = profile?.phone || user.user_metadata?.phone;
-      let mapped: Booking[] = [];
+      const combinedMap = new Map<string, Booking>();
 
+      // 1. Express SQLite fallback/source
       try {
-        let query = supabase
-          .from('bookings')
-          .select('*');
+        const serverBookings = await serverApi.getBookings({ client_id: user.id });
+        if (Array.isArray(serverBookings)) {
+          for (const sb of serverBookings) {
+            if (!sb?.id) continue;
+            combinedMap.set(sb.id, {
+              ...sb,
+              machine: normalizeMachineObj(sb.machine),
+            });
+          }
+        }
+      } catch {
+        // ignore
+      }
 
+      // 2. Authoritative Supabase query joining machines(*)
+      try {
+        let query = supabase.from('bookings').select('*, machines(*)');
         if (userPhone) {
           query = query.or(`client_id.eq.${user.id},client_phone.eq.${userPhone}`);
         } else {
           query = query.eq('client_id', user.id);
         }
 
-        const { data, error } = await query.order('created_at', { ascending: false });
+        let { data, error } = await query.order('created_at', { ascending: false });
 
         if (error) {
-          console.warn('Contractor bookings load query warning:', error.message);
-          // Try simpler query fallback
+          console.warn('Contractor bookings join query warning:', error.message);
           const fallbackRes = await supabase
             .from('bookings')
             .select('*')
-            .eq('client_id', user.id);
-          if (fallbackRes.data) {
-            mapped = fallbackRes.data.map((b: any) => ({
+            .eq('client_id', user.id)
+            .order('created_at', { ascending: false });
+          data = fallbackRes.data;
+        }
+
+        if (Array.isArray(data)) {
+          for (const b of data as any[]) {
+            if (!b?.id) continue;
+            combinedMap.set(b.id, {
               id: b.id,
               machine_id: b.machine_id,
               owner_id: b.owner_id,
@@ -118,38 +160,86 @@ export const ContractorBookingsPage: React.FC = () => {
               breakdowns: Array.isArray(b.breakdowns) ? b.breakdowns : undefined,
               pause_state: b.pause_state || null,
               created_at: b.created_at,
-              machine: b.machines || b.machine,
+              machine: normalizeMachineObj(b.machines || b.machine),
               with_operator: Boolean(b.with_operator ?? true),
-            }));
+            });
           }
-        } else if (data) {
-          mapped = data.map((b: any) => ({
-            id: b.id,
-            machine_id: b.machine_id,
-            owner_id: b.owner_id,
-            client_id: b.client_id,
-            client_name: b.client_name,
-            client_phone: b.client_phone,
-            start_at: b.start_at || b.start_date,
-            end_at: b.end_at || b.end_date,
-            start_date: b.start_date || b.start_at,
-            end_date: b.end_date || b.end_at,
-            total_price: Number(b.total_price) || 0,
-            status: b.status,
-            notes: b.notes,
-            breakdowns: Array.isArray(b.breakdowns) ? b.breakdowns : undefined,
-            pause_state: b.pause_state || null,
-            created_at: b.created_at,
-            machine: b.machines || b.machine,
-            with_operator: Boolean(b.with_operator ?? true),
-          }));
         }
       } catch (qErr) {
         console.warn('Contractor Supabase query failed:', qErr);
       }
 
-      // Supabase is the single source of truth (no stale local cache)
-      setBookings(mapped);
+      const rawList = Array.from(combinedMap.values());
+
+      // 3. Ensure every booking resolves the exact real machine & photos from DB / server / cache
+      const cachedMachines = machineStore.getCachedMachines();
+      const missingIds = Array.from(
+        new Set(
+          rawList
+            .filter((b) => b.machine_id && (!(b.machine as any)?.images?.length || !(b.machine as any)?.title_ar))
+            .map((b) => b.machine_id)
+        )
+      );
+
+      const machineById = new Map<string, any>();
+      for (const cm of cachedMachines) {
+        if (cm?.id) machineById.set(cm.id, normalizeMachineObj(cm));
+      }
+
+      if (missingIds.length > 0) {
+        try {
+          const { data: dbMachs } = await supabase
+            .from('machines')
+            .select('*')
+            .in('id', missingIds);
+          if (Array.isArray(dbMachs)) {
+            for (const m of dbMachs) {
+              if (m?.id) machineById.set(m.id, normalizeMachineObj(m));
+            }
+          }
+        } catch {
+          // ignore
+        }
+
+        const stillMissing = missingIds.some((id) => !machineById.get(id)?.images?.length);
+        if (stillMissing) {
+          try {
+            const srvMachs = await serverApi.getMachines();
+            for (const m of srvMachs) {
+              if (m?.id && !machineById.get(m.id)?.images?.length) {
+                machineById.set(m.id, normalizeMachineObj(m));
+              }
+            }
+          } catch {
+            // ignore
+          }
+        }
+      }
+
+      const enriched = rawList
+        .map((b) => {
+          const fallbackMachine = b.machine_id ? machineById.get(b.machine_id) : undefined;
+          const currentMachine = normalizeMachineObj(b.machine);
+          const mergedMachine =
+            currentMachine || fallbackMachine
+              ? {
+                  ...(fallbackMachine || {}),
+                  ...(currentMachine || {}),
+                  images:
+                    currentMachine?.images && currentMachine.images.length > 0
+                      ? currentMachine.images
+                      : fallbackMachine?.images || [],
+                }
+              : undefined;
+          return { ...b, machine: mergedMachine };
+        })
+        .sort(
+          (a, b) =>
+            new Date(b.created_at || b.start_at || 0).getTime() -
+            new Date(a.created_at || a.start_at || 0).getTime()
+        );
+
+      setBookings(enriched);
     } catch (err) {
       console.warn('Contractor bookings load exception:', err);
       const userPhone = profile?.phone || user.user_metadata?.phone;
@@ -165,7 +255,25 @@ export const ContractorBookingsPage: React.FC = () => {
 
     const handleEvent = () => loadContractorBookings();
     window.addEventListener('jadijcb_booking_event', handleEvent);
-    // Auto-refresh while visible so owner approval shows up without reloading the page
+    window.addEventListener('jadijcb_bookings_updated', handleEvent);
+
+    let rtChannel: any = null;
+    if (user?.id) {
+      try {
+        rtChannel = supabase
+          .channel(`contractor_bookings_rt_${user.id}`)
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'bookings' },
+            () => loadContractorBookings()
+          )
+          .subscribe();
+      } catch {
+        // ignore
+      }
+    }
+
+    // Auto-refresh while visible so owner approval / pause / resume shows up promptly
     const poll = setInterval(() => {
       if (document.visibilityState === 'visible') loadContractorBookings();
     }, 25000);
@@ -175,10 +283,33 @@ export const ContractorBookingsPage: React.FC = () => {
     document.addEventListener('visibilitychange', onVisible);
     return () => {
       window.removeEventListener('jadijcb_booking_event', handleEvent);
+      window.removeEventListener('jadijcb_bookings_updated', handleEvent);
       clearInterval(poll);
       document.removeEventListener('visibilitychange', onVisible);
+      if (rtChannel) supabase.removeChannel(rtChannel);
     };
-  }, [loadContractorBookings]);
+  }, [loadContractorBookings, user?.id]);
+
+  const handleConfirmRepair = async (booking: Booking) => {
+    setConfirmingRepairId(booking.id);
+    try {
+      const clientName =
+        profile?.company_name || profile?.full_name || booking.client_name || '';
+      const res = await confirmClientRepairCompleted(booking, user?.id || profile?.id, clientName);
+      setBookings((prev) =>
+        prev.map((item) => (item.id === res.updatedBooking.id ? res.updatedBooking : item))
+      );
+      toast.success(
+        lang === 'fr'
+          ? 'Réparation confirmée ! Le propriétaire peut maintenant reprendre la location.'
+          : 'تم تأكيد «تم الإصلاح»! تم إشعار المالك ليتمكن الآن من الضغط على زر «مواصلة».'
+      );
+    } catch {
+      toast.error(t('common.error'));
+    } finally {
+      setConfirmingRepairId(null);
+    }
+  };
 
   // Filter bookings
   const filteredBookings = bookings.filter((b) => {
@@ -352,15 +483,19 @@ export const ContractorBookingsPage: React.FC = () => {
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
                   {/* Machine & Info */}
                   <div className="flex items-start gap-4">
-                    <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl overflow-hidden bg-steel-100 shrink-0">
-                      <img
-                        src={
-                          machine?.images?.[0] ||
-                          'https://images.unsplash.com/photo-1579829366248-204fe8413f31?w=800&q=80'
-                        }
-                        alt="Machine"
-                        className="w-full h-full object-cover"
-                      />
+                    <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl overflow-hidden bg-amber-500/10 border border-steel-200 shrink-0 flex items-center justify-center">
+                      {machine?.images?.[0] && !failedImageIds[b.id] ? (
+                        <img
+                          src={machine.images[0]}
+                          alt={machine?.title_ar || machine?.title_fr || 'Machine'}
+                          onError={() =>
+                            setFailedImageIds((prev) => ({ ...prev, [b.id]: true }))
+                          }
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <Truck className="w-9 h-9 text-primary-dark" />
+                      )}
                     </div>
 
                     <div className="space-y-1.5 min-w-0">
@@ -380,11 +515,16 @@ export const ContractorBookingsPage: React.FC = () => {
                       </div>
 
                       <h3 className="text-sm sm:text-base font-black text-ink">
-                        {lang === 'fr' ? machine?.title_fr || machine?.brand : machine?.title_ar || machine?.brand}
+                        {(lang === 'fr'
+                          ? machine?.title_fr || machine?.title_ar
+                          : machine?.title_ar || machine?.title_fr) ||
+                          [machine?.brand, machine?.model].filter(Boolean).join(' ') ||
+                          (lang === 'fr' ? 'Engin loué' : 'آلية أشغال عمومية')}
                       </h3>
 
                       <p className="text-xs text-steel-600">
-                        {machine?.brand} {machine?.model} · {machine?.city || 'المغرب'}
+                        {[machine?.brand, machine?.model].filter(Boolean).join(' ') || 'JCB'} ·{' '}
+                        {machine?.city || 'المغرب'}
                       </p>
 
                       <div className="flex items-center gap-3 text-xs text-steel-500 pt-1 flex-wrap">
@@ -426,6 +566,40 @@ export const ContractorBookingsPage: React.FC = () => {
 
                     {/* Action Buttons */}
                     <div className="flex items-center gap-2 flex-wrap">
+                      {/* Client Repair Confirmation Button ("تم الإصلاح") to protect the client before Owner can Resume */}
+                      {b.status === 'active' &&
+                        ((isPaused && !pauseState?.client_repair_confirmed) ||
+                          openBreakdownsCount > 0) && (
+                          <Button
+                            type="button"
+                            variant="primary"
+                            size="sm"
+                            disabled={confirmingRepairId === b.id}
+                            onClick={() => handleConfirmRepair(b)}
+                            leftIcon={<CheckCircle2 className="w-4 h-4" />}
+                            className="font-black text-xs bg-emerald-600! hover:bg-emerald-700! text-white! border-emerald-700! shadow-sm"
+                          >
+                            {confirmingRepairId === b.id
+                              ? '...'
+                              : lang === 'fr'
+                              ? 'Réparation terminée'
+                              : 'تم الإصلاح'}
+                          </Button>
+                        )}
+
+                      {b.status === 'active' &&
+                        isPaused &&
+                        pauseState?.client_repair_confirmed && (
+                          <span className="px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-800 text-[11px] font-black inline-flex items-center gap-1.5">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>
+                              {lang === 'fr'
+                                ? 'Réparé confirmé — en attente de reprise'
+                                : '✓ تم تأكيد الإصلاح — بانتظار المالك للمواصلة'}
+                            </span>
+                          </span>
+                        )}
+
                       {/* Report Machine Breakdown Button (once client received machine -> active status) */}
                       {b.status === 'active' && (
                         <Button

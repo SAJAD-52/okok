@@ -193,7 +193,39 @@ export function extractBookingBreakdownsAndNotes(
     (a, b) => new Date(b.reported_at || 0).getTime() - new Date(a.reported_at || 0).getTime()
   );
 
-  const pauseState = booking.pause_state || parsedPauseFromNotes || null;
+  let pauseState: BookingPauseState | null = null;
+  if (booking.pause_state && parsedPauseFromNotes) {
+    const colTime = Math.max(
+      booking.pause_state.client_repair_confirmed_at
+        ? new Date(booking.pause_state.client_repair_confirmed_at).getTime()
+        : 0,
+      booking.pause_state.resumed_at ? new Date(booking.pause_state.resumed_at).getTime() : 0,
+      booking.pause_state.paused_at ? new Date(booking.pause_state.paused_at).getTime() : 0
+    );
+    const noteTime = Math.max(
+      parsedPauseFromNotes.client_repair_confirmed_at
+        ? new Date(parsedPauseFromNotes.client_repair_confirmed_at).getTime()
+        : 0,
+      parsedPauseFromNotes.resumed_at ? new Date(parsedPauseFromNotes.resumed_at).getTime() : 0,
+      parsedPauseFromNotes.paused_at ? new Date(parsedPauseFromNotes.paused_at).getTime() : 0
+    );
+    const primary = noteTime > colTime ? parsedPauseFromNotes : booking.pause_state;
+    const secondary = noteTime > colTime ? booking.pause_state : parsedPauseFromNotes;
+    pauseState = {
+      ...secondary,
+      ...primary,
+      client_repair_confirmed:
+        primary.is_paused
+          ? Boolean(primary.client_repair_confirmed || secondary.client_repair_confirmed)
+          : primary.client_repair_confirmed,
+      client_repair_confirmed_at:
+        primary.client_repair_confirmed_at || secondary.client_repair_confirmed_at,
+      client_repair_confirmed_by:
+        primary.client_repair_confirmed_by || secondary.client_repair_confirmed_by,
+    };
+  } else {
+    pauseState = booking.pause_state || parsedPauseFromNotes || null;
+  }
 
   return {
     breakdowns,
@@ -430,7 +462,7 @@ export async function resolveBookingBreakdown(
 
   const nextBreakdowns: BookingBreakdownReport[] = existingBreakdowns.map((item) =>
     item.id === breakdownId
-      ? { ...item, status: 'resolved', resolved_at: nowIso }
+      ? { ...item, status: 'resolved', resolved_at: nowIso, resolved_by: 'owner' }
       : item
   );
   const nextNotes = buildUpdatedNotesWithExtras(cleanNotes, nextBreakdowns, pauseState);
@@ -476,12 +508,17 @@ export async function resolveBookingBreakdown(
       try {
         const machineTitleAr = booking.machine?.title_ar || booking.machine?.title_fr || 'الآلية';
         const machineTitleFr = booking.machine?.title_fr || booking.machine?.title_ar || 'Engin';
+        const isPausedNow = Boolean(pauseState?.is_paused);
         await supabase.from('notifications').insert({
           user_id: booking.client_id,
-          title_ar: `✅ تم معالجة العطل: ${machineTitleAr}`,
-          title_fr: `✅ Panne traitée : ${machineTitleFr}`,
-          body_ar: `قام المالك بتحديث حالة العطل المبلّغ عنه إلى "تم الإصلاح".`,
-          body_fr: `Le propriétaire a marqué l'anomalie signalée comme résolue.`,
+          title_ar: `🔧 قام المالك بصيانة العطل: ${machineTitleAr}`,
+          title_fr: `🔧 Réparation effectuée : ${machineTitleFr}`,
+          body_ar: isPausedNow
+            ? `أشار المالك إلى إصلاح العطل. اضغط على «تم الإصلاح» من حسابك بعد المعاينة ليتمكن المالك من استئناف الكراء.`
+            : `قام المالك بتحديث حالة العطل المبلّغ عنه إلى "تم الإصلاح".`,
+          body_fr: isPausedNow
+            ? `Le propriétaire signale que l'engin est réparé. Confirmez « Réparé » pour autoriser la reprise.`
+            : `Le propriétaire a marqué l'anomalie signalée comme résolue.`,
           type: 'booking_breakdown_resolved',
           data: {
             booking_id: booking.id,
@@ -507,6 +544,169 @@ export async function resolveBookingBreakdown(
   return {
     success: persisted || !isSupabaseConfigured,
     updatedBooking,
+  };
+}
+
+/**
+ * Client-side confirmation ("تم الإصلاح") protecting the client:
+ * - Resolves any open breakdown reports on the booking.
+ * - Sets `pauseState.client_repair_confirmed = true` so the Owner's "مواصلة"
+ *   (Resume) button unlocks ONLY after the client confirms the machine is repaired.
+ */
+export async function confirmClientRepairCompleted(
+  booking: Booking,
+  clientId?: string,
+  clientName?: string
+): Promise<{
+  success: boolean;
+  updatedBooking: Booking;
+  error?: string;
+}> {
+  const nowIso = new Date().toISOString();
+  const { breakdowns: existingBreakdowns, pauseState: prevPauseState, cleanNotes } =
+    extractBookingBreakdownsAndNotes(booking);
+
+  const nextBreakdowns: BookingBreakdownReport[] = existingBreakdowns.map((item) =>
+    item.status === 'open'
+      ? { ...item, status: 'resolved', resolved_at: nowIso, resolved_by: 'client' }
+      : item
+  );
+
+  const nextPauseState: BookingPauseState | null = prevPauseState
+    ? {
+        ...prevPauseState,
+        client_repair_confirmed: true,
+        client_repair_confirmed_at: nowIso,
+        client_repair_confirmed_by: clientId || clientName || booking.client_id || 'client',
+      }
+    : null;
+
+  const nextNotes = buildUpdatedNotesWithExtras(cleanNotes, nextBreakdowns, nextPauseState);
+  let persisted = false;
+  let errorMsg: string | undefined;
+
+  if (isSupabaseConfigured) {
+    try {
+      const updatePayload: Record<string, any> = {
+        notes: nextNotes,
+        breakdowns: nextBreakdowns,
+      };
+      if (nextPauseState) {
+        updatePayload.pause_state = nextPauseState;
+      }
+
+      const { error: updErr } = await supabase
+        .from('bookings')
+        .update(updatePayload)
+        .eq('id', booking.id);
+
+      if (!updErr) {
+        persisted = true;
+      } else if (
+        updErr.message?.toLowerCase().includes('breakdowns') ||
+        updErr.message?.toLowerCase().includes('pause_state') ||
+        updErr.message?.toLowerCase().includes('column')
+      ) {
+        const { error: notesErr } = await supabase
+          .from('bookings')
+          .update({ notes: nextNotes })
+          .eq('id', booking.id);
+        if (!notesErr) {
+          persisted = true;
+        } else {
+          errorMsg = notesErr.message;
+        }
+      } else {
+        errorMsg = updErr.message;
+      }
+    } catch (e: any) {
+      errorMsg = e?.message;
+    }
+
+    if (!persisted) {
+      for (const rep of existingBreakdowns.filter((f) => f.status === 'open')) {
+        try {
+          const { error: rpcErr } = await supabase.rpc('resolve_booking_breakdown', {
+            p_booking_id: booking.id,
+            p_report_id: rep.id,
+            p_notes: nextNotes,
+          });
+          if (!rpcErr) {
+            persisted = true;
+            errorMsg = undefined;
+          }
+        } catch {
+          // Ignore if RPC not present
+        }
+      }
+    }
+
+    if (booking.owner_id) {
+      const machineTitleAr =
+        booking.machine?.title_ar || booking.machine?.title_fr || 'الآلية المؤجرة';
+      const machineTitleFr =
+        booking.machine?.title_fr || booking.machine?.title_ar || 'Engin loué';
+      const clientLabel = clientName || booking.client_name || 'الزبون';
+
+      try {
+        await supabase.from('notifications').insert({
+          user_id: booking.owner_id,
+          title_ar: `✅ أكد الزبون «تم الإصلاح»: ${machineTitleAr}`,
+          title_fr: `✅ Réparation confirmée par le client : ${machineTitleFr}`,
+          body_ar: `أكّد ${clientLabel} أن الآلية تم إصلاحها وجاهزة للعمل. يمكنك الآن الضغط على زر «مواصلة» لاستئناف العداد.`,
+          body_fr: `${clientLabel} a confirmé que l'engin est réparé. Vous pouvez maintenant cliquer sur « Reprendre ».`,
+          type: 'booking_repair_confirmed',
+          data: {
+            booking_id: booking.id,
+            machine_id: booking.machine_id,
+            client_name: clientLabel,
+          },
+        });
+      } catch {
+        // Non-blocking
+      }
+
+      if (clientId) {
+        try {
+          const { data: conv } = await supabase
+            .from('conversations')
+            .select('id')
+            .or(
+              `and(participant_a.eq.${clientId},participant_b.eq.${booking.owner_id}),and(participant_a.eq.${booking.owner_id},participant_b.eq.${clientId})`
+            )
+            .maybeSingle();
+          if (conv?.id) {
+            await supabase.from('messages').insert({
+              conversation_id: conv.id,
+              sender_id: clientId,
+              content: `✅ تم الإصلاح (${machineTitleAr}): أكّدت جاهزية الآلية للعمل. يمكنك الآن الضغط على زر «مواصلة» لاستئناف مدة الكراء.`,
+            });
+          }
+        } catch {
+          // Non-blocking
+        }
+      }
+    }
+  }
+
+  const updatedBooking: Booking = {
+    ...booking,
+    notes: nextNotes,
+    breakdowns: nextBreakdowns,
+    pause_state: nextPauseState,
+  };
+
+  bookingStore.saveBooking(updatedBooking);
+  window.dispatchEvent(
+    new CustomEvent('jadijcb_booking_event', {
+      detail: { action: 'client_repair_confirmed', booking: updatedBooking },
+    })
+  );
+
+  return {
+    success: persisted || !isSupabaseConfigured,
+    updatedBooking,
+    error: persisted ? undefined : errorMsg,
   };
 }
 
@@ -549,6 +749,9 @@ export async function pauseBookingForBreakdown(
     remaining_ms: remainingMs,
     total_paused_ms: prevPauseState?.total_paused_ms || 0,
     pause_reason: resolvedReason,
+    client_repair_confirmed: false,
+    client_repair_confirmed_at: undefined,
+    client_repair_confirmed_by: undefined,
   };
 
   const nextNotes = buildUpdatedNotesWithExtras(cleanNotes, breakdowns, nextPauseState);

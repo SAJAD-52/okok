@@ -362,6 +362,21 @@ export const DashboardLayout: React.FC = () => {
                   tag: `breakdown_${row.id || Date.now()}`,
                   url: '/owner/bookings?tab=active',
                 });
+              } else if (row?.type === 'booking_repair_confirmed') {
+                window.dispatchEvent(new CustomEvent('jadijcb_booking_event'));
+                playOpportunitySound();
+                const alertTitle =
+                  lang === 'fr'
+                    ? row.title_fr || '✅ Réparation confirmée par le client !'
+                    : row.title_ar || '✅ أكد الزبون «تم الإصلاح» — يمكنك المواصلة الآن!';
+                const alertBody = lang === 'fr' ? row.body_fr : row.body_ar;
+                toast.success(alertBody ? `${alertTitle} — ${alertBody}` : alertTitle);
+                showBrowserChatNotification({
+                  title: alertTitle,
+                  body: alertBody || '',
+                  tag: `repair_ok_${row.id || Date.now()}`,
+                  url: '/owner/bookings?tab=active',
+                });
               } else if (
                 row?.type === 'booking_breakdown_resolved' ||
                 row?.type === 'booking_paused' ||
@@ -1827,7 +1842,8 @@ export const DashboardLayout: React.FC = () => {
                               const notif = entry.notif;
                               const isBreakdownNotif =
                                 notif.type === 'booking_breakdown' ||
-                                notif.type === 'booking_breakdown_resolved';
+                                notif.type === 'booking_breakdown_resolved' ||
+                                notif.type === 'booking_repair_confirmed';
                               const isPauseNotif =
                                 notif.type === 'booking_paused' ||
                                 notif.type === 'booking_resumed';
@@ -1881,7 +1897,10 @@ export const DashboardLayout: React.FC = () => {
                                       }
                                     } else if (notif.type === 'driver_application') {
                                       navigate('/owner/machines');
-                                    } else if (notif.type === 'booking_breakdown') {
+                                    } else if (
+                                      notif.type === 'booking_breakdown' ||
+                                      notif.type === 'booking_repair_confirmed'
+                                    ) {
                                       navigate('/owner/bookings?tab=active');
                                     } else if (
                                       notif.type === 'booking_breakdown_resolved' ||

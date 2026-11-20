@@ -16,6 +16,7 @@ export const PublicHeader: React.FC = () => {
 
   const isContractor = profile?.role === 'client' || profile?.role === 'contractor';
   const isDriver = profile?.role === 'driver';
+  const isSupplier = profile?.role === 'supplier' || profile?.role === 'dealer';
   const tendersLabel = lang === 'fr' ? 'Radar Marchés Publics' : 'رادار الصفقات العمومية';
 
   const navLinks = isSuperAdmin
@@ -23,6 +24,13 @@ export const PublicHeader: React.FC = () => {
         { to: '/marketplace', label: t('nav.marketplace'), icon: <Compass className="w-4 h-4" /> },
         { to: '/tenders', label: tendersLabel, icon: <Radar className="w-4 h-4" /> },
         { to: '/admin', label: '👑 Super Admin' },
+      ]
+    : isSupplier
+    ? [
+        { to: '/supplier', label: lang === 'fr' ? 'Espace Fournisseur' : 'بوابة الموردين', icon: <Wrench className="w-4 h-4" /> },
+        { to: '/supplier/requests', label: lang === 'fr' ? 'Demandes propriétaires' : 'طلبات الملاك', icon: <Briefcase className="w-4 h-4" /> },
+        { to: '/supplier/catalog', label: lang === 'fr' ? 'Catalogue & Import' : 'الكتالوج والاستيراد', icon: <Compass className="w-4 h-4" /> },
+        { to: '/marketplace', label: t('nav.marketplace'), icon: <Compass className="w-4 h-4" /> },
       ]
     : isDriver
     ? [
@@ -81,7 +89,15 @@ export const PublicHeader: React.FC = () => {
               variant="outline"
               onClick={() =>
                 navigate(
-                  isSuperAdmin ? '/admin' : isDriver ? '/driver' : isContractor ? '/entreprise' : '/owner'
+                  isSuperAdmin
+                    ? '/admin'
+                    : isSupplier
+                    ? '/supplier'
+                    : isDriver
+                    ? '/driver'
+                    : isContractor
+                    ? '/entreprise'
+                    : '/owner'
                 )
               }
               className="hidden sm:inline-flex text-xs font-bold items-center gap-2"
@@ -103,6 +119,8 @@ export const PublicHeader: React.FC = () => {
             >
               {isSuperAdmin
                 ? '👑 Super Admin'
+                : isSupplier
+                ? (profile?.company_name || profile?.full_name || (lang === 'fr' ? 'Espace Fournisseur' : 'بوابة المورد'))
                 : isDriver
                 ? (profile?.full_name || (lang === 'fr' ? 'Mon Espace Conducteur' : 'حساب السائق'))
                 : isContractor
@@ -130,6 +148,16 @@ export const PublicHeader: React.FC = () => {
               leftIcon={<ShieldCheck className="w-4 h-4 text-ink" />}
             >
               {lang === 'fr' ? 'Console Admin' : 'لوحة الإدارة 👑'}
+            </Button>
+          ) : isSupplier ? (
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={() => navigate('/supplier/requests')}
+              className="hidden sm:inline-flex font-black text-xs"
+              leftIcon={<Briefcase className="w-4 h-4" />}
+            >
+              {lang === 'fr' ? 'Demandes propriétaires' : 'طلبات الملاك'}
             </Button>
           ) : isDriver ? (
             <Button
@@ -207,6 +235,19 @@ export const PublicHeader: React.FC = () => {
               >
                 {lang === 'fr' ? 'Console Super Admin' : 'لوحة الإدارة (Super Admin) 👑'}
               </Button>
+            ) : isSupplier ? (
+              <Button
+                size="md"
+                variant="primary"
+                className="w-full justify-center font-black"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  navigate('/supplier/requests');
+                }}
+                leftIcon={<Briefcase className="w-4 h-4" />}
+              >
+                {lang === 'fr' ? 'Demandes des propriétaires' : 'طلبات مالكي الآليات'}
+              </Button>
             ) : isDriver ? (
               <Button
                 size="md"
@@ -258,6 +299,8 @@ export const PublicHeader: React.FC = () => {
                   user
                     ? isSuperAdmin
                       ? '/admin'
+                      : isSupplier
+                      ? '/supplier'
                       : isDriver
                       ? '/driver'
                       : isContractor
@@ -271,6 +314,10 @@ export const PublicHeader: React.FC = () => {
               {user
                 ? isSuperAdmin
                   ? '👑 Super Admin'
+                  : isSupplier
+                  ? lang === 'fr'
+                    ? 'Espace Fournisseur'
+                    : 'بوابة الموردين'
                   : isDriver
                   ? lang === 'fr'
                     ? 'Mon Espace Conducteur'

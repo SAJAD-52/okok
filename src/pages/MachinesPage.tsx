@@ -31,6 +31,8 @@ import {
   HardHat,
   Phone,
   Users,
+  Ship,
+  ShoppingBag,
 } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -42,8 +44,10 @@ import { useLanguage } from '../hooks/useLanguage';
 import { useAuth } from '../hooks/useAuth';
 import { Machine, ListingMode, DispatchCampaign } from '../types/database';
 import { formatPriceMAD } from '../data/rentalTerms';
+import { getImportCountryLabel } from '../data/supplierOptions';
 import { MachineStepperModal } from '../components/machines/MachineStepperModal';
 import { SparePartDispatchModal } from '../components/machines/SparePartDispatchModal';
+import { MachinePurchaseDispatchModal } from '../components/machines/MachinePurchaseDispatchModal';
 import { DriverDispatchModal } from '../components/machines/DriverDispatchModal';
 import {
   closeDispatchCampaign,
@@ -80,8 +84,10 @@ export const MachinesPage: React.FC = () => {
   const [selectedMachineToEdit, setSelectedMachineToEdit] = useState<Machine | null>(null);
   const [isStepperOpen, setIsStepperOpen] = useState(false);
   const [spareDispatchMachine, setSpareDispatchMachine] = useState<Machine | null>(null);
+  const [isPurchaseDispatchOpen, setIsPurchaseDispatchOpen] = useState<boolean>(false);
   const [driverDispatchMachine, setDriverDispatchMachine] = useState<Machine | null>(null);
   const [spareCampaigns, setSpareCampaigns] = useState<DispatchCampaign[]>([]);
+  const [purchaseCampaigns, setPurchaseCampaigns] = useState<DispatchCampaign[]>([]);
   const [driverCampaigns, setDriverCampaigns] = useState<OwnerDriverOfferWithApps[]>([]);
   const [closingOfferDriverKey, setClosingOfferDriverKey] = useState<string | null>(null);
 
@@ -208,13 +214,17 @@ export const MachinesPage: React.FC = () => {
     let cancelled = false;
     const loadSpareCampaigns = async () => {
       const list = await fetchContractorCampaigns(ownerUid);
-      const filtered = list.filter(
+      const filteredSpare = list.filter(
         (c) =>
           c.campaign_type === 'spare_part' ||
           Boolean(c.part_reference) ||
           c.machine_category === 'spare-parts'
       );
-      if (!cancelled) setSpareCampaigns(filtered);
+      const filteredPurchase = list.filter((c) => c.campaign_type === 'machine_purchase');
+      if (!cancelled) {
+        setSpareCampaigns(filteredSpare);
+        setPurchaseCampaigns(filteredPurchase);
+      }
     };
 
     loadSpareCampaigns();
@@ -421,15 +431,26 @@ export const MachinesPage: React.FC = () => {
           </p>
         </div>
 
-        <Button
-          variant="primary"
-          size="md"
-          onClick={handleOpenAdd}
-          leftIcon={<Plus className="w-4 h-4" />}
-          className="font-black shadow-md min-h-[44px]"
-        >
-          {t('machines.add_machine')}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <Button
+            variant="outline"
+            size="md"
+            onClick={() => setIsPurchaseDispatchOpen(true)}
+            leftIcon={<Ship className="w-4 h-4 text-primary-dark" />}
+            className="font-black min-h-[44px] bg-white border-steel-300"
+          >
+            {lang === 'fr' ? 'Acheter / Importer un engin' : 'أطلق حملة شراء آلية / استيراد'}
+          </Button>
+          <Button
+            variant="primary"
+            size="md"
+            onClick={handleOpenAdd}
+            leftIcon={<Plus className="w-4 h-4" />}
+            className="font-black shadow-md min-h-[44px]"
+          >
+            {t('machines.add_machine')}
+          </Button>
+        </div>
       </div>
 
       {/* KPI Counters Bar */}
@@ -1077,6 +1098,135 @@ export const MachinesPage: React.FC = () => {
         </div>
       )}
 
+      {/* Owner's Launched Machinery Purchase & Import Campaigns */}
+      {purchaseCampaigns.length > 0 && (
+        <div className="space-y-3 pt-2">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-base sm:text-lg font-black text-ink flex items-center gap-2">
+              <Ship className="w-5 h-5 text-primary-dark shrink-0" />
+              <span>
+                {lang === 'fr'
+                  ? 'Campagnes d’achat & importation d’engins'
+                  : 'حملات البحث عن شراء أو استيراد آليات'}
+              </span>
+            </h2>
+            <span className="text-xs font-black px-2.5 py-1 rounded-xl bg-steel-100 text-ink tabular-nums">
+              {purchaseCampaigns.filter((c) => c.status === 'active').length}{' '}
+              {lang === 'fr' ? 'actives' : 'نشطة'}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {purchaseCampaigns.map((camp) => {
+              const isClosed = camp.status === 'closed';
+              const notifs = camp.notifications || [];
+              const acceptedNotifs = notifs.filter((n) => n.status === 'accepted' || n.owner_accepted);
+
+              return (
+                <Card
+                  key={camp.id}
+                  className={`p-4 rounded-2xl border space-y-3 ${
+                    isClosed ? 'bg-steel-50/70 border-steel-200 opacity-90' : 'bg-white border-steel-200'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-black text-ink truncate">{camp.machine_name}</h3>
+                      <p className="text-[11px] text-steel-500 font-bold mt-1 flex items-center gap-1.5 flex-wrap">
+                        <span>{camp.site_city || camp.site_name}</span>
+                        <span>·</span>
+                        <span>
+                          {camp.import_allowed
+                            ? lang === 'fr'
+                              ? 'Maroc + Import'
+                              : 'المغرب + استيراد'
+                            : lang === 'fr'
+                            ? 'Maroc uniquement'
+                            : 'المغرب فقط'}
+                        </span>
+                        {camp.preferred_origin && (
+                          <>
+                            <span>·</span>
+                            <span>{getImportCountryLabel(camp.preferred_origin, lang)}</span>
+                          </>
+                        )}
+                        {camp.budget_mad ? (
+                          <>
+                            <span>·</span>
+                            <span dir="ltr" className="font-mono tabular-nums text-ink">
+                              {Number(camp.budget_mad).toLocaleString()} MAD
+                            </span>
+                          </>
+                        ) : null}
+                      </p>
+                    </div>
+                    <span className="text-xs font-black text-steel-700 shrink-0 tabular-nums">
+                      {camp.matched_owners_count} {lang === 'fr' ? 'contactés' : 'مورد'}
+                    </span>
+                  </div>
+
+                  {acceptedNotifs.length > 0 ? (
+                    <div className="space-y-2 pt-2 border-t border-steel-100">
+                      {acceptedNotifs.map((n) => (
+                        <div
+                          key={n.id}
+                          className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between gap-2"
+                        >
+                          <div className="min-w-0 text-xs">
+                            <p className="font-black text-ink truncate">
+                              {n.matched_machine_title || camp.machine_name}
+                            </p>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="primary"
+                            size="sm"
+                            onClick={() =>
+                              navigate(
+                                `/owner/messages?target=${n.owner_id}&machine=${n.machine_id || ''}&campaign=${camp.id}`
+                              )
+                            }
+                            leftIcon={<MessageSquare className="w-3.5 h-3.5" />}
+                            className="shrink-0 text-[11px] min-h-[38px]"
+                          >
+                            {lang === 'fr' ? 'Discuter' : 'محادثة المورد'}
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-steel-500 pt-2 border-t border-steel-100">
+                      {lang === 'fr'
+                        ? 'Demande visible aux vendeurs d’engins et importateurs dans la bourse.'
+                        : 'الطلب منشور لدى بائعي الآليات وشركات الاستيراد — ستصلك عروض الأسعار في الرسائل.'}
+                    </p>
+                  )}
+
+                  {!isClosed && (
+                    <div className="flex justify-end pt-1">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await closeDispatchCampaign(camp.id);
+                          setPurchaseCampaigns((prev) =>
+                            prev.map((c) => (c.id === camp.id ? { ...c, status: 'closed' } : c))
+                          );
+                          toast.info(lang === 'fr' ? 'Campagne clôturée' : 'تم إغلاق حملة الشراء');
+                        }}
+                        className="inline-flex items-center gap-1 text-[11px] font-bold text-steel-500 hover:text-rose-600 transition-colors cursor-pointer py-1 px-2"
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                        <span>{lang === 'fr' ? 'Clôturer la campagne' : 'إغلاق الحملة'}</span>
+                      </button>
+                    </div>
+                  )}
+                </Card>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Owner's Launched Driver Search Campaigns Tracker */}
       {driverCampaigns.length > 0 && (
         <div className="space-y-3 pt-2">
@@ -1445,6 +1595,15 @@ export const MachinesPage: React.FC = () => {
         machine={spareDispatchMachine}
         onCampaignLaunched={(newCampaign) => {
           setSpareCampaigns((prev) => [newCampaign, ...prev]);
+        }}
+      />
+
+      {/* Machinery Purchase & Import Dispatch Modal */}
+      <MachinePurchaseDispatchModal
+        isOpen={isPurchaseDispatchOpen}
+        onClose={() => setIsPurchaseDispatchOpen(false)}
+        onCampaignLaunched={(newCampaign) => {
+          setPurchaseCampaigns((prev) => [newCampaign, ...prev]);
         }}
       />
 

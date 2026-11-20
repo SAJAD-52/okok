@@ -7,7 +7,7 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { normalizeMoroccanPhone, phoneToSyntheticEmail } from '../lib/authHelpers';
 import { isLifetimeFreePhone } from '../lib/constants';
 import { mapDatabaseError } from '../lib/errorHelpers';
-import { UserProfile, UserRole, ClientSegment } from '../types/database';
+import { UserProfile, UserRole, ClientSegment, SupplierType } from '../types/database';
 import { generateUniqueStorefrontSlug } from '../lib/storefrontSlug';
 import { saveStorefrontData } from '../lib/storefrontService';
 import { markUserWhatsAppVerified } from '../lib/whatsappOtpService';
@@ -38,6 +38,11 @@ interface AuthContextType {
       driverMachines?: string[];
       driverExperienceYears?: string;
       driverAvailable?: boolean;
+      supplierType?: SupplierType;
+      importCountries?: string[];
+      importLeadTime?: string;
+      supplierSpecialties?: string[];
+      deliversNationwide?: boolean;
       whatsappVerified?: boolean;
     }
   ) => Promise<{ success: boolean; error?: string; isNewUser?: boolean }>;
@@ -256,6 +261,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           ? 'admin'
           : metaRole === 'driver' || dbRole === 'driver'
           ? 'driver'
+          : metaRole === 'supplier' || dbRole === 'supplier'
+          ? 'supplier'
           : dbRole || metaRole || 'client';
 
       const normalized: UserProfile = {
@@ -285,6 +292,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           localCached.driver_available ??
           true,
         driver_bio: (data as any)?.driver_bio || meta.driver_bio || localCached.driver_bio || '',
+        supplier_type:
+          (data as any)?.supplier_type ||
+          meta.supplier_type ||
+          meta.supplierType ||
+          localCached.supplier_type ||
+          undefined,
+        import_countries:
+          Array.isArray((data as any)?.import_countries) && (data as any).import_countries.length > 0
+            ? (data as any).import_countries
+            : Array.isArray(meta.import_countries)
+            ? meta.import_countries
+            : Array.isArray(localCached.import_countries)
+            ? localCached.import_countries
+            : [],
+        import_lead_time:
+          (data as any)?.import_lead_time ||
+          meta.import_lead_time ||
+          meta.importLeadTime ||
+          localCached.import_lead_time ||
+          undefined,
+        supplier_specialties:
+          Array.isArray((data as any)?.supplier_specialties) && (data as any).supplier_specialties.length > 0
+            ? (data as any).supplier_specialties
+            : Array.isArray(meta.supplier_specialties)
+            ? meta.supplier_specialties
+            : Array.isArray(localCached.supplier_specialties)
+            ? localCached.supplier_specialties
+            : [],
+        delivers_nationwide:
+          (data as any)?.delivers_nationwide ??
+          meta.delivers_nationwide ??
+          meta.deliversNationwide ??
+          localCached.delivers_nationwide ??
+          true,
         ice_number: (data as any)?.ice_number || meta.ice_number || meta.iceNumber || localCached.ice_number || '',
         onboarding_completed: (data as any)?.onboarding_completed ?? meta.onboarding_completed ?? localCached.onboarding_completed ?? true,
         whatsapp_verified: Boolean((data as any)?.whatsapp_verified ?? meta.whatsapp_verified ?? localCached.whatsapp_verified ?? true),
@@ -293,7 +334,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             ? 'suspended'
             : isLifetimeVip
             ? 'active'
-            : resolvedRole === 'driver' || resolvedRole === 'client' || resolvedRole === 'contractor'
+            : resolvedRole === 'driver' ||
+              resolvedRole === 'client' ||
+              resolvedRole === 'contractor' ||
+              resolvedRole === 'supplier' ||
+              resolvedRole === 'dealer'
             ? 'active'
             : (data as any)?.subscription_status || localCached.subscription_status || 'trial',
         trial_started_at: (data as any)?.trial_started_at || localCached.trial_started_at || new Date().toISOString(),
@@ -481,6 +526,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const finalRole =
           data.user.user_metadata?.role === 'driver' && prof?.role !== 'admin'
             ? 'driver'
+            : data.user.user_metadata?.role === 'supplier' && prof?.role !== 'admin'
+            ? 'supplier'
             : prof?.role || data.user.user_metadata?.role || 'client';
         return {
           success: true,
@@ -635,6 +682,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       driverMachines?: string[];
       driverExperienceYears?: string;
       driverAvailable?: boolean;
+      supplierType?: SupplierType;
+      importCountries?: string[];
+      importLeadTime?: string;
+      supplierSpecialties?: string[];
+      deliversNationwide?: boolean;
       whatsappVerified?: boolean;
     }
   ): Promise<{ success: boolean; error?: string; isNewUser?: boolean }> => {
@@ -652,7 +704,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const syntheticEmail = phoneToSyntheticEmail(norm.e164);
     const resolvedRole: UserRole =
-      role === 'owner' ? 'owner' : role === 'driver' ? 'driver' : 'client';
+      role === 'owner'
+        ? 'owner'
+        : role === 'driver'
+        ? 'driver'
+        : role === 'supplier' || role === 'dealer'
+        ? 'supplier'
+        : 'client';
 
     try {
       const { data, error } = await supabase.auth.signUp({
@@ -673,6 +731,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               resolvedRole === 'driver' ? meta?.driverExperienceYears || '3_5' : undefined,
             driver_available:
               resolvedRole === 'driver' ? meta?.driverAvailable ?? true : undefined,
+            supplier_type: resolvedRole === 'supplier' ? meta?.supplierType || 'all' : undefined,
+            import_countries: resolvedRole === 'supplier' ? meta?.importCountries || [] : undefined,
+            import_lead_time: resolvedRole === 'supplier' ? meta?.importLeadTime || undefined : undefined,
+            supplier_specialties:
+              resolvedRole === 'supplier' ? meta?.supplierSpecialties || [] : undefined,
+            delivers_nationwide:
+              resolvedRole === 'supplier' ? meta?.deliversNationwide ?? true : undefined,
             whatsapp_verified: Boolean(meta?.whatsappVerified),
             preferred_lang: 'ar',
           },
@@ -752,19 +817,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           subscription_ends_at: isVipSignup ? '2099-12-31T23:59:59.000Z' : undefined,
           preferred_lang: 'ar',
           created_at: new Date().toISOString(),
+          ...(resolvedRole === 'supplier'
+            ? {
+                supplier_type: meta?.supplierType || 'all',
+                import_countries: meta?.importCountries || [],
+                import_lead_time: meta?.importLeadTime || null,
+                supplier_specialties: meta?.supplierSpecialties || [],
+                delivers_nationwide: meta?.deliversNationwide ?? true,
+              }
+            : {}),
         };
 
-        const { data: insertedProf, error: insertErr } = await supabase
-          .from('profiles')
-          .upsert(newProfPayload)
-          .select()
-          .maybeSingle();
+        let insertedProf: any = null;
+        let insertErr: any = null;
+        const adaptivePayload = { ...newProfPayload };
+        for (let attempt = 0; attempt < 6; attempt++) {
+          const res = await supabase
+            .from('profiles')
+            .upsert(adaptivePayload)
+            .select()
+            .maybeSingle();
+          insertedProf = res.data;
+          insertErr = res.error;
+          if (!insertErr) break;
+          const missingCol = insertErr.message?.match(/Could not find the '([^']+)' column/i);
+          if (missingCol && missingCol[1]) {
+            delete adaptivePayload[missingCol[1]];
+            continue;
+          }
+          if (adaptivePayload.role === 'supplier') {
+            adaptivePayload.role = 'dealer';
+            continue;
+          }
+          break;
+        }
 
         if (insertedProf && !insertErr) {
           loadedProfile = insertedProf as UserProfile;
         } else if (insertErr) {
           console.warn('Profile creation fallback warning:', insertErr);
-          // Try minimal payload without enum role in case 'driver' isn't migrated in Postgres yet
+          // Try minimal payload without enum role in case 'driver' or 'supplier' isn't migrated in Postgres yet
           try {
             const minPayload = {
               id: activeUser.id,
@@ -799,6 +891,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           driver_experience_years:
             resolvedRole === 'driver' ? meta?.driverExperienceYears || '3_5' : undefined,
           driver_available: resolvedRole === 'driver' ? meta?.driverAvailable ?? true : undefined,
+          supplier_type: resolvedRole === 'supplier' ? meta?.supplierType || 'all' : undefined,
+          import_countries: resolvedRole === 'supplier' ? meta?.importCountries || [] : undefined,
+          import_lead_time: resolvedRole === 'supplier' ? meta?.importLeadTime : undefined,
+          supplier_specialties: resolvedRole === 'supplier' ? meta?.supplierSpecialties || [] : undefined,
+          delivers_nationwide: resolvedRole === 'supplier' ? meta?.deliversNationwide ?? true : undefined,
           city: meta?.city || 'Casablanca',
           whatsapp_verified: Boolean(meta?.whatsappVerified),
           subscription_status: resolvedRole === 'owner' ? 'trial' : 'active',
@@ -811,7 +908,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         loadedProfile = {
           ...loadedProfile,
           whatsapp_verified: Boolean(meta?.whatsappVerified) || Boolean(loadedProfile.whatsapp_verified),
-          role: resolvedRole === 'driver' ? 'driver' : loadedProfile.role,
+          role:
+            resolvedRole === 'driver'
+              ? 'driver'
+              : resolvedRole === 'supplier'
+              ? 'supplier'
+              : loadedProfile.role,
           client_segment: loadedProfile.client_segment || meta?.clientSegment,
           client_activity_note: loadedProfile.client_activity_note || meta?.clientActivityNote || '',
           driver_machines:
@@ -828,6 +930,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             resolvedRole === 'driver'
               ? loadedProfile.driver_available ?? meta?.driverAvailable ?? true
               : loadedProfile.driver_available,
+          supplier_type:
+            resolvedRole === 'supplier'
+              ? loadedProfile.supplier_type || meta?.supplierType || 'all'
+              : loadedProfile.supplier_type,
+          import_countries:
+            resolvedRole === 'supplier'
+              ? loadedProfile.import_countries?.length
+                ? loadedProfile.import_countries
+                : meta?.importCountries || []
+              : loadedProfile.import_countries,
+          import_lead_time:
+            resolvedRole === 'supplier'
+              ? loadedProfile.import_lead_time || meta?.importLeadTime
+              : loadedProfile.import_lead_time,
+          supplier_specialties:
+            resolvedRole === 'supplier'
+              ? loadedProfile.supplier_specialties?.length
+                ? loadedProfile.supplier_specialties
+                : meta?.supplierSpecialties || []
+              : loadedProfile.supplier_specialties,
+          delivers_nationwide:
+            resolvedRole === 'supplier'
+              ? loadedProfile.delivers_nationwide ?? meta?.deliversNationwide ?? true
+              : loadedProfile.delivers_nationwide,
         };
       }
 
@@ -913,6 +1039,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         'driver_experience_years',
         'driver_available',
         'driver_bio',
+        'supplier_type',
+        'import_countries',
+        'import_lead_time',
+        'supplier_specialties',
+        'delivers_nationwide',
       ];
 
       const dbPayload: any = {};
@@ -946,19 +1077,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.warn('Could not update auth user_metadata:', authMetaErr);
       }
 
-      // 3. Update public.profiles table
+      // 3. Update public.profiles table (adaptive column stripping)
       let dbData: any = null;
       if (Object.keys(dbPayload).length > 0) {
-        const { data, error } = await supabase
-          .from('profiles')
-          .update(dbPayload)
-          .eq('id', targetId)
-          .select()
-          .maybeSingle();
+        const adaptiveDbPayload = { ...dbPayload };
+        let lastErr: any = null;
+        for (let attempt = 0; attempt < 6; attempt++) {
+          const { data, error } = await supabase
+            .from('profiles')
+            .update(adaptiveDbPayload)
+            .eq('id', targetId)
+            .select()
+            .maybeSingle();
 
-        if (error) {
-          console.warn('Supabase profiles update warning:', error.message);
-          // Fallback to minimal core columns if schema cache lacks newer columns or enum value
+          if (!error) {
+            dbData = data;
+            lastErr = null;
+            break;
+          }
+          lastErr = error;
+          const missingCol = error.message?.match(/Could not find the '([^']+)' column/i);
+          if (missingCol && missingCol[1]) {
+            delete adaptiveDbPayload[missingCol[1]];
+            continue;
+          }
+          if (adaptiveDbPayload.role === 'supplier') {
+            adaptiveDbPayload.role = 'dealer';
+            continue;
+          }
+          break;
+        }
+
+        if (lastErr) {
+          console.warn('Supabase profiles update warning:', lastErr.message);
           const minimalPayload: any = {};
           if (updates.full_name !== undefined) minimalPayload.full_name = updates.full_name;
           if (updates.company_name !== undefined) minimalPayload.company_name = updates.company_name;
@@ -973,15 +1124,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               .maybeSingle();
             dbData = retryData;
           }
-        } else {
-          dbData = data;
         }
       }
 
-      // 4. Update local state and localStorage (always preserve resolved driver role & fields)
+      // 4. Update local state and localStorage (always preserve resolved driver/supplier role & fields)
       const resolvedMergedRole =
         profile?.role === 'driver' && updates.role === undefined
           ? 'driver'
+          : profile?.role === 'supplier' && updates.role === undefined
+          ? 'supplier'
           : updates.role || profile?.role || 'client';
 
       const merged: UserProfile = {
@@ -1010,6 +1161,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             ? updates.driver_available
             : profile?.driver_available ?? true,
         driver_bio: updates.driver_bio !== undefined ? updates.driver_bio : profile?.driver_bio || '',
+        supplier_type:
+          updates.supplier_type !== undefined ? updates.supplier_type : profile?.supplier_type,
+        import_countries:
+          updates.import_countries !== undefined
+            ? updates.import_countries
+            : profile?.import_countries || [],
+        import_lead_time:
+          updates.import_lead_time !== undefined
+            ? updates.import_lead_time
+            : profile?.import_lead_time,
+        supplier_specialties:
+          updates.supplier_specialties !== undefined
+            ? updates.supplier_specialties
+            : profile?.supplier_specialties || [],
+        delivers_nationwide:
+          updates.delivers_nationwide !== undefined
+            ? updates.delivers_nationwide
+            : profile?.delivers_nationwide ?? true,
         ice_number: updates.ice_number !== undefined ? updates.ice_number : profile?.ice_number || '',
         onboarding_completed:
           updates.onboarding_completed !== undefined

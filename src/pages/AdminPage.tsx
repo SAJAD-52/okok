@@ -255,7 +255,13 @@ export const AdminPage: React.FC = () => {
         acc.city?.toLowerCase().includes(q) ||
         acc.ice_number?.includes(q);
 
-      const matchesRole = filterRole === 'all' || acc.role === filterRole;
+      const matchesRole =
+        filterRole === 'all' ||
+        (filterRole === 'client'
+          ? acc.role === 'client' || acc.role === 'contractor'
+          : filterRole === 'supplier'
+          ? acc.role === 'supplier' || acc.role === 'dealer'
+          : acc.role === filterRole);
 
       let matchesStatus = true;
       if (filterStatus === 'suspended') {
@@ -360,7 +366,13 @@ export const AdminPage: React.FC = () => {
       await adminService.changeUserRole(acc.id, newRole);
       toast.success(
         `تم تغيير صفة الحساب إلى: ${
-          newRole === 'owner' ? 'مالك آليات' : newRole === 'driver' ? 'سائق آليات' : 'زبون / مقاولة'
+          newRole === 'owner'
+            ? 'مالك آليات'
+            : newRole === 'driver'
+            ? 'سائق آليات'
+            : newRole === 'supplier' || newRole === 'dealer'
+            ? 'مورد / شركة استيراد'
+            : 'زبون / مقاولة'
         }`
       );
       await loadPlatformData();
@@ -455,6 +467,8 @@ export const AdminPage: React.FC = () => {
     toast.success(`أنت الآن تتصفح المنصة بصلاحية: ${acc.company_name || acc.full_name}`);
     if (acc.role === 'driver') {
       navigate('/driver');
+    } else if (acc.role === 'supplier' || acc.role === 'dealer') {
+      navigate('/supplier');
     } else if (acc.role === 'client' || acc.role === 'contractor') {
       navigate('/entreprise');
     } else {
@@ -833,6 +847,21 @@ export const AdminPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => {
+                      setFilterRole('supplier');
+                      setFilterStatus('all');
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      filterRole === 'supplier' && filterStatus === 'all'
+                        ? 'bg-purple-600 text-white shadow-xs'
+                        : 'bg-steel-100 text-steel-700 hover:bg-steel-200'
+                    }`}
+                  >
+                    🚢 الموردون وشركات الاستيراد ({accounts.filter((a) => a.role === 'supplier' || a.role === 'dealer').length})
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
                       setFilterRole('all');
                       setFilterStatus('never_activated');
                     }}
@@ -897,14 +926,26 @@ export const AdminPage: React.FC = () => {
                     {/* User Identity info */}
                     <div className="flex items-start gap-3.5">
                       <div className="w-12 h-12 rounded-2xl bg-steel-100 border border-steel-200 flex items-center justify-center font-black text-ink text-sm shrink-0">
-                        {acc.role === 'owner' ? '🚜' : acc.role === 'driver' ? '👷‍♂️' : '🏢'}
+                        {acc.role === 'owner'
+                          ? '🚜'
+                          : acc.role === 'driver'
+                          ? '👷‍♂️'
+                          : acc.role === 'supplier' || acc.role === 'dealer'
+                          ? '🚢'
+                          : '🏢'}
                       </div>
 
                       <div className="space-y-1.5">
                         <div className="flex flex-wrap items-center gap-2">
                           <h3 className="font-black text-sm text-ink">{acc.full_name}</h3>
                           <Badge
-                            variant={acc.role === 'owner' ? 'warning' : acc.role === 'driver' ? 'success' : 'info'}
+                            variant={
+                              acc.role === 'owner' || acc.role === 'supplier' || acc.role === 'dealer'
+                                ? 'warning'
+                                : acc.role === 'driver'
+                                ? 'success'
+                                : 'info'
+                            }
                             size="sm"
                             className="font-black"
                           >
@@ -912,6 +953,8 @@ export const AdminPage: React.FC = () => {
                               ? 'مالك آليات / مؤجر'
                               : acc.role === 'driver'
                               ? 'سائق آليات ومعدات'
+                              : acc.role === 'supplier' || acc.role === 'dealer'
+                              ? 'مورد آليات / شركة استيراد'
                               : 'زبون / مقاولة'}
                           </Badge>
                           {acc.is_suspended ? (

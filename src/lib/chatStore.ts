@@ -286,8 +286,12 @@ class ChatStore {
       const isRecipientContractor =
         resolvedRecipientRole === 'client' || resolvedRecipientRole === 'contractor';
       const isRecipientDriver = resolvedRecipientRole === 'driver';
+      const isRecipientSupplier =
+        resolvedRecipientRole === 'supplier' || resolvedRecipientRole === 'dealer';
       const targetUrl = isRecipientDriver
         ? `/driver/messages?conv=${encodeURIComponent(conversationId)}`
+        : isRecipientSupplier
+        ? `/supplier/messages?conv=${encodeURIComponent(conversationId)}`
         : isRecipientContractor
         ? `/entreprise/messages?conv=${encodeURIComponent(conversationId)}`
         : `/owner/messages?conv=${encodeURIComponent(conversationId)}`;

@@ -35,6 +35,9 @@ import { DriverDashboardPage } from './pages/DriverDashboardPage';
 import { DriverJobOffersPage } from './pages/DriverJobOffersPage';
 import { OwnerDriversPage } from './pages/OwnerDriversPage';
 import { PublicTendersRadarPage } from './pages/PublicTendersRadarPage';
+import { SupplierDashboardPage } from './pages/SupplierDashboardPage';
+import { SupplierRequestsPage } from './pages/SupplierRequestsPage';
+import { SupplierCatalogPage } from './pages/SupplierCatalogPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -151,6 +154,21 @@ export const App: React.FC = () => {
             >
               <Route index element={<DriverDashboardPage />} />
               <Route path="joboffer" element={<DriverJobOffersPage />} />
+              <Route path="messages" element={<MessagesPage />} />
+            </Route>
+
+            {/* Protected Suppliers & International Importers Portal Routes (/supplier) */}
+            <Route
+              path="/supplier"
+              element={
+                <ProtectedRoute>
+                  <DashboardLayout />
+                </ProtectedRoute>
+              }
+            >
+              <Route index element={<SupplierDashboardPage />} />
+              <Route path="requests" element={<SupplierRequestsPage />} />
+              <Route path="catalog" element={<SupplierCatalogPage />} />
               <Route path="messages" element={<MessagesPage />} />
             </Route>
 

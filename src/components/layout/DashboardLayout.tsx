@@ -32,6 +32,8 @@ import {
   Clock,
   Banknote,
   Radar,
+  Package,
+  Ship,
 } from 'lucide-react';
 import { Logo } from '../ui/Logo';
 import { LanguageSwitcher } from '../ui/LanguageSwitcher';
@@ -56,6 +58,7 @@ import { toast } from '../ui/Toast';
 import { serverApi, ServerNotification } from '../../lib/serverApi';
 import {
   ensureDispatchConversationLinked,
+  fetchOpenOwnerRequestsForSupplier,
   updateDispatchNotificationStatus,
 } from '../../lib/dispatchService';
 import {
@@ -87,6 +90,7 @@ export const DashboardLayout: React.FC = () => {
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
   const [pendingBookingsCount, setPendingBookingsCount] = useState<number>(0);
   const [driverOpenOffersCount, setDriverOpenOffersCount] = useState<number>(0);
+  const [supplierOpenRequestsCount, setSupplierOpenRequestsCount] = useState<number>(0);
   const [pendingBookingsList, setPendingBookingsList] = useState<Booking[]>([]);
   const [systemNotifications, setSystemNotifications] = useState<ServerNotification[]>([]);
   const [opportunityNotifications, setOpportunityNotifications] = useState<DispatchNotification[]>([]);
@@ -136,12 +140,13 @@ export const DashboardLayout: React.FC = () => {
 
   const isContractor = profile?.role === 'client' || profile?.role === 'contractor';
   const isDriver = profile?.role === 'driver';
+  const isSupplier = profile?.role === 'supplier' || profile?.role === 'dealer';
   const isDriverBusy = isDriver && (profile?.driver_available === false || driverHasActiveContract);
   const isDriverBusyRef = React.useRef(isDriverBusy);
   isDriverBusyRef.current = isDriverBusy;
   const isChatRoute = location.pathname.includes('/messages');
-  // Contractors and drivers are NEVER blocked by owner 72h trial soft-lock!
-  const shouldShowLock = !isContractor && !isDriver && isLocked && !isChatRoute;
+  // Contractors, drivers, and suppliers are NEVER blocked by owner 72h trial soft-lock!
+  const shouldShowLock = !isContractor && !isDriver && !isSupplier && isLocked && !isChatRoute;
 
   const [unreadMessagesCount, setUnreadMessagesCount] = useState<number>(0);
 
@@ -490,11 +495,50 @@ export const DashboardLayout: React.FC = () => {
     return unsub;
   }, [isDriver, isDriverBusy, profile?.id, profile?.driver_machines]);
 
+  // Sync open supplier requests badge count (for Machinery/Spare Parts Suppliers & Importers)
+  useEffect(() => {
+    if (!isSupplier || !profile?.id || (isSuperAdmin && !isImpersonating)) {
+      setSupplierOpenRequestsCount(0);
+      return;
+    }
+
+    let mounted = true;
+    const syncSupplierBadge = async () => {
+      try {
+        const list = await fetchOpenOwnerRequestsForSupplier(profile);
+        if (!mounted) return;
+        const openCount = list.filter((item) => !item.is_read).length;
+        setSupplierOpenRequestsCount(openCount);
+      } catch {
+        // ignore
+      }
+    };
+
+    syncSupplierBadge();
+    const onRefresh = () => {
+      syncSupplierBadge();
+    };
+    window.addEventListener('jadijcb_dispatch_campaigns_updated', onRefresh);
+    window.addEventListener('jadijcb_dispatch_updated', onRefresh);
+    window.addEventListener('storage', onRefresh);
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') syncSupplierBadge();
+    }, 120000);
+
+    return () => {
+      mounted = false;
+      window.removeEventListener('jadijcb_dispatch_campaigns_updated', onRefresh);
+      window.removeEventListener('jadijcb_dispatch_updated', onRefresh);
+      window.removeEventListener('storage', onRefresh);
+      clearInterval(interval);
+    };
+  }, [isSupplier, profile, isSuperAdmin, isImpersonating]);
+
   // Sync pending bookings & important operational booking alerts (1-day expiry, overdue, unpaid dues)
   useEffect(() => {
     const activeOwnerId = isImpersonating ? profile?.id : (user?.id || profile?.id);
 
-    if (!activeOwnerId || isDriver || (isSuperAdmin && !isImpersonating)) {
+    if (!activeOwnerId || isDriver || isSupplier || (isSuperAdmin && !isImpersonating)) {
       setPendingBookingsCount(0);
       setPendingBookingsList([]);
       setOperationalAlerts([]);
@@ -951,7 +995,7 @@ export const DashboardLayout: React.FC = () => {
       document.removeEventListener('visibilitychange', onVisible);
       if (bookingsChannel) supabase.removeChannel(bookingsChannel);
     };
-  }, [profile?.id, profile?.phone, user?.id, user?.user_metadata?.phone, isContractor, isDriver, isSuperAdmin, isImpersonating, lang]);
+  }, [profile?.id, profile?.phone, user?.id, user?.user_metadata?.phone, isContractor, isDriver, isSupplier, isSuperAdmin, isImpersonating, lang]);
 
   const contractorNavigationItems = [
     {
@@ -1063,8 +1107,40 @@ export const DashboardLayout: React.FC = () => {
     },
   ];
 
+  const supplierNavigationItems = [
+    {
+      to: '/supplier',
+      exact: true,
+      label: lang === 'fr' ? 'Tableau de bord' : 'لوحة المورد والاستيراد',
+      mobileLabel: lang === 'fr' ? 'Accueil' : 'لوحتي',
+      icon: <LayoutDashboard className="w-5 h-5" />,
+    },
+    {
+      to: '/supplier/requests',
+      label: lang === 'fr' ? 'Demandes des Propriétaires' : 'طلبات الملاك والكمبيات',
+      mobileLabel: lang === 'fr' ? 'Demandes' : 'الطلبات',
+      icon: <Package className="w-5 h-5" />,
+      badge: supplierOpenRequestsCount,
+    },
+    {
+      to: '/supplier/catalog',
+      label: lang === 'fr' ? 'Catalogue & Import' : 'الكتالوج والاستيراد',
+      mobileLabel: lang === 'fr' ? 'Catalogue' : 'الكتالوج',
+      icon: <Ship className="w-5 h-5" />,
+    },
+    {
+      to: '/supplier/messages',
+      label: t('nav.messages'),
+      mobileLabel: t('nav.messages'),
+      icon: <MessageSquare className="w-5 h-5" />,
+      badge: unreadMessagesCount,
+    },
+  ];
+
   const navigationItems = isDriver
     ? driverNavigationItems
+    : isSupplier
+    ? supplierNavigationItems
     : isContractor
     ? contractorNavigationItems
     : ownerNavigationItems;
@@ -1082,6 +1158,10 @@ export const DashboardLayout: React.FC = () => {
       ? lang === 'fr'
         ? 'Conducteur JADIJCB'
         : 'سائق محترف JADIJCB'
+      : isSupplier
+      ? lang === 'fr'
+        ? 'Fournisseur & Importateur'
+        : 'مورد آليات وقطع غيار'
       : isContractor
       ? lang === 'fr'
         ? 'Client JADIJCB'
@@ -1092,6 +1172,22 @@ export const DashboardLayout: React.FC = () => {
       ? t('auth.role_owner')
       : profile?.role === 'admin'
       ? 'Super Admin'
+      : isSupplier
+      ? profile?.supplier_type === 'importer'
+        ? lang === 'fr'
+          ? 'Importateur International'
+          : 'شركة استيراد من الخارج'
+        : profile?.supplier_type === 'machinery_dealer'
+        ? lang === 'fr'
+          ? 'Concessionnaire Engins'
+          : 'مورد وموزع آليات'
+        : profile?.supplier_type === 'spare_parts'
+        ? lang === 'fr'
+          ? 'Fournisseur Pièces'
+          : 'مورد قطع غيار'
+        : lang === 'fr'
+        ? 'Fournisseur & Import'
+        : 'مورد آليات وقطع غيار'
       : isDriver
       ? lang === 'fr'
         ? 'Conducteur d’engins'
@@ -1201,7 +1297,7 @@ export const DashboardLayout: React.FC = () => {
           <PWAInstallButton variant="sidebar" />
 
           {/* Subscription Mini Pill (Only for machinery owners) */}
-          {isTrial && !isLocked && !isContractor && !isDriver && (
+          {isTrial && !isLocked && !isContractor && !isDriver && !isSupplier && (
             <button
               type="button"
               onClick={() => setIsPaymentModalOpen(true)}
@@ -1256,7 +1352,7 @@ export const DashboardLayout: React.FC = () => {
         )}
 
         {/* Trial Live Banner: only for machinery owners */}
-        {!isContractor && !isDriver && (
+        {!isContractor && !isDriver && !isSupplier && (
           <TrialBanner onOpenPaymentModal={() => setIsPaymentModalOpen(true)} />
         )}
 
@@ -1284,6 +1380,23 @@ export const DashboardLayout: React.FC = () => {
                 <Briefcase className="w-3.5 h-3.5 shrink-0" />
                 <span>{lang === 'fr' ? 'Offres d’emploi' : 'عروض العمل'}</span>
               </NavLink>
+            ) : isSupplier ? (
+              <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                <NavLink
+                  to="/supplier/catalog"
+                  className="hidden sm:flex text-xs font-semibold text-steel-700 hover:text-ink px-2.5 sm:px-3 py-1.5 rounded-lg border border-steel-200 bg-steel-50 hover:bg-steel-100 min-h-[40px] sm:min-h-[44px] items-center gap-1.5 whitespace-nowrap shrink-0"
+                >
+                  <Ship className="w-3.5 h-3.5 shrink-0" />
+                  <span>{lang === 'fr' ? 'Catalogue & Import' : 'الكتالوج والاستيراد'}</span>
+                </NavLink>
+                <NavLink
+                  to="/supplier/requests"
+                  className="text-[11px] sm:text-xs font-black text-ink px-2.5 sm:px-3 py-1.5 rounded-xl border border-primary/50 bg-primary hover:bg-primary-hover min-h-[40px] sm:min-h-[44px] flex items-center gap-1 sm:gap-1.5 shadow-sm whitespace-nowrap shrink-0"
+                >
+                  <Package className="w-3.5 h-3.5 shrink-0" />
+                  <span>{lang === 'fr' ? 'Demandes Reçues' : 'طلبات الملاك'}</span>
+                </NavLink>
+              </div>
             ) : isContractor ? (
               <NavLink
                 to="/entreprise/map"
@@ -1549,6 +1662,8 @@ export const DashboardLayout: React.FC = () => {
                                       tag: 'jadijcb-test-notif',
                                       url: isDriver
                                         ? '/driver/messages'
+                                        : isSupplier
+                                        ? '/supplier/messages'
                                         : isContractor
                                         ? '/entreprise/messages'
                                         : '/owner/messages',
@@ -1592,6 +1707,8 @@ export const DashboardLayout: React.FC = () => {
                                     tag: 'jadijcb-test-notif',
                                     url: isDriver
                                       ? '/driver/messages'
+                                      : isSupplier
+                                      ? '/supplier/messages'
                                       : isContractor
                                       ? '/entreprise/messages'
                                       : '/owner/messages',
@@ -1634,6 +1751,7 @@ export const DashboardLayout: React.FC = () => {
                                 const opp = entry.opp;
                                 const isSpareOpp =
                                   opp.campaign_type === 'spare_part' || Boolean(opp.part_reference);
+                                const isPurchaseOpp = opp.campaign_type === 'machine_purchase';
                                 return (
                                   <div
                                     key={entry.id}
@@ -1646,7 +1764,13 @@ export const DashboardLayout: React.FC = () => {
                                     <div className="flex items-start gap-2.5">
                                       <img
                                         src="/assets/aistudio/image_010e3368.png"
-                                        alt={isSpareOpp ? 'طلب قطعة غيار' : 'فرصة جديدة'}
+                                        alt={
+                                          isSpareOpp
+                                            ? 'طلب قطعة غيار'
+                                            : isPurchaseOpp
+                                            ? 'طلب شراء آلية'
+                                            : 'فرصة جديدة'
+                                        }
                                         className="w-9 h-9 object-contain shrink-0 rounded-lg bg-white/10 p-0.5"
                                       />
                                       <div className="min-w-0 flex-1">
@@ -1658,7 +1782,11 @@ export const DashboardLayout: React.FC = () => {
                                                 : 'text-primary-dark'
                                             }`}
                                           >
-                                            {isSpareOpp ? 'طلب قطعة غيار 🔧' : 'فرصة جديدة'}
+                                            {isSpareOpp
+                                              ? 'طلب قطعة غيار 🔧'
+                                              : isPurchaseOpp
+                                              ? 'طلب شراء / استيراد آلية 🚢'
+                                              : 'فرصة جديدة'}
                                           </span>
                                           <div className="flex items-center gap-2 shrink-0">
                                             {opp.is_nationwide ? (
@@ -1680,6 +1808,8 @@ export const DashboardLayout: React.FC = () => {
                                         <p className="font-black leading-snug mt-0.5 break-words">
                                           {isSpareOpp
                                             ? `«${opp.company_name}» يبحث عن Réf: ${opp.part_reference || opp.machine_name}`
+                                            : isPurchaseOpp
+                                            ? `«${opp.company_name}» يبحث عن شراء «${opp.machine_name}»`
                                             : `«${opp.company_name}» محتاجة «${opp.machine_name}» ديالك`}
                                         </p>
                                         <p className="text-[10px] opacity-75 truncate mt-0.5">
@@ -1717,16 +1847,17 @@ export const DashboardLayout: React.FC = () => {
                                             )
                                           );
                                           setIsNotificationsOpen(false);
+                                          const msgPrefix = isSupplier ? '/supplier/messages' : '/owner/messages';
                                           navigate(
-                                            `/owner/messages?target=${opp.contractor_id}&machine=${opp.machine_id || ''}&campaign=${opp.campaign_id}`
+                                            `${msgPrefix}?target=${opp.contractor_id}&machine=${opp.machine_id || ''}&campaign=${opp.campaign_id}`
                                           );
                                         }}
                                         className="px-2.5 py-1.5 rounded-lg bg-primary text-ink font-black text-[11px] hover:bg-primary-hover transition-colors cursor-pointer"
                                       >
-                                        {isSpareOpp
+                                        {isSpareOpp || isPurchaseOpp
                                           ? lang === 'fr'
-                                            ? 'Disponible & Discuter'
-                                            : 'متوفرة عندي — محادثة'
+                                            ? 'Proposer un devis'
+                                            : 'تقديم عرض ومحادثة'
                                           : lang === 'fr'
                                           ? 'Accepter & Discuter'
                                           : 'موافقة ومحادثة المقاولة'}
@@ -1923,6 +2054,8 @@ export const DashboardLayout: React.FC = () => {
                                       navigate(
                                         isDriver
                                           ? '/driver/joboffer'
+                                          : isSupplier
+                                          ? '/supplier/requests'
                                           : isContractor
                                           ? '/entreprise/bookings'
                                           : '/owner/bookings?tab=pending'
@@ -1984,6 +2117,8 @@ export const DashboardLayout: React.FC = () => {
                               navigate(
                                 isDriver
                                   ? '/driver/joboffer'
+                                  : isSupplier
+                                  ? '/supplier/requests'
                                   : isContractor
                                   ? '/entreprise/bookings'
                                   : '/owner/bookings?tab=pending'
@@ -1995,6 +2130,10 @@ export const DashboardLayout: React.FC = () => {
                               ? lang === 'fr'
                                 ? 'Voir les offres d’emploi →'
                                 : 'الانتقال إلى عروض العمل ←'
+                              : isSupplier
+                              ? lang === 'fr'
+                                ? 'Voir les demandes des propriétaires →'
+                                : 'الانتقال إلى طلبات الملاك ←'
                               : isContractor
                               ? lang === 'fr'
                                 ? 'Accéder à mes locations →'
@@ -2027,6 +2166,10 @@ export const DashboardLayout: React.FC = () => {
                     ? lang === 'fr'
                       ? 'Activez les alertes pour recevoir instantanément les offres urgentes de conducteurs avec tarif et durée même hors application.'
                       : 'فعّل إشعارات الهاتف ليصلك صوت وتنبيه فوري بعروض العمل العاجلة (نوع الآلية، الثمن والمدة) فور إطلاقها حتى خارج التطبيق.'
+                    : isSupplier
+                    ? lang === 'fr'
+                      ? 'Activez les alertes pour recevoir instantanément les demandes d’achat d’engins, import et pièces des propriétaires.'
+                      : 'فعّل إشعارات الهاتف ليصلك تنبيه فوري عند إطلاق الملاك لحملات البحث عن قطع الغيار أو شراء واستيراد الآليات.'
                     : isContractor
                     ? lang === 'fr'
                       ? 'Activez les notifications pour recevoir les messages des propriétaires dans votre barre mobile même hors application.'
@@ -2139,6 +2282,54 @@ export const DashboardLayout: React.FC = () => {
                 {lang === 'fr' ? 'Profil' : 'حسابي'}
               </span>
             </button>
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="flex flex-col items-center justify-center flex-1 min-w-0 px-0.5 py-1.5 min-h-[50px] text-danger hover:bg-rose-50/70 rounded-xl transition-colors cursor-pointer"
+              aria-label={t('nav.logout')}
+            >
+              <div className="p-1 rounded-xl">
+                <LogOut className="w-5 h-5" />
+              </div>
+              <span className="text-[10px] font-bold mt-0.5 tracking-tight truncate max-w-full">
+                {lang === 'fr' ? 'Quitter' : 'خروج'}
+              </span>
+            </button>
+          </>
+        ) : isSupplier ? (
+          <>
+            {supplierNavigationItems.map((item) => {
+              const isItemActive = item.exact
+                ? location.pathname === item.to
+                : location.pathname.startsWith(item.to);
+
+              return (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  className={`flex flex-col items-center justify-center flex-1 min-w-0 px-0.5 py-1.5 min-h-[50px] transition-colors relative ${
+                    isItemActive ? 'text-ink font-bold' : 'text-steel-400 hover:text-steel-700'
+                  }`}
+                >
+                  <div
+                    className={`p-1 rounded-xl transition-all relative ${
+                      isItemActive ? 'bg-primary text-ink' : ''
+                    }`}
+                  >
+                    {item.icon}
+                    {typeof item.badge === 'number' && item.badge > 0 && (
+                      <span className="absolute -top-1.5 -end-2 min-w-[17px] h-[17px] px-1 rounded-full bg-primary text-ink text-[9px] font-black flex items-center justify-center ring-2 ring-white tabular-nums">
+                        {item.badge > 99 ? '99+' : item.badge}
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[10px] mt-0.5 tracking-tight truncate max-w-full">
+                    {item.mobileLabel || item.label}
+                  </span>
+                </NavLink>
+              );
+            })}
 
             <button
               type="button"
@@ -2521,10 +2712,11 @@ export const DashboardLayout: React.FC = () => {
         onClose={() => setIsProfileModalOpen(false)}
       />
 
-      {/* Real-Time InDrive Opportunity Listener (Audio + Push + Celebration Popup for Owners) */}
+      {/* Real-Time InDrive Opportunity Listener (Audio + Push + Celebration Popup for Owners & Suppliers/Importers) */}
       {!isContractor && !isDriver && (profile?.id || user?.id) && !(isSuperAdmin && !isImpersonating) && (
         <OpportunityAlertListener
           ownerId={profile?.id || user?.id || ''}
+          userRole={isSupplier ? 'supplier' : 'owner'}
           onNotificationsSync={setOpportunityNotifications}
         />
       )}

@@ -6,10 +6,13 @@ export type UserRole =
   | 'owner'
   | 'client'
   | 'driver'
+  | 'supplier'
   | 'admin'
   | 'contractor'
   | 'equipment_owner'
   | 'dealer';
+
+export type SupplierType = 'spare_parts' | 'machinery_dealer' | 'importer' | 'all';
 export type ClientSegment =
   | 'company'
   | 'farmer'
@@ -76,6 +79,11 @@ export interface UserProfile {
   driver_experience_years?: string;
   driver_available?: boolean;
   driver_bio?: string;
+  supplier_type?: SupplierType;
+  import_countries?: string[];
+  import_lead_time?: string;
+  supplier_specialties?: string[];
+  delivers_nationwide?: boolean;
   last_active_at?: string;
   activation_at?: string;
   created_at: string;
@@ -430,7 +438,7 @@ export interface Lead {
   machine?: Partial<Machine>;
 }
 
-export type DispatchCampaignType = 'machine' | 'spare_part';
+export type DispatchCampaignType = 'machine' | 'spare_part' | 'machine_purchase';
 
 export interface DispatchCampaign {
   id: string;
@@ -439,6 +447,10 @@ export interface DispatchCampaign {
   campaign_type?: DispatchCampaignType;
   part_reference?: string;
   part_category?: string;
+  budget_mad?: number | null;
+  import_allowed?: boolean;
+  preferred_origin?: string;
+  desired_condition?: 'any' | 'new' | 'used' | 'import';
   site_id?: string | null;
   site_name: string;
   site_city?: string;
@@ -477,6 +489,10 @@ export interface DispatchNotification {
   campaign_type?: DispatchCampaignType;
   part_reference?: string;
   part_category?: string;
+  budget_mad?: number | null;
+  import_allowed?: boolean;
+  preferred_origin?: string;
+  desired_condition?: 'any' | 'new' | 'used' | 'import';
   company_name: string;
   machine_name: string;
   matched_machine_title?: string;
@@ -507,6 +523,10 @@ export interface DispatchDealContext {
   campaign_type?: DispatchCampaignType;
   part_reference?: string;
   part_category?: string;
+  budget_mad?: number | null;
+  import_allowed?: boolean;
+  preferred_origin?: string;
+  desired_condition?: 'any' | 'new' | 'used' | 'import';
   company_name: string;
   machine_name: string;
   matched_machine_title?: string;

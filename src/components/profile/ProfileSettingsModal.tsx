@@ -26,6 +26,9 @@ import {
   Users,
   HardHat,
   Award,
+  Package,
+  Ship,
+  Globe,
 } from 'lucide-react';
 import { Input } from '../ui/Input';
 import { Select } from '../ui/Select';
@@ -38,7 +41,13 @@ import { useAuth } from '../../hooks/useAuth';
 import { MOROCCAN_CITIES } from '../../data/cities';
 import { CLIENT_SEGMENTS, getClientSegmentOption } from '../../data/clientSegments';
 import { DRIVER_EXPERIENCE_LEVELS } from '../../data/driverMachines';
-import { ClientSegment } from '../../types/database';
+import {
+  SUPPLIER_TYPES,
+  IMPORT_ORIGIN_COUNTRIES,
+  IMPORT_LEAD_TIMES,
+  getSupplierTypeOption,
+} from '../../data/supplierOptions';
+import { ClientSegment, SupplierType } from '../../types/database';
 import { supabase } from '../../lib/supabase';
 import { normalizeMoroccanPhone } from '../../lib/authHelpers';
 import {
@@ -72,12 +81,17 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
 
   const isClient = profile?.role === 'client' || profile?.role === 'contractor';
   const isDriver = profile?.role === 'driver';
+  const isSupplier = profile?.role === 'supplier' || profile?.role === 'dealer';
 
   const [clientSegment, setClientSegment] = useState<ClientSegment>('company');
   const [clientActivityNote, setClientActivityNote] = useState('');
   const [driverMachines, setDriverMachines] = useState<string[]>([]);
   const [driverExperienceYears, setDriverExperienceYears] = useState('3_5');
   const [driverAvailable, setDriverAvailable] = useState(true);
+  const [supplierType, setSupplierType] = useState<SupplierType>('all');
+  const [importCountries, setImportCountries] = useState<string[]>(['europe']);
+  const [importLeadTime, setImportLeadTime] = useState('15_30');
+  const [deliversNationwide, setDeliversNationwide] = useState(true);
   const [activeDriverContract, setActiveDriverContract] = useState<AgreedDriverDealItem | null>(null);
   const [fullName, setFullName] = useState('');
   const [companyName, setCompanyName] = useState('');
@@ -96,6 +110,14 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
       setDriverMachines(Array.isArray(profile.driver_machines) ? profile.driver_machines : []);
       setDriverExperienceYears(profile.driver_experience_years || '3_5');
       setDriverAvailable(profile.driver_available ?? true);
+      setSupplierType(profile.supplier_type || 'all');
+      setImportCountries(
+        Array.isArray(profile.import_countries) && profile.import_countries.length > 0
+          ? profile.import_countries
+          : ['europe']
+      );
+      setImportLeadTime(profile.import_lead_time || '15_30');
+      setDeliversNationwide(profile.delivers_nationwide ?? true);
       setFullName(profile.full_name || '');
       setCompanyName(profile.company_name || '');
       const matchedCity = MOROCCAN_CITIES.find(
@@ -132,6 +154,13 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
 
   const isClientCompany = isClient && clientSegment === 'company';
   const currentSegmentMeta = getClientSegmentOption(clientSegment);
+  const currentSupplierMeta = getSupplierTypeOption(supplierType);
+
+  const toggleImportCountry = (countryId: string) => {
+    setImportCountries((prev) =>
+      prev.includes(countryId) ? prev.filter((id) => id !== countryId) : [...prev, countryId]
+    );
+  };
 
   const cityOptions = MOROCCAN_CITIES.map((c) => ({
     value: c.id,
@@ -148,7 +177,11 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
 
     if (!isDriver && (!isClient || isClientCompany) && !companyName.trim()) {
       toast.error(
-        lang === 'fr'
+        isSupplier
+          ? lang === 'fr'
+            ? 'Veuillez saisir le nom de votre magasin ou société'
+            : 'يرجى إدخال اسم المتجر أو شركة التوريد / الاستيراد'
+          : lang === 'fr'
           ? 'Veuillez saisir le nom de votre entreprise'
           : 'يرجى إدخال اسم الشركة أو المقاولة'
       );
@@ -186,7 +219,21 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
         driver_machines: isDriver ? driverMachines : undefined,
         driver_experience_years: isDriver ? driverExperienceYears : undefined,
         driver_available: isDriver ? effectiveDriverAvailable : undefined,
-        ice_number: !isClient && !isDriver ? iceNumber.trim() : '',
+        supplier_type: isSupplier ? supplierType : undefined,
+        import_countries:
+          isSupplier && (supplierType === 'importer' || supplierType === 'all')
+            ? importCountries
+            : isSupplier
+            ? []
+            : undefined,
+        import_lead_time:
+          isSupplier && (supplierType === 'importer' || supplierType === 'all')
+            ? importLeadTime
+            : isSupplier
+            ? ''
+            : undefined,
+        delivers_nationwide: isSupplier ? deliversNationwide : undefined,
+        ice_number: !isClient && !isDriver && !isSupplier ? iceNumber.trim() : '',
         whatsapp_verified: true,
       };
 
@@ -274,6 +321,8 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
             <div className="w-10 h-10 rounded-2xl bg-primary text-ink flex items-center justify-center font-black shrink-0">
               {isDriver ? (
                 <HardHat className="w-5 h-5" />
+              ) : isSupplier ? (
+                <Package className="w-5 h-5" />
               ) : isClient ? (
                 <Users className="w-5 h-5" />
               ) : (
@@ -290,6 +339,10 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
                     ? lang === 'fr'
                       ? 'Conducteur d’engins'
                       : 'سائق آليات'
+                    : isSupplier
+                    ? lang === 'fr'
+                      ? currentSupplierMeta.labelFr
+                      : currentSupplierMeta.labelAr
                     : isClient
                     ? lang === 'fr'
                       ? currentSegmentMeta.labelFr
@@ -304,6 +357,10 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
                   ? lang === 'fr'
                     ? 'Gérez votre nom, ville, expérience et engins maîtrisés'
                     : 'تحديث اسمك، مدينتك، سنوات الخبرة والآليات التي تحترفها'
+                  : isSupplier
+                  ? lang === 'fr'
+                    ? 'Gérez votre activité, pays d\'importation, ville et coordonnées'
+                    : 'تحديث تخصص التوريد، بلدان الاستيراد، مدينتك ورقم التواصل'
                   : isClient
                   ? lang === 'fr'
                     ? 'Gérez votre catégorie, nom, ville et numéro de contact'
@@ -527,8 +584,106 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
             </div>
           )}
 
-          {/* ICE Tax Field ONLY for machinery owners, NOT for clients or drivers */}
-          {!isClient && !isDriver && (
+          {/* Supplier & Importer Specific Fields */}
+          {isSupplier && (
+            <div className="space-y-3 p-3.5 rounded-2xl bg-steel-50 border border-steel-200">
+              <div>
+                <label className="text-xs font-black text-ink flex items-center gap-1.5 mb-2">
+                  <Ship className="w-3.5 h-3.5 text-primary-dark" />
+                  <span>{lang === 'fr' ? 'Type d’activité & Spécialité' : 'طبيعة نشاط المورد أو شركة الاستيراد'}</span>
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {SUPPLIER_TYPES.map((st) => {
+                    const active = supplierType === st.id;
+                    return (
+                      <button
+                        key={st.id}
+                        type="button"
+                        onClick={() => setSupplierType(st.id)}
+                        className={`p-2 rounded-xl border text-start transition-colors cursor-pointer min-h-[44px] ${
+                          active
+                            ? 'bg-white border-primary ring-2 ring-primary/35 text-ink'
+                            : 'bg-white/75 border-steel-200 text-steel-700 hover:bg-white'
+                        }`}
+                      >
+                        <span className="text-xs font-black block">
+                          {lang === 'fr' ? st.labelFr : st.labelAr}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {(supplierType === 'importer' || supplierType === 'all') && (
+                <div className="space-y-2.5 pt-2 border-t border-steel-200/80">
+                  <div>
+                    <label className="text-xs font-bold text-steel-700 flex items-center gap-1.5 mb-1.5">
+                      <Globe className="w-3.5 h-3.5 text-primary-dark" />
+                      <span>{lang === 'fr' ? 'Pays d’importation' : 'بلدان الاستيراد المتاحة'}</span>
+                    </label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {IMPORT_ORIGIN_COUNTRIES.map((country) => {
+                        const selected = importCountries.includes(country.id);
+                        return (
+                          <button
+                            key={country.id}
+                            type="button"
+                            onClick={() => toggleImportCountry(country.id)}
+                            className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-bold transition-colors cursor-pointer min-h-[36px] ${
+                              selected
+                                ? 'bg-ink text-primary border-ink'
+                                : 'bg-white text-steel-700 border-steel-200 hover:bg-steel-100'
+                            }`}
+                          >
+                            {country.flag} {lang === 'fr' ? country.nameFr : country.nameAr}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-steel-700 block mb-1">
+                      {lang === 'fr' ? 'Délai moyen d’importation' : 'مدة التوريد والاستيراد المعتادة'}
+                    </label>
+                    <Select
+                      value={importLeadTime}
+                      onChange={(e) => setImportLeadTime(e.target.value)}
+                      options={IMPORT_LEAD_TIMES.map((lt) => ({
+                        value: lt.id,
+                        label: lang === 'fr' ? lt.labelFr : lt.labelAr,
+                      }))}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <button
+                type="button"
+                role="checkbox"
+                aria-checked={deliversNationwide}
+                onClick={() => setDeliversNationwide((prev) => !prev)}
+                className={`w-full p-2.5 rounded-xl border text-start flex items-center gap-2 cursor-pointer min-h-[44px] ${
+                  deliversNationwide
+                    ? 'bg-emerald-50 border-emerald-300 text-ink'
+                    : 'bg-white border-steel-200 text-steel-700'
+                }`}
+              >
+                <span className={deliversNationwide ? 'text-emerald-600' : 'text-steel-400'}>
+                  {deliversNationwide ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
+                </span>
+                <span className="text-xs font-bold">
+                  {lang === 'fr'
+                    ? 'Livraison vers toutes les villes du Maroc'
+                    : 'نوفر الشحن والتوصيل لجميع مدن المغرب'}
+                </span>
+              </button>
+            </div>
+          )}
+
+          {/* ICE Tax Field ONLY for machinery owners, NOT for clients, drivers, or suppliers */}
+          {!isClient && !isDriver && !isSupplier && (
             <div>
               <label className="text-xs font-bold text-steel-700 block mb-1.5 flex items-center gap-1.5">
                 <FileCheck className="w-3.5 h-3.5 text-primary-dark" />

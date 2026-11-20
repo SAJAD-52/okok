@@ -640,13 +640,13 @@ export const PillarShowcaseSections: React.FC<PillarShowcaseSectionsProps> = ({
                     <div>
                       <span className="text-xs text-primary font-bold block">
                         {lang === 'fr'
-                          ? 'Espace Fournisseur · Bientôt disponible'
-                          : 'فضاء موردي قطع الغيار · قريبا في المنصة'}
+                          ? 'Portail Fournisseurs & Import · En ligne (/supplier)'
+                          : 'بوابة الموردين وشركات الاستيراد · متاحة الآن'}
                       </span>
                       <span className="text-base font-black text-white">
                         {lang === 'fr'
-                          ? 'Stock, demandes urgentes & contrats de vente'
-                          : 'طلبات القطع الفورية، المخزون والمبيعات'}
+                          ? 'Engins, Pièces détachées & Importation internationale'
+                          : 'عروض قطع الغيار، بيع الآليات والاستيراد من الخارج'}
                       </span>
                     </div>
                     <div className="w-10 h-10 rounded-xl bg-primary/15 text-primary flex items-center justify-center shrink-0">
@@ -660,7 +660,7 @@ export const PillarShowcaseSections: React.FC<PillarShowcaseSectionsProps> = ({
                       <span className="text-primary font-bold flex items-center gap-1.5">
                         <PackageSearch className="w-4 h-4 shrink-0" />
                         <span>
-                          {lang === 'fr' ? 'Demande urgente reçue' : 'إشعار بحث فوري من مالك آلية'}
+                          {lang === 'fr' ? 'Demande urgente de propriétaire' : 'حملة بحث مباشرة من مالك آلية'}
                         </span>
                       </span>
                       <span className="text-slate-400">
@@ -669,13 +669,13 @@ export const PillarShowcaseSections: React.FC<PillarShowcaseSectionsProps> = ({
                     </div>
                     <div className="text-sm font-bold text-white mt-2">
                       {lang === 'fr'
-                        ? 'Kit filtres & flexibles hydrauliques JCB 3CX'
-                        : 'طقم فلاتر وخراطيم هيدروليك JCB 3CX · مراكش'}
+                        ? 'Achat / Import pelle CAT 320D + kit hydraulique JCB'
+                        : 'طلب شراء أو استيراد حفارة CAT 320D + فلاتر JCB 3CX'}
                     </div>
                     <div className="text-xs text-slate-400 mt-1">
                       {lang === 'fr'
-                        ? 'Proposez votre prix et délai de livraison en direct.'
-                        : 'أرسل ثمنك وتوفر القطعة لصاحب الآلية في الحين.'}
+                        ? 'Proposez votre devis Maroc ou import avec délai d’expédition.'
+                        : 'ارسل عرض السعر ومصدر التوريد ومدة الشحن لصاحب الآلية مباشرة.'}
                     </div>
                   </div>
 
@@ -683,29 +683,29 @@ export const PillarShowcaseSections: React.FC<PillarShowcaseSectionsProps> = ({
                   <div className="grid grid-cols-2 gap-3 mt-3">
                     <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800">
                       <span className="text-[11px] text-slate-400 block">
-                        {lang === 'fr' ? 'Articles en stock' : 'القطع في المخزون'}
+                        {lang === 'fr' ? 'Catégories couvertes' : 'مجالات التوريد'}
                       </span>
                       <div className="text-lg font-black text-white font-mono latin-nums mt-1">
-                        340 <span className="text-xs text-slate-400">{lang === 'fr' ? 'réf.' : 'صنف'}</span>
+                        3 <span className="text-xs text-slate-400">{lang === 'fr' ? 'pôles' : 'مسارات'}</span>
                       </div>
                     </div>
                     <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800">
                       <span className="text-[11px] text-slate-400 block">
-                        {lang === 'fr' ? 'Bénéfice net suivi' : 'صافي الأرباح المسجل'}
+                        {lang === 'fr' ? 'Importation directe' : 'الاستيراد الدولي'}
                       </span>
                       <div className="text-lg font-black text-emerald-400 font-mono latin-nums mt-1">
-                        +28 400 <span className="text-xs">MAD</span>
+                        {lang === 'fr' ? 'EU / CN / TR' : 'أوروبا وآسيا'}
                       </div>
                     </div>
                   </div>
                 </div>
 
                 <div className="mt-5 pt-4 border-t border-slate-800 flex items-center justify-between gap-3 text-xs">
-                  <span className="text-primary font-semibold">
-                    {lang === 'fr' ? 'Pré-inscription ouverte' : 'التسجيل المبكر مفتوح للمحلات والموردين'}
-                  </span>
+                  <Link to="/supplier" className="text-primary font-black hover:underline">
+                    {lang === 'fr' ? 'Accéder au portail /supplier →' : 'دخول بوابة الموردين ←'}
+                  </Link>
                   <span className="text-slate-400">
-                    {lang === 'fr' ? 'Contrats & Vitrine inclus' : 'متجر + عقود بيع'}
+                    {lang === 'fr' ? 'Devis & Chat direct' : 'عروض سعر + محادثة مباشرة'}
                   </span>
                 </div>
               </div>
@@ -721,49 +721,49 @@ export const PillarShowcaseSections: React.FC<PillarShowcaseSectionsProps> = ({
             >
               <div className="text-xs sm:text-sm font-extrabold text-primary mb-2">
                 {lang === 'fr'
-                  ? '04 · Fournisseurs de Pièces de Rechange · Suite à venir'
-                  : '04 · موردو قطع الغيار والمعدات · مزايا قادمة في المنصة'}
+                  ? '04 · Fournisseurs d’Engins, Pièces & Sociétés d’Importation'
+                  : '04 · موردو الآليات وقطع الغيار وشركات الاستيراد من الخارج'}
               </div>
               <h2 className="font-display text-2xl sm:text-4xl font-black text-white leading-tight text-balance">
                 {lang === 'fr'
-                  ? 'Un marché ouvert face aux propriétaires et chantiers, avec alertes en direct'
-                  : 'سوق مفتوح من المالكين والزبناء مع إشعارات فورية لطلبات قطع الغيار'}
+                  ? 'Connectés directement aux propriétaires qui cherchent à acheter ou réparer'
+                  : 'تواصل مباشر مع مالكي الآليات الباحثين عن الشراء أو قطع الغيار أو الاستيراد'}
               </h2>
               <p className="text-sm sm:text-base text-slate-300 mt-3 leading-relaxed max-w-2xl">
                 {lang === 'fr'
-                  ? 'Préparez l’ouverture de votre espace fournisseur : recevez les demandes de pièces en temps réel, créez votre boutique et pilotez stock et bénéfices.'
-                  : 'منظومة متكاملة نجهزها لمحلات وموزعي قطع الغيار لربطهم مباشرة بمالكي الآليات المتوقفين في الأوراش وإدارة مبيعاتهم من مكان واحد.'}
+                  ? 'Recevez en direct les campagnes d’achat d’engins et de pièces détachées lancées par les propriétaires marocains, que votre stock soit au Maroc ou en importation internationale.'
+                  : 'استقبل فورا حملات البحث التي يطلقها مالكو الآليات لشراء المعدات الثقيلة أو قطع الغيار سواء من مخزونك بالمغرب أو عبر الاستيراد المباشر من الخارج.'}
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-7">
                 {[
                   {
                     icon: Truck,
-                    titleAr: 'سوق مفتوح من المالكين والزبناء',
-                    titleFr: 'Marché ouvert B2B ciblé',
-                    descAr: 'اعرض قطع الغيار، الفلاتر، الخراطيم، الزيوت والجنازير أمام الباحثين عنها كل يوم.',
-                    descFr: 'Connectez votre catalogue aux loueurs d’engins et chantiers qui recherchent vos pièces.',
+                    titleAr: 'ارتباط مباشر بمالكي الآليات',
+                    titleFr: 'Demandes ciblées des propriétaires',
+                    descAr: 'مالك الآلية يطلق حملة بحث عن قطعة غيار أو آلية للشراء فتصلك فورا في بوابة الموردين.',
+                    descFr: 'Chaque campagne lancée par un propriétaire arrive instantanément dans votre bourse de demandes.',
                   },
                   {
                     icon: Bell,
-                    titleAr: 'إشعارات فورية في حينها',
-                    titleFr: 'Alertes demandes en direct',
-                    descAr: 'تتوصل بإشعار فوري بمجرد بحث أي مالك آلية عن قطعة غيار محددة لتجيب بالثمن والتوصيل.',
-                    descFr: 'Recevez une alerte instantanée lorsqu’un propriétaire recherche une référence précise.',
+                    titleAr: 'شركات الاستيراد من الخارج مدمجة',
+                    titleFr: 'Importation internationale intégrée',
+                    descAr: 'تقدم بعروض الاستيراد من أوروبا والصين وتركيا والخليج مع مدة الشحن والتسليم بالموانئ.',
+                    descFr: 'Répondez aux commandes d’import depuis l’Europe, la Chine ou le Golfe avec fret et délais.',
                   },
                   {
                     icon: Store,
-                    titleAr: 'متجر خاص وتوليد عقود البيع',
-                    titleFr: 'Boutique dédiée & Contrats de vente',
-                    descAr: 'صمم متجرك الخاص داخل المنصة مع إمكانية توليد عقود بيع وفواتير احترافية لزبنائك.',
-                    descFr: 'Créez votre boutique en ligne et émettez factures et contrats de vente depuis la plateforme.',
+                    titleAr: 'كتالوج بيع وعروض استيراد',
+                    titleFr: 'Catalogue vente & import sur commande',
+                    descAr: 'انشر قطع الغيار بالمرجع، الآليات المتوفرة للبيع بالمغرب، وعروض الاستيراد حسب الطلب.',
+                    descFr: 'Publiez vos pièces avec référence, engins en stock au Maroc et offres d’importation.',
                   },
                   {
                     icon: Boxes,
-                    titleAr: 'لوحة تحكم المخزون والمبيعات والأرباح',
-                    titleFr: 'Gestion stock, ventes & bénéfices',
-                    descAr: 'إدارة شاملة للمخزون، تسجيل المبيعات اليومية، حساب الأرباح الصافية، وتنبيهات النفاد والمزيد.',
-                    descFr: 'Tableau complet de suivi des stocks, ventes quotidiennes, marges nettes et réassort.',
+                    titleAr: 'عروض سعر منظمة ومحادثة فورية',
+                    titleFr: 'Devis structurés & négociation directe',
+                    descAr: 'ارسل السعر بالدرهم أو الأورو ومدة التوصيل والضمان وافتح المحادثة مع المالك في الحين.',
+                    descFr: 'Envoyez prix MAD/EUR, origine, délai et garantie puis négociez directement avec l’acheteur.',
                   },
                 ].map((item, idx) => {
                   const Icon = item.icon;

@@ -43,6 +43,7 @@ import { Button } from '../ui/Button';
 
 interface OpportunityAlertListenerProps {
   ownerId: string;
+  userRole?: 'owner' | 'supplier';
   onNotificationsSync: (notifications: DispatchNotification[]) => void;
 }
 
@@ -70,6 +71,7 @@ function addSessionAlertedKey(key: string) {
 
 export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> = ({
   ownerId,
+  userRole = 'owner',
   onNotificationsSync,
 }) => {
   const { lang } = useLanguage();
@@ -104,22 +106,35 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
       : '';
 
     const isSpare = notif.campaign_type === 'spare_part' || Boolean(notif.part_reference);
+    const isPurchase = notif.campaign_type === 'machine_purchase';
+    const baseRoute = userRole === 'supplier' ? '/supplier' : '/owner';
     showBrowserOpportunityNotification({
-      title: isSpare ? 'طلب قطعة غيار عاجل 🔧' : 'فرصة جديدة 🎉',
+      title: isSpare
+        ? 'طلب قطعة غيار عاجل 🔧'
+        : isPurchase
+        ? 'طلب شراء / استيراد آلية 🚢'
+        : 'فرصة جديدة 🎉',
       body: isSpare
         ? `«${notif.company_name}» يبحث عن Réf: ${notif.part_reference || notif.machine_name}${
+            distLabel ? ` · ${distLabel}` : ''
+          }`
+        : isPurchase
+        ? `«${notif.company_name}» يبحث عن شراء «${notif.machine_name}»${
             distLabel ? ` · ${distLabel}` : ''
           }`
         : `«${notif.company_name}» محتاجة «${notif.machine_name}» ديالك${
             distLabel ? ` · ${distLabel}` : ''
           }`,
       tag: alertKey,
-      url: `/owner/messages?target=${notif.contractor_id}&machine=${notif.machine_id || ''}&campaign=${notif.campaign_id}`,
+      url:
+        userRole === 'supplier'
+          ? `/supplier/requests?campaign=${notif.campaign_id}`
+          : `${baseRoute}/messages?target=${notif.contractor_id}&machine=${notif.machine_id || ''}&campaign=${notif.campaign_id}`,
     });
 
     // 3. In-app celebratory banner card
     setActiveAlert(notif);
-  }, []);
+  }, [userRole]);
 
   const syncInFlightRef = useRef(false);
 
@@ -262,7 +277,11 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
             // Check if mutual deal acceptance or closure just arrived
             const dealMsg = parseDispatchDealMessageRow(row);
             if (dealMsg) {
-              if (dealMsg.deal_status === 'accepted' && dealMsg.owner_id === ownerId) {
+              const isSupplyDeal =
+                dealMsg.campaign_type === 'spare_part' ||
+                dealMsg.campaign_type === 'machine_purchase' ||
+                Boolean(dealMsg.part_reference);
+              if (dealMsg.deal_status === 'accepted' && dealMsg.owner_id === ownerId && !isSupplyDeal) {
                 relocateMachineToSite({
                   machineId: dealMsg.machine_id,
                   siteLat: dealMsg.site_lat,
@@ -343,6 +362,10 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
       }),
     ]);
     syncFromSource(false);
+    if (userRole === 'supplier') {
+      navigate(`/supplier/requests?campaign=${alertTarget.campaign_id}`);
+      return;
+    }
     navigate(
       `/owner/messages?target=${alertTarget.contractor_id}&machine=${alertTarget.machine_id || ''}&campaign=${alertTarget.campaign_id}`
     );
@@ -352,6 +375,7 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
 
   const isSpareAlert =
     activeAlert.campaign_type === 'spare_part' || Boolean(activeAlert.part_reference);
+  const isPurchaseAlert = activeAlert.campaign_type === 'machine_purchase';
 
   return (
     <div
@@ -363,12 +387,16 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
         {/* Top Celebratory Bar */}
         <div className="bg-primary text-ink px-4 py-2 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            <Volume2 className="w-4 h-4 shrink-0 animate-pulse" />
+            <Volume2 className="w-4 h-4 shrink-0" />
             <span className="text-xs font-black tracking-tight">
               {isSpareAlert
                 ? lang === 'fr'
                   ? 'Demande urgente de pièce détachée'
-                  : 'طلب مباشر لقطعة غيار قريب منك'
+                  : 'طلب مباشر لقطعة غيار'
+                : isPurchaseAlert
+                ? lang === 'fr'
+                  ? 'Demande achat / importation d’engin'
+                  : 'طلب شراء / استيراد آلية من مالك'
                 : lang === 'fr'
                 ? 'Opportunité Directe JADIJCB'
                 : 'طلب مباشر قريب من آلياتك'}
@@ -389,7 +417,7 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
           <div className="flex items-start gap-3">
             <img
               src="/assets/aistudio/image_010e3368.png"
-              alt={isSpareAlert ? 'طلب قطعة غيار' : 'فرصة جديدة'}
+              alt={isSpareAlert ? 'طلب قطعة غيار' : isPurchaseAlert ? 'طلب شراء آلية' : 'فرصة جديدة'}
               className="w-12 h-12 object-contain shrink-0 bg-white/10 rounded-2xl p-1.5 border border-primary/40"
             />
             <div className="min-w-0 flex-1 space-y-1">
@@ -399,6 +427,10 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
                     ? lang === 'fr'
                       ? 'Pièce recherchée 🔧'
                       : 'طلب قطعة غيار 🔧'
+                    : isPurchaseAlert
+                    ? lang === 'fr'
+                      ? 'Achat / Import Engin 🚢'
+                      : 'طلب شراء / استيراد 🚢'
                     : 'فرصة جديدة'}
                 </h4>
                 {activeAlert.part_reference && (
@@ -407,6 +439,11 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
                     className="inline-flex items-center px-2 py-0.5 rounded-lg bg-primary text-ink text-[10px] font-mono font-black"
                   >
                     Réf: {activeAlert.part_reference}
+                  </span>
+                )}
+                {activeAlert.import_allowed && (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-lg bg-white/15 text-primary text-[10px] font-black">
+                    {lang === 'fr' ? 'Import accepté' : 'يقبل الاستيراد'}
                   </span>
                 )}
                 {activeAlert.is_nationwide ? (
@@ -428,6 +465,8 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
               <p className="text-sm font-black text-white leading-snug break-words">
                 {isSpareAlert
                   ? `«${activeAlert.company_name}» يبحث عن «${activeAlert.machine_name}»`
+                  : isPurchaseAlert
+                  ? `«${activeAlert.company_name}» يبحث عن شراء «${activeAlert.machine_name}»`
                   : `«${activeAlert.company_name}» محتاجة «${activeAlert.machine_name}» ديالك`}
               </p>
             </div>
@@ -444,10 +483,10 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
             </div>
             {activeAlert.matched_machine_title && (
               <p className="text-[11px] text-steel-300">
-                {isSpareAlert
+                {isSpareAlert || isPurchaseAlert
                   ? lang === 'fr'
-                    ? 'Votre pièce correspondante :'
-                    : 'القطعة المطابقة في متجرك:'
+                    ? 'Votre profil/offre correspondant :'
+                    : 'العنصر المطابق في حسابك:'
                   : lang === 'fr'
                   ? 'Votre engin correspondant :'
                   : 'آليتك المطابقة للطلب:'}{' '}
@@ -471,10 +510,10 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
               leftIcon={<MessageSquare className="w-4 h-4" />}
               className="flex-1 justify-center font-black text-xs min-h-[44px]"
             >
-              {isSpareAlert
+              {isSpareAlert || isPurchaseAlert
                 ? lang === 'fr'
-                  ? 'Disponible — Discuter & Devis'
-                  : 'متوفرة عندي — محادثة وتقديم السعر'
+                  ? 'Envoyer un devis maintenant'
+                  : 'تقديم عرض سعر ومراسلة المالك'
                 : lang === 'fr'
                 ? 'Accepter & Discuter'
                 : 'أوافق على الكراء — محادثة الآن'}

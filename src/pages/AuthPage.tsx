@@ -31,6 +31,9 @@ import {
   KeyRound,
   ArrowRight,
   ArrowLeft,
+  Package,
+  Ship,
+  Globe,
 } from 'lucide-react';
 import { PublicHeader } from '../components/layout/PublicHeader';
 import { Footer } from '../components/layout/Footer';
@@ -57,7 +60,12 @@ import { Copy, Check } from 'lucide-react';
 import { MOROCCAN_CITIES } from '../data/cities';
 import { CLIENT_SEGMENTS } from '../data/clientSegments';
 import { DRIVER_EXPERIENCE_LEVELS } from '../data/driverMachines';
-import { UserRole, ClientSegment } from '../types/database';
+import {
+  SUPPLIER_TYPES,
+  IMPORT_ORIGIN_COUNTRIES,
+  IMPORT_LEAD_TIMES,
+} from '../data/supplierOptions';
+import { UserRole, ClientSegment, SupplierType } from '../types/database';
 import { platformSettingsStore } from '../lib/platformSettings';
 
 const SEGMENT_ICONS: Record<ClientSegment, React.ReactNode> = {
@@ -82,12 +90,26 @@ export const AuthPage: React.FC = () => {
     isSignupParam ? 'register' : 'login'
   );
 
+  const roleParam = searchParams.get('role');
+  const initialRole: UserRole =
+    roleParam === 'supplier' || roleParam === 'dealer'
+      ? 'supplier'
+      : roleParam === 'driver'
+      ? 'driver'
+      : roleParam === 'client' || roleParam === 'contractor'
+      ? 'client'
+      : 'owner';
+
   // Form State
-  const [role, setRole] = useState<UserRole>('owner'); // 'owner' | 'client' | 'driver'
+  const [role, setRole] = useState<UserRole>(initialRole); // 'owner' | 'client' | 'driver' | 'supplier'
   const [clientSegment, setClientSegment] = useState<ClientSegment>('company');
   const [clientActivityNote, setClientActivityNote] = useState('');
   const [driverMachines, setDriverMachines] = useState<string[]>(['tractopelle']);
   const [driverExperienceYears, setDriverExperienceYears] = useState<string>('3_5');
+  const [supplierType, setSupplierType] = useState<SupplierType>('all');
+  const [importCountries, setImportCountries] = useState<string[]>(['europe', 'china']);
+  const [importLeadTime, setImportLeadTime] = useState<string>('15_30');
+  const [deliversNationwide, setDeliversNationwide] = useState<boolean>(true);
   const [fullName, setFullName] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [cityId, setCityId] = useState('casablanca');
@@ -129,6 +151,8 @@ export const AuthPage: React.FC = () => {
     setSavedRecoveryCode('');
     if (role === 'driver') {
       navigate('/driver');
+    } else if (role === 'supplier' || role === 'dealer') {
+      navigate('/supplier');
     } else if (role === 'client') {
       setShowClientNextStepsModal(true);
     } else {
@@ -136,10 +160,23 @@ export const AuthPage: React.FC = () => {
     }
   };
 
+  const toggleImportCountry = (countryId: string) => {
+    setImportCountries((prev) =>
+      prev.includes(countryId)
+        ? prev.filter((id) => id !== countryId)
+        : [...prev, countryId]
+    );
+  };
+
   const completeRegistration = async (whatsappVerified: boolean, showFreeRecoveryCard = false) => {
     const cityName = MOROCCAN_CITIES.find((c) => c.id === cityId)?.name_ar || cityId;
+    const isSupplierRole = role === 'supplier' || role === 'dealer';
     const finalCompanyName =
-      role === 'owner' || isClientCompany ? companyName.trim() : '';
+      role === 'owner' || isSupplierRole || isClientCompany ? companyName.trim() : '';
+    const effectiveImportCountries =
+      isSupplierRole && (supplierType === 'importer' || supplierType === 'all')
+        ? importCountries
+        : [];
 
     setIsLoading(true);
     try {
@@ -155,6 +192,10 @@ export const AuthPage: React.FC = () => {
         driverMachines: role === 'driver' ? driverMachines : undefined,
         driverExperienceYears: role === 'driver' ? driverExperienceYears : undefined,
         driverAvailable: role === 'driver' ? true : undefined,
+        supplierType: isSupplierRole ? supplierType : undefined,
+        importCountries: isSupplierRole ? effectiveImportCountries : undefined,
+        importLeadTime: isSupplierRole && (supplierType === 'importer' || supplierType === 'all') ? importLeadTime : undefined,
+        deliversNationwide: isSupplierRole ? deliversNationwide : undefined,
         whatsappVerified,
       });
 
@@ -163,7 +204,14 @@ export const AuthPage: React.FC = () => {
           full_name: fullName.trim(),
           company_name: finalCompanyName,
           city: cityName,
-          role: role === 'owner' ? 'owner' : role === 'driver' ? 'driver' : 'client',
+          role:
+            role === 'owner'
+              ? 'owner'
+              : role === 'driver'
+              ? 'driver'
+              : isSupplierRole
+              ? 'supplier'
+              : 'client',
           client_segment: role === 'client' ? clientSegment : undefined,
           client_activity_note:
             role === 'client' && clientSegment === 'other'
@@ -172,6 +220,13 @@ export const AuthPage: React.FC = () => {
           driver_machines: role === 'driver' ? driverMachines : undefined,
           driver_experience_years: role === 'driver' ? driverExperienceYears : undefined,
           driver_available: role === 'driver' ? true : undefined,
+          supplier_type: isSupplierRole ? supplierType : undefined,
+          import_countries: isSupplierRole ? effectiveImportCountries : undefined,
+          import_lead_time:
+            isSupplierRole && (supplierType === 'importer' || supplierType === 'all')
+              ? importLeadTime
+              : undefined,
+          delivers_nationwide: isSupplierRole ? deliversNationwide : undefined,
         });
 
         const recRes = await generateMyRecoveryCode(phoneValidation.e164).catch(() => ({
@@ -184,6 +239,10 @@ export const AuthPage: React.FC = () => {
             ? lang === 'fr'
               ? 'Compte conducteur créé ! Bienvenue sur votre espace offres.'
               : 'تم إنشاء حساب السائق بنجاح! مرحباً بك في بوابة عروض العمل.'
+            : isSupplierRole
+            ? lang === 'fr'
+              ? 'Compte fournisseur & importateur créé ! Bienvenue sur votre portail.'
+              : 'تم إنشاء حساب المورد وشركة الاستيراد بنجاح! مرحباً بك في بوابتك.'
             : role === 'client'
             ? lang === 'fr'
               ? 'Compte créé avec succès !'
@@ -313,6 +372,10 @@ export const AuthPage: React.FC = () => {
             navigate('/driver');
             return;
           }
+          if (actualRole === 'supplier' || actualRole === 'dealer') {
+            navigate('/supplier');
+            return;
+          }
           const isClient = actualRole === 'client' || actualRole === 'contractor';
           navigate(isClient ? '/entreprise' : '/owner');
         } else {
@@ -327,14 +390,18 @@ export const AuthPage: React.FC = () => {
     }
 
     // Register Mode Validation
-    if (role === 'owner') {
+    if (role === 'owner' || role === 'supplier' || role === 'dealer') {
       if (!fullName.trim()) {
         toast.error(lang === 'fr' ? 'Veuillez saisir votre nom complet' : 'يرجى إدخال الاسم الكامل للمسؤول');
         return;
       }
       if (!companyName.trim()) {
         toast.error(
-          lang === 'fr'
+          role === 'supplier' || role === 'dealer'
+            ? lang === 'fr'
+              ? 'Veuillez saisir le nom de votre magasin ou société d\'importation'
+              : 'يرجى إدخال اسم المتجر أو شركة الاستيراد'
+            : lang === 'fr'
             ? 'Veuillez saisir le nom de votre entreprise'
             : 'يرجى إدخال اسم الشركة أو المقاولة'
         );
@@ -508,33 +575,65 @@ export const AuthPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setRole('driver')}
-                  className={`sm:col-span-2 p-3.5 rounded-2xl border text-start flex items-center justify-between gap-3 transition-all min-h-[82px] cursor-pointer ${
+                  className={`p-3.5 rounded-2xl border text-start flex flex-col justify-between transition-all min-h-[96px] cursor-pointer ${
                     role === 'driver'
                       ? 'border-primary bg-amber-50/60 ring-2 ring-primary text-ink shadow-sm'
                       : 'border-steel-200 bg-white text-steel-700 hover:bg-steel-50'
                   }`}
                 >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-9 h-9 rounded-xl bg-ink text-primary flex items-center justify-center font-black shrink-0">
+                  <div className="flex items-center justify-between w-full mb-1">
+                    <div className="w-8 h-8 rounded-xl bg-ink text-primary flex items-center justify-center font-black">
                       <HardHat className="w-4 h-4" />
                     </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-black text-ink">
-                          {t('auth.role_driver')}
-                        </span>
-                        <span className="text-[10px] font-bold text-emerald-700">
-                          {lang === 'fr' ? '100% Gratuit' : 'حساب مجاني'}
-                        </span>
-                      </div>
-                      <span className="text-[10px] text-steel-500 block mt-0.5 leading-snug">
-                        {t('auth.role_driver_desc')}
+                    {role === 'driver' && (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    )}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-xs font-black text-ink">
+                        {t('auth.role_driver')}
+                      </span>
+                      <span className="text-[10px] font-bold text-emerald-700">
+                        {lang === 'fr' ? 'Gratuit' : 'مجاني'}
                       </span>
                     </div>
+                    <span className="text-[10px] text-steel-500 line-clamp-2 mt-0.5 leading-snug">
+                      {t('auth.role_driver_desc')}
+                    </span>
                   </div>
-                  {role === 'driver' && (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  )}
+                </button>
+
+                {/* Role 4: Machinery / Spare Parts Supplier & International Importer */}
+                <button
+                  type="button"
+                  onClick={() => setRole('supplier')}
+                  className={`p-3.5 rounded-2xl border text-start flex flex-col justify-between transition-all min-h-[96px] cursor-pointer ${
+                    role === 'supplier' || role === 'dealer'
+                      ? 'border-primary bg-amber-50/60 ring-2 ring-primary text-ink shadow-sm'
+                      : 'border-steel-200 bg-white text-steel-700 hover:bg-steel-50'
+                  }`}
+                >
+                  <div className="flex items-center justify-between w-full mb-1">
+                    <div className="w-8 h-8 rounded-xl bg-amber-100 text-primary-dark flex items-center justify-center font-black">
+                      <Package className="w-4 h-4" />
+                    </div>
+                    {(role === 'supplier' || role === 'dealer') && (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    )}
+                  </div>
+                  <div>
+                    <span className="text-xs font-black block text-ink">
+                      {lang === 'fr'
+                        ? 'Fournisseur Engins, Pièces & Import'
+                        : 'مورد آليات وقطع غيار / شركة استيراد'}
+                    </span>
+                    <span className="text-[10px] text-steel-500 line-clamp-2 mt-0.5 leading-snug">
+                      {lang === 'fr'
+                        ? 'Vente pièces, engins au Maroc ou import depuis l’étranger'
+                        : 'بيع الآليات وقطع الغيار أو الاستيراد من أوروبا وآسيا للملاك'}
+                    </span>
+                  </div>
                 </button>
               </div>
             </div>
@@ -961,6 +1060,173 @@ export const AuthPage: React.FC = () => {
                         compact
                       />
                     </div>
+                  </>
+                ) : role === 'supplier' || role === 'dealer' ? (
+                  /* Machinery / Spare Parts Supplier & International Importer Registration Fields */
+                  <>
+                    <div className="p-3.5 rounded-2xl bg-steel-50/90 border border-steel-200 space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <label className="text-xs font-black text-ink flex items-center gap-1.5">
+                          <Ship className="w-4 h-4 text-primary-dark" />
+                          <span>
+                            {lang === 'fr'
+                              ? 'Type de fournisseur / activité *'
+                              : 'طبيعة نشاط المورد أو شركة الاستيراد *'}
+                          </span>
+                        </label>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {SUPPLIER_TYPES.map((st) => {
+                          const active = supplierType === st.id;
+                          return (
+                            <button
+                              key={st.id}
+                              type="button"
+                              onClick={() => setSupplierType(st.id)}
+                              className={`p-2.5 rounded-xl border text-start transition-all min-h-[54px] cursor-pointer ${
+                                active
+                                  ? 'bg-white border-primary ring-2 ring-primary/35 text-ink'
+                                  : 'bg-white/75 border-steel-200 text-steel-700 hover:bg-white'
+                              }`}
+                            >
+                              <span className="text-xs font-black block text-ink">
+                                {lang === 'fr' ? st.labelFr : st.labelAr}
+                              </span>
+                              <span className="text-[10px] text-steel-500 block mt-0.5 leading-snug">
+                                {lang === 'fr' ? st.descFr : st.descAr}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-bold text-steel-700 block mb-1.5">
+                        {lang === 'fr'
+                          ? 'Nom du magasin / société ou importateur *'
+                          : 'اسم المتجر أو شركة التوريد / الاستيراد *'}
+                      </label>
+                      <input
+                        type="text"
+                        placeholder={
+                          lang === 'fr'
+                            ? 'ex. EuroParts & Engins Import SARL'
+                            : 'مثال: شركة النخبة لقطع الغيار واستيراد الآليات'
+                        }
+                        value={companyName}
+                        onChange={(e) => setCompanyName(e.target.value)}
+                        required
+                        className="w-full px-3.5 py-3 rounded-xl border border-steel-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-white min-h-[46px]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-bold text-steel-700 block mb-1.5">
+                        {lang === 'fr' ? 'Nom complet du responsable *' : 'الاسم الكامل للمسؤول *'}
+                      </label>
+                      <input
+                        type="text"
+                        placeholder={lang === 'fr' ? 'ex. Rachid Bennani' : 'مثال: رشيد بناني'}
+                        value={fullName}
+                        onChange={(e) => setFullName(e.target.value)}
+                        required
+                        className="w-full px-3.5 py-3 rounded-xl border border-steel-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-white min-h-[46px]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-bold text-steel-700 block mb-1.5">
+                        {lang === 'fr'
+                          ? 'Ville / Siège principal au Maroc (ou Port d\'entrée)'
+                          : 'المدينة أو المقر الرئيسي في المغرب (أو ميناء التسليم)'}
+                      </label>
+                      <select
+                        value={cityId}
+                        onChange={(e) => setCityId(e.target.value)}
+                        className="w-full px-3.5 py-3 rounded-xl border border-steel-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-white min-h-[46px]"
+                      >
+                        {MOROCCAN_CITIES.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {lang === 'fr' ? c.name_fr : c.name_ar}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {(supplierType === 'importer' || supplierType === 'all') && (
+                      <div className="p-3.5 rounded-2xl bg-amber-50/50 border border-amber-200 space-y-3">
+                        <div>
+                          <label className="text-xs font-black text-ink flex items-center gap-1.5 mb-1">
+                            <Globe className="w-3.5 h-3.5 text-primary-dark" />
+                            <span>
+                              {lang === 'fr'
+                                ? 'Pays / Régions d\'importation habituels'
+                                : 'بلدان الاستيراد المتاحة (أوروبا، الصين، تركيا...)'}
+                            </span>
+                          </label>
+                          <div className="flex flex-wrap gap-1.5">
+                            {IMPORT_ORIGIN_COUNTRIES.map((country) => {
+                              const selected = importCountries.includes(country.id);
+                              return (
+                                <button
+                                  key={country.id}
+                                  type="button"
+                                  onClick={() => toggleImportCountry(country.id)}
+                                  className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-bold transition-colors cursor-pointer min-h-[36px] ${
+                                    selected
+                                      ? 'bg-ink text-primary border-ink'
+                                      : 'bg-white text-steel-700 border-steel-200 hover:bg-steel-50'
+                                  }`}
+                                >
+                                  {country.flag} {lang === 'fr' ? country.nameFr : country.nameAr}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-xs font-bold text-steel-700 block mb-1">
+                            {lang === 'fr'
+                              ? 'Délai moyen d\'importation jusqu\'au Maroc'
+                              : 'المدة المعتادة لوصول الاستيراد والديوانة'}
+                          </label>
+                          <select
+                            value={importLeadTime}
+                            onChange={(e) => setImportLeadTime(e.target.value)}
+                            className="w-full px-3.5 py-2.5 rounded-xl border border-steel-300 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-primary bg-white min-h-[44px]"
+                          >
+                            {IMPORT_LEAD_TIMES.map((lt) => (
+                              <option key={lt.id} value={lt.id}>
+                                {lang === 'fr' ? lt.labelFr : lt.labelAr}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      role="checkbox"
+                      aria-checked={deliversNationwide}
+                      onClick={() => setDeliversNationwide((prev) => !prev)}
+                      className={`w-full p-3 rounded-xl border text-start flex items-center gap-2.5 transition-colors cursor-pointer min-h-[46px] ${
+                        deliversNationwide
+                          ? 'bg-emerald-50/70 border-emerald-300 text-ink'
+                          : 'bg-steel-50 border-steel-200 text-steel-700'
+                      }`}
+                    >
+                      <span className={deliversNationwide ? 'text-emerald-600' : 'text-steel-400'}>
+                        {deliversNationwide ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
+                      </span>
+                      <span className="text-xs font-bold">
+                        {lang === 'fr'
+                          ? 'Livraison et expédition vers toutes les villes du Maroc'
+                          : 'نوفر التوصيل والشحن لجميع مدن وموانئ المغرب'}
+                      </span>
+                    </button>
                   </>
                 ) : (
                   /* Equipment Owner Registration Fields */

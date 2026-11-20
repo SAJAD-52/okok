@@ -7,7 +7,7 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { normalizeMoroccanPhone, phoneToSyntheticEmail } from '../lib/authHelpers';
 import { isLifetimeFreePhone } from '../lib/constants';
 import { mapDatabaseError } from '../lib/errorHelpers';
-import { UserProfile, UserRole, ClientSegment, SupplierType } from '../types/database';
+import { UserProfile, UserRole, ClientSegment, SupplierScope, SupplierType } from '../types/database';
 import { generateUniqueStorefrontSlug } from '../lib/storefrontSlug';
 import { saveStorefrontData } from '../lib/storefrontService';
 import { markUserWhatsAppVerified } from '../lib/whatsappOtpService';
@@ -39,6 +39,7 @@ interface AuthContextType {
       driverExperienceYears?: string;
       driverAvailable?: boolean;
       supplierType?: SupplierType;
+      supplierScope?: SupplierScope;
       importCountries?: string[];
       importLeadTime?: string;
       supplierSpecialties?: string[];
@@ -297,6 +298,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           meta.supplier_type ||
           meta.supplierType ||
           localCached.supplier_type ||
+          undefined,
+        supplier_scope:
+          (data as any)?.supplier_scope ||
+          meta.supplier_scope ||
+          meta.supplierScope ||
+          localCached.supplier_scope ||
           undefined,
         import_countries:
           Array.isArray((data as any)?.import_countries) && (data as any).import_countries.length > 0
@@ -683,6 +690,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       driverExperienceYears?: string;
       driverAvailable?: boolean;
       supplierType?: SupplierType;
+      supplierScope?: SupplierScope;
       importCountries?: string[];
       importLeadTime?: string;
       supplierSpecialties?: string[];
@@ -732,6 +740,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             driver_available:
               resolvedRole === 'driver' ? meta?.driverAvailable ?? true : undefined,
             supplier_type: resolvedRole === 'supplier' ? meta?.supplierType || 'all' : undefined,
+            supplier_scope: resolvedRole === 'supplier' ? meta?.supplierScope || 'local' : undefined,
             import_countries: resolvedRole === 'supplier' ? meta?.importCountries || [] : undefined,
             import_lead_time: resolvedRole === 'supplier' ? meta?.importLeadTime || undefined : undefined,
             supplier_specialties:
@@ -820,6 +829,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           ...(resolvedRole === 'supplier'
             ? {
                 supplier_type: meta?.supplierType || 'all',
+                supplier_scope: meta?.supplierScope || 'local',
                 import_countries: meta?.importCountries || [],
                 import_lead_time: meta?.importLeadTime || null,
                 supplier_specialties: meta?.supplierSpecialties || [],
@@ -892,6 +902,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             resolvedRole === 'driver' ? meta?.driverExperienceYears || '3_5' : undefined,
           driver_available: resolvedRole === 'driver' ? meta?.driverAvailable ?? true : undefined,
           supplier_type: resolvedRole === 'supplier' ? meta?.supplierType || 'all' : undefined,
+          supplier_scope: resolvedRole === 'supplier' ? meta?.supplierScope || 'local' : undefined,
           import_countries: resolvedRole === 'supplier' ? meta?.importCountries || [] : undefined,
           import_lead_time: resolvedRole === 'supplier' ? meta?.importLeadTime : undefined,
           supplier_specialties: resolvedRole === 'supplier' ? meta?.supplierSpecialties || [] : undefined,
@@ -934,6 +945,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             resolvedRole === 'supplier'
               ? loadedProfile.supplier_type || meta?.supplierType || 'all'
               : loadedProfile.supplier_type,
+          supplier_scope:
+            resolvedRole === 'supplier'
+              ? loadedProfile.supplier_scope || meta?.supplierScope || 'local'
+              : loadedProfile.supplier_scope,
           import_countries:
             resolvedRole === 'supplier'
               ? loadedProfile.import_countries?.length
@@ -1163,6 +1178,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         driver_bio: updates.driver_bio !== undefined ? updates.driver_bio : profile?.driver_bio || '',
         supplier_type:
           updates.supplier_type !== undefined ? updates.supplier_type : profile?.supplier_type,
+        supplier_scope:
+          updates.supplier_scope !== undefined ? updates.supplier_scope : profile?.supplier_scope,
         import_countries:
           updates.import_countries !== undefined
             ? updates.import_countries

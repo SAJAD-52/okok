@@ -330,12 +330,18 @@ export async function findMatchingSparePartSuppliersForCampaign(params: {
         const sType = String(sp.supplier_type || 'all') as SupplierType;
         if (sType === 'machinery_dealer') continue; // pure machinery dealers only match machine_purchase
 
+        const canImport =
+          sp.supplier_scope === 'local_and_import' ||
+          sType === 'importer' ||
+          (Array.isArray(sp.import_countries) && sp.import_countries.length > 0) ||
+          Boolean(sp.import_lead_time);
+
         const coords = resolveMachineCoordinates({ city: sp.city });
         const distKm = coords
           ? calculateDistanceKm(params.originLat, params.originLng, coords.lat, coords.lng)
           : 0;
 
-        const isNationwideSupplier = Boolean(sp.delivers_nationwide ?? true) || sType === 'importer';
+        const isNationwideSupplier = Boolean(sp.delivers_nationwide ?? true) || canImport;
         if (!params.isNationwide && !isNationwideSupplier && params.radiusKm !== null && distKm > params.radiusKm) {
           continue;
         }
@@ -345,7 +351,7 @@ export async function findMatchingSparePartSuppliersForCampaign(params: {
         const brandMatch =
           (queryBrand.length >= 2 && specsList.includes(queryBrand)) ||
           (queryModel.length >= 2 && specsList.includes(queryModel));
-        const profileScore = 15 + (brandMatch ? 15 : 0) + (sType === 'importer' ? 5 : 0);
+        const profileScore = 15 + (brandMatch ? 15 : 0) + (canImport ? 5 : 0);
 
         if (!existing || profileScore > existing.priorityScore) {
           bestBySupplier.set(sp.id, {
@@ -359,7 +365,7 @@ export async function findMatchingSparePartSuppliersForCampaign(params: {
             machine_city: existing?.machine_city || sp.city || '',
             distance_km: existing?.distance_km ?? distKm,
             exact_reference_match: existing?.exact_reference_match || false,
-            is_importer: sType === 'importer' || sType === 'all',
+            is_importer: canImport,
             supplier_type: sType,
             import_countries: Array.isArray(sp.import_countries) ? sp.import_countries : [],
             priorityScore: Math.max(existing?.priorityScore || 0, profileScore),
@@ -425,7 +431,7 @@ export async function findMatchingMachinerySuppliersForCampaign(params: {
     if (!matchesRequestedMachine(m, params.machineCategory, params.machineName)) continue;
 
     const specs = (m.specs || {}) as Record<string, any>;
-    const isImportListing = Boolean(specs.is_import_order);
+    const isImportListing = Boolean(specs.is_imported || specs.is_import_order);
     if (!allowImporters && isImportListing) continue;
     if (params.desiredCondition === 'import' && !isImportListing) continue;
     if (params.desiredCondition === 'new' && m.condition !== 'new') continue;
@@ -473,10 +479,17 @@ export async function findMatchingMachinerySuppliersForCampaign(params: {
     if (!sp?.id || sp.id === params.excludeOwnerId) continue;
     const sType = String(sp.supplier_type || 'all') as SupplierType;
     if (sType === 'spare_parts') continue;
-    if (!allowImporters && sType === 'importer') continue;
-    if (params.desiredCondition === 'import' && sType === 'machinery_dealer') continue;
 
     const importCountries: string[] = Array.isArray(sp.import_countries) ? sp.import_countries : [];
+    const canImport =
+      sp.supplier_scope === 'local_and_import' ||
+      sType === 'importer' ||
+      importCountries.length > 0 ||
+      Boolean(sp.import_lead_time);
+
+    if (!allowImporters && sType === 'importer') continue;
+    if (params.desiredCondition === 'import' && !canImport) continue;
+
     const originMatch =
       preferredOriginLower &&
       importCountries.some((c) => String(c).toLowerCase() === preferredOriginLower);
@@ -487,7 +500,7 @@ export async function findMatchingMachinerySuppliersForCampaign(params: {
       : 0;
 
     const isNationwideSupplier =
-      sType === 'importer' || sType === 'all' || Boolean(sp.delivers_nationwide ?? true);
+      canImport || sType === 'all' || Boolean(sp.delivers_nationwide ?? true);
 
     if (!params.isNationwide && !isNationwideSupplier && params.radiusKm !== null && distKm > params.radiusKm) {
       continue;
@@ -500,7 +513,7 @@ export async function findMatchingMachinerySuppliersForCampaign(params: {
 
     const priorityScore =
       20 +
-      (sType === 'importer' || sType === 'all' ? 10 : 5) +
+      (canImport ? 10 : 5) +
       (originMatch ? 25 : 0) +
       (specMatch ? 15 : 0);
 
@@ -513,11 +526,11 @@ export async function findMatchingMachinerySuppliersForCampaign(params: {
           existing?.matched_machine_title ||
           sp.company_name ||
           sp.full_name ||
-          (sType === 'importer' ? 'شركة استيراد آليات' : 'تاجر ومورد آليات'),
+          (canImport ? 'مورد ومستورد آليات' : 'مورد آليات'),
         machine_city: existing?.machine_city || sp.city || '',
         distance_km: existing?.distance_km ?? distKm,
         exact_reference_match: Boolean(existing?.exact_reference_match || originMatch),
-        is_importer: sType === 'importer' || sType === 'all' || existing?.is_importer,
+        is_importer: canImport || existing?.is_importer,
         supplier_type: sType,
         import_countries: importCountries.length > 0 ? importCountries : existing?.import_countries || [],
         priorityScore: Math.max(existing?.priorityScore || 0, priorityScore),

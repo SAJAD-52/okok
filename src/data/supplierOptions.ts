@@ -1,4 +1,4 @@
-import { SupplierType } from '../types/database';
+import { SupplierScope, SupplierType } from '../types/database';
 
 export interface SupplierTypeOption {
   id: SupplierType;
@@ -12,40 +12,56 @@ export interface SupplierTypeOption {
 
 export const SUPPLIER_TYPES: SupplierTypeOption[] = [
   {
-    id: 'all',
-    labelAr: 'شامل: آليات + قطع غيار + استيراد',
-    labelFr: 'Complet : Engins + Pièces + Import',
-    shortAr: 'مورد ومستورد شامل',
-    shortFr: 'Fournisseur & Importateur complet',
-    descAr: 'بيع الآليات الثقيلة، قطع الغيار، وخدمات الاستيراد حسب الطلب',
-    descFr: 'Vente d’engins, pièces de rechange et importation sur commande',
-  },
-  {
     id: 'spare_parts',
-    labelAr: 'مورد ومحل قطع الغيار',
-    labelFr: 'Fournisseur de Pièces de Rechange',
+    labelAr: 'مورد قطع غيار',
+    labelFr: 'Fournisseur de pièces de rechange',
     shortAr: 'مورد قطع غيار',
     shortFr: 'Pièces de rechange',
     descAr: 'فلاتر، هيدروليك، محركات، جنازير، أسنان وزيوت للآليات',
-    descFr: 'Filtres, hydraulique, moteurs, chenilles, dents et lubrifiants',
+    descFr: 'Filtres, hydraulique, moteurs, chenilles et pièces détachées',
   },
   {
     id: 'machinery_dealer',
-    labelAr: 'مورد وبائع الآليات الثقيلة (المغرب)',
-    labelFr: 'Vendeur / Concessionnaire d’Engins (Maroc)',
-    shortAr: 'بائع آليات بالمغرب',
-    shortFr: 'Vendeur d’engins (Maroc)',
-    descAr: 'بيع آليات جديدة ومستعملة متوفرة في المعرض أو الحظيرة بالمغرب',
-    descFr: 'Vente d’engins neufs et d’occasion disponibles en stock au Maroc',
+    labelAr: 'مورد آليات',
+    labelFr: 'Fournisseur d’engins',
+    shortAr: 'مورد آليات',
+    shortFr: 'Fournisseur d’engins',
+    descAr: 'بيع الآليات الثقيلة ومعدات البناء والأشغال العمومية',
+    descFr: 'Vente d’engins lourds et matériels BTP / agricoles',
   },
   {
-    id: 'importer',
-    labelAr: 'شركة استيراد من الخارج (آليات وقطع غيار)',
-    labelFr: 'Société d’Importation Internationale (Engins & Pièces)',
-    shortAr: 'شركة استيراد من الخارج',
-    shortFr: 'Importateur international',
-    descAr: 'استيراد الآليات الثقيلة وقطع الغيار من أوروبا، الصين، تركيا والخليج مع الشحن والتخليص الجمركي',
-    descFr: 'Importation d’engins et pièces depuis l’Europe, la Chine, la Turquie ou le Golfe avec fret & dédouanement',
+    id: 'all',
+    labelAr: 'مورد قطع غيار وآليات',
+    labelFr: 'Fournisseur d’engins et pièces',
+    shortAr: 'مورد قطع غيار وآليات',
+    shortFr: 'Engins & pièces de rechange',
+    descAr: 'توفير الآليات الثقيلة وقطع الغيار معاً لأساطيل الملاك',
+    descFr: 'Vente d’engins lourds et pièces de rechange',
+  },
+];
+
+export interface SupplierScopeOption {
+  id: SupplierScope;
+  labelAr: string;
+  labelFr: string;
+  descAr: string;
+  descFr: string;
+}
+
+export const SUPPLIER_SUPPLY_SCOPES: SupplierScopeOption[] = [
+  {
+    id: 'local',
+    labelAr: 'مورد محلي',
+    labelFr: 'Fournisseur local (Maroc)',
+    descAr: 'توفير الآليات أو قطع الغيار المتوفرة داخل المغرب',
+    descFr: 'Stock et disponibilité au Maroc',
+  },
+  {
+    id: 'local_and_import',
+    labelAr: 'محلي مع إمكانية الاستيراد والتخليص الجمركي',
+    labelFr: 'Local avec importation & dédouanement',
+    descAr: 'توريد محلي بالإضافة إلى الاستيراد من الخارج والتعشير الجمركي',
+    descFr: 'Stock local + importation internationale et dédouanement',
   },
 ];
 
@@ -67,10 +83,17 @@ export const IMPORT_ORIGIN_COUNTRIES: ImportCountryOption[] = [
 ];
 
 export const IMPORT_LEAD_TIMES = [
-  { id: '7_15', labelAr: '7 إلى 15 يوما (جوي / سريع)', labelFr: '7 à 15 jours (Express / Aérien)' },
-  { id: '15_30', labelAr: '15 إلى 30 يوما (شحن بحري)', labelFr: '15 à 30 jours (Maritime)' },
-  { id: '30_45', labelAr: '30 إلى 45 يوما (استيراد وتعشير)', labelFr: '30 à 45 jours (Import & Dédouanement)' },
-  { id: '45_60', labelAr: '45 إلى 60 يوما (تصنيع / طلب خاص)', labelFr: '45 à 60 jours (Commande spéciale)' },
+  { id: '7_15', labelAr: '7 إلى 15 يوماً (جوي / سريع)', labelFr: '7 à 15 jours (Express / Aérien)' },
+  { id: '15_30', labelAr: '15 إلى 30 يوماً (شحن بحري)', labelFr: '15 à 30 jours (Maritime)' },
+  { id: '30_45', labelAr: '30 إلى 45 يوماً (استيراد وتخليص جمركي)', labelFr: '30 à 45 jours (Import & Dédouanement)' },
+  { id: '45_60', labelAr: '45 إلى 60 يوماً (تصنيع / طلب خاص)', labelFr: '45 à 60 jours (Commande spéciale)' },
+];
+
+export const IMPORT_SHIPPING_METHODS = [
+  { id: 'sea_container', labelAr: 'شحن بحري (حاوية / سفينة Ro-Ro)', labelFr: 'Fret maritime (Conteneur / Ro-Ro)' },
+  { id: 'air_express', labelAr: 'شحن جوي سريع (لقطع الغيار المستعجلة)', labelFr: 'Fret aérien express' },
+  { id: 'land_intl', labelAr: 'نقل بري دولي (شاحنات من أوروبا)', labelFr: 'Transport routier international' },
+  { id: 'ddp_customs', labelAr: 'شحن واستيراد شامل مع التخليص الجمركي', labelFr: 'Importation clé en main + dédouanement' },
 ];
 
 export const IMPORT_DELIVERY_PORTS = [
@@ -78,7 +101,8 @@ export const IMPORT_DELIVERY_PORTS = [
   { id: 'casablanca', labelAr: 'ميناء الدار البيضاء', labelFr: 'Port de Casablanca' },
   { id: 'agadir', labelAr: 'ميناء أكادير', labelFr: 'Port d’Agadir' },
   { id: 'nador', labelAr: 'ميناء الناظور', labelFr: 'Port de Nador' },
-  { id: 'door_morocco', labelAr: 'تسليم مباشر لورش المالك بالمغرب (DDP)', labelFr: 'Livraison directe Maroc (DDP)' },
+  { id: 'airport_cmn', labelAr: 'مطار محمد الخامس للشحن الجوي', labelFr: 'Aéroport Mohammed V (Fret aérien)' },
+  { id: 'door_morocco', labelAr: 'تسليم بعد التعشير (يتم الاتفاق بالمحادثة)', labelFr: 'Remise après dédouanement (à convenir)' },
 ];
 
 export const SUPPLIER_PART_CATEGORIES = [
@@ -94,7 +118,32 @@ export const SUPPLIER_PART_CATEGORIES = [
 ];
 
 export function getSupplierTypeOption(id?: string): SupplierTypeOption {
-  return SUPPLIER_TYPES.find((s) => s.id === id) || SUPPLIER_TYPES[0];
+  if (id === 'importer') return SUPPLIER_TYPES[2]; // backwards compatibility -> مورد قطع غيار وآليات
+  return SUPPLIER_TYPES.find((s) => s.id === id) || SUPPLIER_TYPES[2];
+}
+
+export function getSupplierScopeOption(id?: string): SupplierScopeOption {
+  return SUPPLIER_SUPPLY_SCOPES.find((s) => s.id === id) || SUPPLIER_SUPPLY_SCOPES[0];
+}
+
+export function resolveSupplierScopeFromProfile(profile?: {
+  supplier_scope?: SupplierScope;
+  supplier_type?: SupplierType | string;
+  import_countries?: string[];
+  import_lead_time?: string;
+} | null): SupplierScope {
+  if (!profile) return 'local';
+  if (profile.supplier_scope === 'local' || profile.supplier_scope === 'local_and_import') {
+    return profile.supplier_scope;
+  }
+  if (
+    profile.supplier_type === 'importer' ||
+    (Array.isArray(profile.import_countries) && profile.import_countries.length > 0) ||
+    Boolean(profile.import_lead_time)
+  ) {
+    return 'local_and_import';
+  }
+  return 'local';
 }
 
 export function getImportCountryLabel(id: string, lang: 'ar' | 'fr' = 'ar'): string {
@@ -102,3 +151,22 @@ export function getImportCountryLabel(id: string, lang: 'ar' | 'fr' = 'ar'): str
   if (!found) return id;
   return `${found.flag} ${lang === 'fr' ? found.nameFr : found.nameAr}`;
 }
+
+export function getImportLeadTimeLabel(id: string, lang: 'ar' | 'fr' = 'ar'): string {
+  const found = IMPORT_LEAD_TIMES.find((l) => l.id === id);
+  if (!found) return id;
+  return lang === 'fr' ? found.labelFr : found.labelAr;
+}
+
+export function getImportShippingMethodLabel(id: string, lang: 'ar' | 'fr' = 'ar'): string {
+  const found = IMPORT_SHIPPING_METHODS.find((m) => m.id === id);
+  if (!found) return id;
+  return lang === 'fr' ? found.labelFr : found.labelAr;
+}
+
+export function getImportPortLabel(id: string, lang: 'ar' | 'fr' = 'ar'): string {
+  const found = IMPORT_DELIVERY_PORTS.find((p) => p.id === id);
+  if (!found) return id;
+  return lang === 'fr' ? found.labelFr : found.labelAr;
+}
+

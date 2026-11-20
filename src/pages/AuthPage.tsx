@@ -33,7 +33,6 @@ import {
   ArrowLeft,
   Package,
   Ship,
-  Globe,
 } from 'lucide-react';
 import { PublicHeader } from '../components/layout/PublicHeader';
 import { Footer } from '../components/layout/Footer';
@@ -62,10 +61,9 @@ import { CLIENT_SEGMENTS } from '../data/clientSegments';
 import { DRIVER_EXPERIENCE_LEVELS } from '../data/driverMachines';
 import {
   SUPPLIER_TYPES,
-  IMPORT_ORIGIN_COUNTRIES,
-  IMPORT_LEAD_TIMES,
+  SUPPLIER_SUPPLY_SCOPES,
 } from '../data/supplierOptions';
-import { UserRole, ClientSegment, SupplierType } from '../types/database';
+import { UserRole, ClientSegment, SupplierScope, SupplierType } from '../types/database';
 import { platformSettingsStore } from '../lib/platformSettings';
 
 const SEGMENT_ICONS: Record<ClientSegment, React.ReactNode> = {
@@ -107,9 +105,7 @@ export const AuthPage: React.FC = () => {
   const [driverMachines, setDriverMachines] = useState<string[]>(['tractopelle']);
   const [driverExperienceYears, setDriverExperienceYears] = useState<string>('3_5');
   const [supplierType, setSupplierType] = useState<SupplierType>('all');
-  const [importCountries, setImportCountries] = useState<string[]>(['europe', 'china']);
-  const [importLeadTime, setImportLeadTime] = useState<string>('15_30');
-  const [deliversNationwide, setDeliversNationwide] = useState<boolean>(true);
+  const [supplierScope, setSupplierScope] = useState<SupplierScope>('local');
   const [fullName, setFullName] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [cityId, setCityId] = useState('casablanca');
@@ -160,23 +156,14 @@ export const AuthPage: React.FC = () => {
     }
   };
 
-  const toggleImportCountry = (countryId: string) => {
-    setImportCountries((prev) =>
-      prev.includes(countryId)
-        ? prev.filter((id) => id !== countryId)
-        : [...prev, countryId]
-    );
-  };
-
   const completeRegistration = async (whatsappVerified: boolean, showFreeRecoveryCard = false) => {
     const cityName = MOROCCAN_CITIES.find((c) => c.id === cityId)?.name_ar || cityId;
     const isSupplierRole = role === 'supplier' || role === 'dealer';
     const finalCompanyName =
       role === 'owner' || isSupplierRole || isClientCompany ? companyName.trim() : '';
-    const effectiveImportCountries =
-      isSupplierRole && (supplierType === 'importer' || supplierType === 'all')
-        ? importCountries
-        : [];
+    const isImportCapable = isSupplierRole && supplierScope === 'local_and_import';
+    const effectiveImportCountries = isImportCapable ? ['europe', 'china'] : [];
+    const effectiveImportLeadTime = isImportCapable ? '15_30' : '';
 
     setIsLoading(true);
     try {
@@ -193,9 +180,10 @@ export const AuthPage: React.FC = () => {
         driverExperienceYears: role === 'driver' ? driverExperienceYears : undefined,
         driverAvailable: role === 'driver' ? true : undefined,
         supplierType: isSupplierRole ? supplierType : undefined,
+        supplierScope: isSupplierRole ? supplierScope : undefined,
         importCountries: isSupplierRole ? effectiveImportCountries : undefined,
-        importLeadTime: isSupplierRole && (supplierType === 'importer' || supplierType === 'all') ? importLeadTime : undefined,
-        deliversNationwide: isSupplierRole ? deliversNationwide : undefined,
+        importLeadTime: isSupplierRole ? effectiveImportLeadTime : undefined,
+        deliversNationwide: isSupplierRole ? true : undefined,
         whatsappVerified,
       });
 
@@ -221,12 +209,10 @@ export const AuthPage: React.FC = () => {
           driver_experience_years: role === 'driver' ? driverExperienceYears : undefined,
           driver_available: role === 'driver' ? true : undefined,
           supplier_type: isSupplierRole ? supplierType : undefined,
+          supplier_scope: isSupplierRole ? supplierScope : undefined,
           import_countries: isSupplierRole ? effectiveImportCountries : undefined,
-          import_lead_time:
-            isSupplierRole && (supplierType === 'importer' || supplierType === 'all')
-              ? importLeadTime
-              : undefined,
-          delivers_nationwide: isSupplierRole ? deliversNationwide : undefined,
+          import_lead_time: isSupplierRole ? effectiveImportLeadTime : undefined,
+          delivers_nationwide: isSupplierRole ? true : undefined,
         });
 
         const recRes = await generateMyRecoveryCode(phoneValidation.e164).catch(() => ({
@@ -1064,18 +1050,17 @@ export const AuthPage: React.FC = () => {
                 ) : role === 'supplier' || role === 'dealer' ? (
                   /* Machinery / Spare Parts Supplier & International Importer Registration Fields */
                   <>
-                    <div className="p-3.5 rounded-2xl bg-steel-50/90 border border-steel-200 space-y-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <label className="text-xs font-black text-ink flex items-center gap-1.5">
-                          <Ship className="w-4 h-4 text-primary-dark" />
-                          <span>
-                            {lang === 'fr'
-                              ? 'Type de fournisseur / activité *'
-                              : 'طبيعة نشاط المورد أو شركة الاستيراد *'}
-                          </span>
-                        </label>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {/* 1. Exactly 3 Activity Choices */}
+                    <div className="p-3.5 rounded-2xl bg-steel-50/90 border border-steel-200 space-y-2.5">
+                      <label className="text-xs font-black text-ink flex items-center gap-1.5">
+                        <Package className="w-4 h-4 text-primary-dark" />
+                        <span>
+                          {lang === 'fr'
+                            ? 'Spécialité du fournisseur *'
+                            : 'تخصص المورد *'}
+                        </span>
+                      </label>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                         {SUPPLIER_TYPES.map((st) => {
                           const active = supplierType === st.id;
                           return (
@@ -1083,22 +1068,60 @@ export const AuthPage: React.FC = () => {
                               key={st.id}
                               type="button"
                               onClick={() => setSupplierType(st.id)}
-                              className={`p-2.5 rounded-xl border text-start transition-all min-h-[54px] cursor-pointer ${
+                              className={`p-2.5 rounded-xl border text-start transition-all min-h-[52px] cursor-pointer ${
                                 active
                                   ? 'bg-white border-primary ring-2 ring-primary/35 text-ink'
-                                  : 'bg-white/75 border-steel-200 text-steel-700 hover:bg-white'
+                                  : 'bg-white/80 border-steel-200 text-steel-700 hover:bg-white'
                               }`}
                             >
                               <span className="text-xs font-black block text-ink">
                                 {lang === 'fr' ? st.labelFr : st.labelAr}
                               </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* 2. Exactly 2 Supply Scope Choices */}
+                    <div className="p-3.5 rounded-2xl bg-steel-50/90 border border-steel-200 space-y-2.5">
+                      <label className="text-xs font-black text-ink flex items-center gap-1.5">
+                        <Ship className="w-4 h-4 text-primary-dark" />
+                        <span>
+                          {lang === 'fr'
+                            ? 'Mode d’approvisionnement & importation *'
+                            : 'نظام التوريد والاستيراد *'}
+                        </span>
+                      </label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {SUPPLIER_SUPPLY_SCOPES.map((sc, idx) => {
+                          const active = supplierScope === sc.id;
+                          return (
+                            <button
+                              key={sc.id}
+                              type="button"
+                              onClick={() => setSupplierScope(sc.id)}
+                              className={`p-3 rounded-xl border text-start transition-all min-h-[60px] cursor-pointer ${
+                                active
+                                  ? 'bg-white border-primary ring-2 ring-primary/35 text-ink'
+                                  : 'bg-white/80 border-steel-200 text-steel-700 hover:bg-white'
+                              }`}
+                            >
+                              <span className="text-xs font-black block text-ink">
+                                {idx + 1}. {lang === 'fr' ? sc.labelFr : sc.labelAr}
+                              </span>
                               <span className="text-[10px] text-steel-500 block mt-0.5 leading-snug">
-                                {lang === 'fr' ? st.descFr : st.descAr}
+                                {lang === 'fr' ? sc.descFr : sc.descAr}
                               </span>
                             </button>
                           );
                         })}
                       </div>
+                      <p className="text-[11px] text-steel-500 font-medium leading-relaxed">
+                        {lang === 'fr'
+                          ? 'Les modalités de livraison et d’expédition sont convenues directement dans la discussion avec le propriétaire.'
+                          : 'يتم الاتفاق على طرق التوصيل والشحن مباشرة داخل المحادثة مع مالك الآلية.'}
+                      </p>
                     </div>
 
                     <div>
@@ -1153,80 +1176,6 @@ export const AuthPage: React.FC = () => {
                         ))}
                       </select>
                     </div>
-
-                    {(supplierType === 'importer' || supplierType === 'all') && (
-                      <div className="p-3.5 rounded-2xl bg-amber-50/50 border border-amber-200 space-y-3">
-                        <div>
-                          <label className="text-xs font-black text-ink flex items-center gap-1.5 mb-1">
-                            <Globe className="w-3.5 h-3.5 text-primary-dark" />
-                            <span>
-                              {lang === 'fr'
-                                ? 'Pays / Régions d\'importation habituels'
-                                : 'بلدان الاستيراد المتاحة (أوروبا، الصين، تركيا...)'}
-                            </span>
-                          </label>
-                          <div className="flex flex-wrap gap-1.5">
-                            {IMPORT_ORIGIN_COUNTRIES.map((country) => {
-                              const selected = importCountries.includes(country.id);
-                              return (
-                                <button
-                                  key={country.id}
-                                  type="button"
-                                  onClick={() => toggleImportCountry(country.id)}
-                                  className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-bold transition-colors cursor-pointer min-h-[36px] ${
-                                    selected
-                                      ? 'bg-ink text-primary border-ink'
-                                      : 'bg-white text-steel-700 border-steel-200 hover:bg-steel-50'
-                                  }`}
-                                >
-                                  {country.flag} {lang === 'fr' ? country.nameFr : country.nameAr}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className="text-xs font-bold text-steel-700 block mb-1">
-                            {lang === 'fr'
-                              ? 'Délai moyen d\'importation jusqu\'au Maroc'
-                              : 'المدة المعتادة لوصول الاستيراد والديوانة'}
-                          </label>
-                          <select
-                            value={importLeadTime}
-                            onChange={(e) => setImportLeadTime(e.target.value)}
-                            className="w-full px-3.5 py-2.5 rounded-xl border border-steel-300 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-primary bg-white min-h-[44px]"
-                          >
-                            {IMPORT_LEAD_TIMES.map((lt) => (
-                              <option key={lt.id} value={lt.id}>
-                                {lang === 'fr' ? lt.labelFr : lt.labelAr}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-                    )}
-
-                    <button
-                      type="button"
-                      role="checkbox"
-                      aria-checked={deliversNationwide}
-                      onClick={() => setDeliversNationwide((prev) => !prev)}
-                      className={`w-full p-3 rounded-xl border text-start flex items-center gap-2.5 transition-colors cursor-pointer min-h-[46px] ${
-                        deliversNationwide
-                          ? 'bg-emerald-50/70 border-emerald-300 text-ink'
-                          : 'bg-steel-50 border-steel-200 text-steel-700'
-                      }`}
-                    >
-                      <span className={deliversNationwide ? 'text-emerald-600' : 'text-steel-400'}>
-                        {deliversNationwide ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
-                      </span>
-                      <span className="text-xs font-bold">
-                        {lang === 'fr'
-                          ? 'Livraison et expédition vers toutes les villes du Maroc'
-                          : 'نوفر التوصيل والشحن لجميع مدن وموانئ المغرب'}
-                      </span>
-                    </button>
                   </>
                 ) : (
                   /* Equipment Owner Registration Fields */

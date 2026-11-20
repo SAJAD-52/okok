@@ -1,7 +1,8 @@
 // ============================================================================
 // JADIJCB: Supplier & Importer Catalog Page (/supplier/catalog)
-// Lets suppliers manage: 1) Spare parts, 2) Machinery for sale in Morocco,
-// and 3) International import-on-order listings.
+// Lets suppliers manage Spare Parts & Machinery for sale (local or imported),
+// with full international import fields (Country, Arrival Time, Shipping Method, Port)
+// available for BOTH spare parts and machinery.
 // ============================================================================
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
@@ -29,15 +30,20 @@ import {
   IMPORT_DELIVERY_PORTS,
   IMPORT_LEAD_TIMES,
   IMPORT_ORIGIN_COUNTRIES,
+  IMPORT_SHIPPING_METHODS,
   SUPPLIER_PART_CATEGORIES,
   getImportCountryLabel,
+  getImportLeadTimeLabel,
+  getImportPortLabel,
+  getImportShippingMethodLabel,
+  resolveSupplierScopeFromProfile,
 } from '../data/supplierOptions';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { machineStore } from '../lib/machineStore';
 import { formatPriceMAD } from '../data/rentalTerms';
 
-type CatalogItemType = 'spare_part' | 'machine_sale' | 'import_order';
-type CatalogFilter = 'all' | CatalogItemType;
+type ProductKind = 'spare_part' | 'machine';
+type CatalogFilter = 'all' | 'spare_part' | 'machine' | 'imported';
 
 const MACHINERY_CATS = EQUIPMENT_CATEGORIES.filter((c) => c.id !== 'spare-parts');
 
@@ -53,7 +59,8 @@ export const SupplierCatalogPage: React.FC = () => {
 
   // Create Modal state
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
-  const [itemType, setItemType] = useState<CatalogItemType>('spare_part');
+  const [productKind, setProductKind] = useState<ProductKind>('spare_part');
+  const [isImported, setIsImported] = useState<boolean>(false);
   const [titleAr, setTitleAr] = useState('');
   const [brand, setBrand] = useState('');
   const [model, setModel] = useState('');
@@ -66,6 +73,7 @@ export const SupplierCatalogPage: React.FC = () => {
   const [cityId, setCityId] = useState<string>('casablanca');
   const [importCountry, setImportCountry] = useState<string>('europe');
   const [importLeadTime, setImportLeadTime] = useState<string>(IMPORT_LEAD_TIMES[1].id);
+  const [shippingMethod, setShippingMethod] = useState<string>(IMPORT_SHIPPING_METHODS[0].id);
   const [deliveryPort, setDeliveryPort] = useState<string>(IMPORT_DELIVERY_PORTS[0].id);
   const [descriptionAr, setDescriptionAr] = useState('');
   const [isSaving, setIsSaving] = useState<boolean>(false);
@@ -100,20 +108,29 @@ export const SupplierCatalogPage: React.FC = () => {
     loadCatalog();
   }, [loadCatalog]);
 
-  const classifyItem = (m: Machine): CatalogItemType => {
+  const getProductKind = (m: Machine): ProductKind => {
     const cat = String(m.category || m.category_id || '').toLowerCase();
-    if (cat === 'spare-parts') return 'spare_part';
-    if ((m.specs as any)?.is_import_order) return 'import_order';
-    return 'machine_sale';
+    return cat === 'spare-parts' ? 'spare_part' : 'machine';
+  };
+
+  const isItemImported = (m: Machine): boolean => {
+    const specs = (m.specs || {}) as Record<string, any>;
+    return Boolean(specs.is_imported || specs.is_import_order);
   };
 
   const filteredItems = useMemo(() => {
     if (activeFilter === 'all') return items;
-    return items.filter((m) => classifyItem(m) === activeFilter);
+    if (activeFilter === 'imported') return items.filter((m) => isItemImported(m));
+    return items.filter((m) => getProductKind(m) === activeFilter);
   }, [items, activeFilter]);
 
-  const resetForm = (nextType: CatalogItemType = 'spare_part') => {
-    setItemType(nextType);
+  const resetForm = (nextKind?: ProductKind) => {
+    const defaultKind: ProductKind =
+      nextKind || (profile?.supplier_type === 'machinery_dealer' ? 'machine' : 'spare_part');
+    const defaultImported = resolveSupplierScopeFromProfile(profile) === 'local_and_import';
+
+    setProductKind(defaultKind);
+    setIsImported(defaultImported);
     setTitleAr('');
     setBrand('');
     setModel('');
@@ -121,11 +138,14 @@ export const SupplierCatalogPage: React.FC = () => {
     setPartType('filters');
     setMachineCat('excavator');
     setYear(2023);
-    setCondition(nextType === 'spare_part' ? 'new' : 'used');
+    setCondition(defaultKind === 'spare_part' ? 'new' : 'used');
     setSalePrice('');
     setCityId('casablanca');
     setImportCountry(profile?.import_countries?.[0] || 'europe');
     setImportLeadTime(profile?.import_lead_time || IMPORT_LEAD_TIMES[1].id);
+    setShippingMethod(
+      defaultKind === 'spare_part' ? 'air_express' : IMPORT_SHIPPING_METHODS[0].id
+    );
     setDeliveryPort(IMPORT_DELIVERY_PORTS[0].id);
     setDescriptionAr('');
   };
@@ -140,7 +160,7 @@ export const SupplierCatalogPage: React.FC = () => {
       return;
     }
 
-    if (itemType === 'spare_part' && !partNumber.trim()) {
+    if (productKind === 'spare_part' && !partNumber.trim()) {
       toast.error(
         lang === 'fr'
           ? 'Veuillez saisir le numéro de référence (Réf)'
@@ -152,8 +172,7 @@ export const SupplierCatalogPage: React.FC = () => {
     setIsSaving(true);
     try {
       const cityObj = MOROCCAN_CITIES.find((c) => c.id === cityId) || MOROCCAN_CITIES[0];
-      const isSpare = itemType === 'spare_part';
-      const isImport = itemType === 'import_order';
+      const isSpare = productKind === 'spare_part';
       const catSlug = isSpare ? 'spare-parts' : machineCat;
 
       const resolvedTitle =
@@ -163,17 +182,29 @@ export const SupplierCatalogPage: React.FC = () => {
           : `${brand.trim()} ${model.trim()}`.trim()) ||
         (isSpare ? 'قطعة غيار' : 'آلية للبيع');
 
+      const importSpecs = isImported
+        ? {
+            is_imported: true,
+            is_import_order: true,
+            import_country: importCountry,
+            import_lead_time: importLeadTime,
+            shipping_method: shippingMethod,
+            delivery_port: deliveryPort,
+          }
+        : {
+            is_imported: false,
+            is_import_order: false,
+          };
+
       const specsPayload: Record<string, any> = isSpare
         ? {
             part_number: partNumber.trim().toUpperCase(),
             part_type: partType,
             compatible_models: model.trim(),
+            ...importSpecs,
           }
         : {
-            is_import_order: isImport,
-            import_country: isImport ? importCountry : undefined,
-            import_lead_time: isImport ? importLeadTime : undefined,
-            delivery_port: isImport ? deliveryPort : undefined,
+            ...importSpecs,
           };
 
       const newRecord: Machine = {
@@ -264,7 +295,7 @@ export const SupplierCatalogPage: React.FC = () => {
       }
 
       machineStore.saveMachine(savedRemote || newRecord);
-      toast.success(lang === 'fr' ? 'Article ajouté au catalogue' : 'تمت إضافة العرض إلى كتالوجك');
+      toast.success(lang === 'fr' ? 'Article ajouté au catalogue' : 'تمت إضافة المنتج إلى كتالوجك');
       setIsModalOpen(false);
       await loadCatalog();
     } catch {
@@ -312,8 +343,8 @@ export const SupplierCatalogPage: React.FC = () => {
           </h1>
           <p className="text-xs text-steel-500 mt-0.5">
             {lang === 'fr'
-              ? 'Gérez vos pièces détachées, engins en stock et offres d’importation sur commande'
-              : 'أضف مخزونك من قطع الغيار أو الآليات المتوفرة للبيع أو عروض الاستيراد حسب الطلب'}
+              ? 'Publiez vos pièces détachées ou engins disponibles au Maroc ou importés de l’étranger'
+              : 'أضف مخزونك من قطع الغيار أو الآليات المتوفرة محلياً أو المستوردة من الخارج مع تفاصيل الشحن والميناء'}
           </p>
         </div>
 
@@ -322,13 +353,13 @@ export const SupplierCatalogPage: React.FC = () => {
           variant="primary"
           size="md"
           onClick={() => {
-            resetForm('spare_part');
+            resetForm();
             setIsModalOpen(true);
           }}
           leftIcon={<Plus className="w-4 h-4" />}
           className="min-h-[44px] font-black whitespace-nowrap shrink-0"
         >
-          {lang === 'fr' ? 'Nouvel article / offre' : 'إضافة عرض جديد'}
+          {lang === 'fr' ? 'Nouveau produit' : 'إضافة آلية أو قطعة غيار'}
         </Button>
       </div>
 
@@ -340,19 +371,19 @@ export const SupplierCatalogPage: React.FC = () => {
             id: 'spare_part',
             ar: 'قطع الغيار',
             fr: 'Pièces détachées',
-            count: items.filter((m) => classifyItem(m) === 'spare_part').length,
+            count: items.filter((m) => getProductKind(m) === 'spare_part').length,
           },
           {
-            id: 'machine_sale',
-            ar: 'آليات للبيع بالمغرب',
-            fr: 'Engins en stock',
-            count: items.filter((m) => classifyItem(m) === 'machine_sale').length,
+            id: 'machine',
+            ar: 'الآليات',
+            fr: 'Engins',
+            count: items.filter((m) => getProductKind(m) === 'machine').length,
           },
           {
-            id: 'import_order',
-            ar: 'استيراد من الخارج',
-            fr: 'Import sur commande',
-            count: items.filter((m) => classifyItem(m) === 'import_order').length,
+            id: 'imported',
+            ar: 'منتجات مستوردة من الخارج',
+            fr: 'Produits importés',
+            count: items.filter((m) => isItemImported(m)).length,
           },
         ].map((tab) => (
           <button
@@ -380,30 +411,31 @@ export const SupplierCatalogPage: React.FC = () => {
         <div className="bg-white border border-steel-200 rounded-2xl p-10 text-center space-y-3">
           <Package className="w-10 h-10 text-steel-300 mx-auto" />
           <h2 className="text-sm font-black text-ink">
-            {lang === 'fr' ? 'Votre catalogue est encore vide' : 'لا توجد عروض منشورة في الكتالوج بعد'}
+            {lang === 'fr' ? 'Votre catalogue est encore vide' : 'لا توجد منتجات منشورة في الكتالوج بعد'}
           </h2>
           <p className="text-xs text-steel-500 max-w-md mx-auto">
             {lang === 'fr'
-              ? 'Publiez vos pièces ou engins pour apparaître automatiquement dans les campagnes de recherche des propriétaires.'
-              : 'أضف أول قطعة غيار أو آلية للبيع أو عرض استيراد لتظهر تلقائياً في حملات البحث التي يطلقها الملاك.'}
+              ? 'Publiez vos pièces ou engins (locaux ou importés) pour recevoir les demandes des propriétaires.'
+              : 'أضف أول قطعة غيار أو آلية للبيع (محلية أو مستوردة من الخارج) لتظهر تلقائياً في حملات البحث التي يطلقها الملاك.'}
           </p>
           <Button
             variant="primary"
             size="md"
             onClick={() => {
-              resetForm('spare_part');
+              resetForm();
               setIsModalOpen(true);
             }}
             leftIcon={<Plus className="w-4 h-4" />}
             className="min-h-[44px] font-black"
           >
-            {lang === 'fr' ? 'Ajouter maintenant' : 'أضف أول عرض الآن'}
+            {lang === 'fr' ? 'Ajouter maintenant' : 'أضف أول منتج الآن'}
           </Button>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filteredItems.map((m) => {
-            const kind = classifyItem(m);
+            const kind = getProductKind(m);
+            const imported = isItemImported(m);
             const specs = (m.specs || {}) as Record<string, any>;
             return (
               <div
@@ -412,10 +444,10 @@ export const SupplierCatalogPage: React.FC = () => {
               >
                 <div className="flex items-start gap-3 min-w-0">
                   <div className="w-10 h-10 rounded-xl bg-steel-100 text-ink flex items-center justify-center shrink-0">
-                    {kind === 'spare_part' ? (
-                      <Wrench className="w-5 h-5" />
-                    ) : kind === 'import_order' ? (
+                    {imported ? (
                       <Ship className="w-5 h-5" />
+                    ) : kind === 'spare_part' ? (
+                      <Wrench className="w-5 h-5" />
                     ) : (
                       <Truck className="w-5 h-5" />
                     )}
@@ -427,13 +459,19 @@ export const SupplierCatalogPage: React.FC = () => {
                           ? lang === 'fr'
                             ? 'Pièce détachée'
                             : 'قطعة غيار'
-                          : kind === 'import_order'
-                          ? lang === 'fr'
-                            ? 'Import sur commande'
-                            : 'استيراد من الخارج'
                           : lang === 'fr'
-                          ? 'Vente au Maroc'
-                          : 'بيع بالمغرب'}
+                          ? 'Engin à vendre'
+                          : 'آلية للبيع'}
+                        {' · '}
+                        <span className={imported ? 'text-primary-dark' : 'text-steel-600'}>
+                          {imported
+                            ? lang === 'fr'
+                              ? 'Importé de l’étranger'
+                              : 'مستورد من الخارج'
+                            : lang === 'fr'
+                            ? 'Stock Maroc'
+                            : 'متوفر محلياً'}
+                        </span>
                       </span>
                       <span
                         className={`text-[11px] font-black ${
@@ -462,15 +500,35 @@ export const SupplierCatalogPage: React.FC = () => {
                           </span>
                         </>
                       )}
-                      {specs.import_country && (
-                        <>
-                          <span>·</span>
-                          <span>{getImportCountryLabel(specs.import_country, lang)}</span>
-                        </>
-                      )}
                       <span>·</span>
                       <span>{m.city}</span>
                     </p>
+
+                    {imported && (
+                      <p className="text-[11px] text-steel-600 font-bold mt-1.5 flex items-center gap-1.5 flex-wrap">
+                        {specs.import_country && (
+                          <span>{getImportCountryLabel(specs.import_country, lang)}</span>
+                        )}
+                        {specs.import_lead_time && (
+                          <>
+                            <span>·</span>
+                            <span>{getImportLeadTimeLabel(specs.import_lead_time, lang)}</span>
+                          </>
+                        )}
+                        {specs.shipping_method && (
+                          <>
+                            <span>·</span>
+                            <span>{getImportShippingMethodLabel(specs.shipping_method, lang)}</span>
+                          </>
+                        )}
+                        {specs.delivery_port && (
+                          <>
+                            <span>·</span>
+                            <span>{getImportPortLabel(specs.delivery_port, lang)}</span>
+                          </>
+                        )}
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -518,7 +576,7 @@ export const SupplierCatalogPage: React.FC = () => {
           <div className="bg-white w-full sm:max-w-xl rounded-t-3xl sm:rounded-3xl border border-steel-200 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
             <div className="bg-ink text-white px-5 py-4 flex items-center justify-between gap-3 shrink-0">
               <h2 className="text-sm sm:text-base font-black">
-                {lang === 'fr' ? 'Ajouter au catalogue fournisseur' : 'إضافة عرض جديد في الكتالوج'}
+                {lang === 'fr' ? 'Ajouter un produit au catalogue' : 'إضافة آلية أو قطعة غيار للكتالوج'}
               </h2>
               <button
                 type="button"
@@ -530,27 +588,135 @@ export const SupplierCatalogPage: React.FC = () => {
             </div>
 
             <form onSubmit={handleCreateItem} className="p-4 sm:p-6 space-y-4 overflow-y-auto">
-              {/* Item Type Selector */}
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  { id: 'spare_part', ar: 'قطعة غيار', fr: 'Pièce détachée' },
-                  { id: 'machine_sale', ar: 'آلية بالمغرب', fr: 'Engin Maroc' },
-                  { id: 'import_order', ar: 'استيراد من الخارج', fr: 'Import' },
-                ].map((opt) => (
+              {/* 1. Product Type: Spare Part vs Machine */}
+              <div>
+                <label className="text-xs font-black text-ink block mb-1.5">
+                  {lang === 'fr' ? 'Type de produit :' : 'نوع المنتج :'}
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: 'spare_part', ar: 'قطعة غيار', fr: 'Pièce de rechange' },
+                    { id: 'machine', ar: 'آلية للبيع', fr: 'Engin à vendre' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setProductKind(opt.id as ProductKind)}
+                      className={`min-h-[44px] px-3 rounded-xl text-xs font-black border cursor-pointer transition-colors ${
+                        productKind === opt.id
+                          ? 'bg-ink text-primary border-ink'
+                          : 'bg-white text-steel-700 border-steel-300 hover:bg-steel-50'
+                      }`}
+                    >
+                      {lang === 'fr' ? opt.fr : opt.ar}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 2. Origin Choice: Local Morocco vs Imported from Abroad (Works for BOTH Spare Parts & Machines!) */}
+              <div>
+                <label className="text-xs font-black text-ink block mb-1.5">
+                  {lang === 'fr' ? 'Origine & disponibilité :' : 'مصدر المنتج :'}
+                </label>
+                <div className="grid grid-cols-2 gap-2">
                   <button
-                    key={opt.id}
                     type="button"
-                    onClick={() => setItemType(opt.id as CatalogItemType)}
-                    className={`min-h-[44px] px-2.5 rounded-xl text-xs font-black border cursor-pointer transition-colors ${
-                      itemType === opt.id
-                        ? 'bg-ink text-primary border-ink'
-                        : 'bg-white text-steel-700 border-steel-300'
+                    onClick={() => setIsImported(false)}
+                    className={`min-h-[44px] px-3 rounded-xl text-xs font-black border cursor-pointer transition-colors ${
+                      !isImported
+                        ? 'bg-amber-50 border-primary ring-2 ring-primary/35 text-ink'
+                        : 'bg-white text-steel-700 border-steel-300 hover:bg-steel-50'
                     }`}
                   >
-                    {lang === 'fr' ? opt.fr : opt.ar}
+                    {lang === 'fr' ? 'Disponible localement (Maroc)' : 'متوفر محلياً بالمغرب'}
                   </button>
-                ))}
+                  <button
+                    type="button"
+                    onClick={() => setIsImported(true)}
+                    className={`min-h-[44px] px-3 rounded-xl text-xs font-black border cursor-pointer transition-colors ${
+                      isImported
+                        ? 'bg-amber-50 border-primary ring-2 ring-primary/35 text-ink'
+                        : 'bg-white text-steel-700 border-steel-300 hover:bg-steel-50'
+                    }`}
+                  >
+                    {lang === 'fr' ? 'Produit importé de l’étranger' : 'منتج مستورد من الخارج'}
+                  </button>
+                </div>
               </div>
+
+              {/* 3. Import Details (Country, Arrival Time, Shipping Method, Port) whenever isImported is true */}
+              {isImported && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3.5 rounded-2xl bg-steel-50 border border-steel-200">
+                  <div>
+                    <label className="text-xs font-black text-ink block mb-1">
+                      {lang === 'fr' ? 'Pays d’origine * :' : 'الدولة (بلد الاستيراد) * :'}
+                    </label>
+                    <select
+                      value={importCountry}
+                      onChange={(e) => setImportCountry(e.target.value)}
+                      className="w-full px-3 py-2 text-xs font-bold bg-white border border-steel-300 rounded-xl min-h-[44px]"
+                    >
+                      {IMPORT_ORIGIN_COUNTRIES.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.flag} {lang === 'fr' ? c.nameFr : c.nameAr}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-black text-ink block mb-1">
+                      {lang === 'fr' ? 'Délai d’arrivée * :' : 'مدة الوصول * :'}
+                    </label>
+                    <select
+                      value={importLeadTime}
+                      onChange={(e) => setImportLeadTime(e.target.value)}
+                      className="w-full px-3 py-2 text-xs font-bold bg-white border border-steel-300 rounded-xl min-h-[44px]"
+                    >
+                      {IMPORT_LEAD_TIMES.map((lt) => (
+                        <option key={lt.id} value={lt.id}>
+                          {lang === 'fr' ? lt.labelFr : lt.labelAr}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-black text-ink block mb-1">
+                      {lang === 'fr' ? 'Méthode d’expédition * :' : 'الطريقة (طريقة الشحن) * :'}
+                    </label>
+                    <select
+                      value={shippingMethod}
+                      onChange={(e) => setShippingMethod(e.target.value)}
+                      className="w-full px-3 py-2 text-xs font-bold bg-white border border-steel-300 rounded-xl min-h-[44px]"
+                    >
+                      {IMPORT_SHIPPING_METHODS.map((sm) => (
+                        <option key={sm.id} value={sm.id}>
+                          {lang === 'fr' ? sm.labelFr : sm.labelAr}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-black text-ink block mb-1">
+                      {lang === 'fr' ? 'Port d’arrivée * :' : 'الميناء (نقطة الوصول) * :'}
+                    </label>
+                    <select
+                      value={deliveryPort}
+                      onChange={(e) => setDeliveryPort(e.target.value)}
+                      className="w-full px-3 py-2 text-xs font-bold bg-white border border-steel-300 rounded-xl min-h-[44px]"
+                    >
+                      {IMPORT_DELIVERY_PORTS.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {lang === 'fr' ? p.labelFr : p.labelAr}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="text-xs font-black text-ink block mb-1.5">
@@ -562,7 +728,7 @@ export const SupplierCatalogPage: React.FC = () => {
                   value={titleAr}
                   onChange={(e) => setTitleAr(e.target.value)}
                   placeholder={
-                    itemType === 'spare_part'
+                    productKind === 'spare_part'
                       ? 'مثال: مضخة هيدروليك JCB 3CX أصلية'
                       : 'مثال: حفارة CAT 320D بحالة ممتازة'
                   }
@@ -570,7 +736,7 @@ export const SupplierCatalogPage: React.FC = () => {
                 />
               </div>
 
-              {itemType === 'spare_part' ? (
+              {productKind === 'spare_part' ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs font-black text-ink block mb-1.5">
@@ -654,7 +820,7 @@ export const SupplierCatalogPage: React.FC = () => {
                 </div>
                 <div>
                   <label className="text-xs font-black text-ink block mb-1.5">
-                    {itemType === 'spare_part'
+                    {productKind === 'spare_part'
                       ? lang === 'fr'
                         ? 'Modèles compatibles :'
                         : 'الآليات المتوافقة :'
@@ -671,59 +837,6 @@ export const SupplierCatalogPage: React.FC = () => {
                   />
                 </div>
               </div>
-
-              {itemType === 'import_order' && (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3.5 rounded-2xl bg-steel-50 border border-steel-200">
-                  <div>
-                    <label className="text-[11px] font-black text-ink block mb-1">
-                      {lang === 'fr' ? 'Origine :' : 'بلد الاستيراد :'}
-                    </label>
-                    <select
-                      value={importCountry}
-                      onChange={(e) => setImportCountry(e.target.value)}
-                      className="w-full px-2.5 py-2 text-xs font-bold bg-white border border-steel-300 rounded-xl min-h-[42px]"
-                    >
-                      {IMPORT_ORIGIN_COUNTRIES.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.flag} {lang === 'fr' ? c.nameFr : c.nameAr}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-black text-ink block mb-1">
-                      {lang === 'fr' ? 'Délai :' : 'مدة الشحن :'}
-                    </label>
-                    <select
-                      value={importLeadTime}
-                      onChange={(e) => setImportLeadTime(e.target.value)}
-                      className="w-full px-2.5 py-2 text-xs font-bold bg-white border border-steel-300 rounded-xl min-h-[42px]"
-                    >
-                      {IMPORT_LEAD_TIMES.map((lt) => (
-                        <option key={lt.id} value={lt.id}>
-                          {lang === 'fr' ? lt.labelFr : lt.labelAr}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-black text-ink block mb-1">
-                      {lang === 'fr' ? 'Port :' : 'ميناء التسليم :'}
-                    </label>
-                    <select
-                      value={deliveryPort}
-                      onChange={(e) => setDeliveryPort(e.target.value)}
-                      className="w-full px-2.5 py-2 text-xs font-bold bg-white border border-steel-300 rounded-xl min-h-[42px]"
-                    >
-                      {IMPORT_DELIVERY_PORTS.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {lang === 'fr' ? p.labelFr : p.labelAr}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
@@ -758,7 +871,7 @@ export const SupplierCatalogPage: React.FC = () => {
 
                 <div>
                   <label className="text-xs font-black text-ink block mb-1.5">
-                    {lang === 'fr' ? 'Ville :' : 'المدينة :'}
+                    {lang === 'fr' ? 'Ville au Maroc :' : 'المدينة بالمغرب :'}
                   </label>
                   <select
                     value={cityId}

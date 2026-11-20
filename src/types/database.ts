@@ -13,6 +13,7 @@ export type UserRole =
   | 'dealer';
 
 export type SupplierType = 'spare_parts' | 'machinery_dealer' | 'importer' | 'all';
+export type SupplierScope = 'local' | 'local_and_import';
 export type ClientSegment =
   | 'company'
   | 'farmer'
@@ -80,6 +81,7 @@ export interface UserProfile {
   driver_available?: boolean;
   driver_bio?: string;
   supplier_type?: SupplierType;
+  supplier_scope?: SupplierScope;
   import_countries?: string[];
   import_lead_time?: string;
   supplier_specialties?: string[];

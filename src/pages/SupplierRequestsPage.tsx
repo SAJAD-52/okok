@@ -34,6 +34,7 @@ import {
   IMPORT_LEAD_TIMES,
   IMPORT_ORIGIN_COUNTRIES,
   getImportCountryLabel,
+  resolveSupplierScopeFromProfile,
 } from '../data/supplierOptions';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { formatDistanceKm } from '../lib/geoUtils';
@@ -126,7 +127,7 @@ export const SupplierRequestsPage: React.FC = () => {
     setCurrency('MAD');
     const isImp =
       req.desired_condition === 'import' ||
-      profile?.supplier_type === 'importer' ||
+      resolveSupplierScopeFromProfile(profile) === 'local_and_import' ||
       Boolean(req.preferred_origin);
     setSupplySource(isImp ? 'import_order' : 'morocco_stock');
     setOriginCountryId(

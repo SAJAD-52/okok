@@ -29,7 +29,12 @@ import {
   subscribeLocalDispatchEvents,
   SupplierOpenRequestItem,
 } from '../lib/dispatchService';
-import { getImportCountryLabel, getSupplierTypeOption } from '../data/supplierOptions';
+import {
+  getImportCountryLabel,
+  getSupplierScopeOption,
+  getSupplierTypeOption,
+  resolveSupplierScopeFromProfile,
+} from '../data/supplierOptions';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { machineStore } from '../lib/machineStore';
 import { formatDistanceKm } from '../lib/geoUtils';
@@ -106,14 +111,13 @@ export const SupplierDashboardPage: React.FC = () => {
   }, [loadDashboard, supplierId]);
 
   const supplierTypeOpt = getSupplierTypeOption(profile?.supplier_type);
+  const supplierScope = resolveSupplierScopeFromProfile(profile);
+  const supplierScopeOpt = getSupplierScopeOption(supplierScope);
   const spareReqCount = requests.filter((r) => r.campaign_type === 'spare_part').length;
   const purchaseReqCount = requests.filter((r) => r.campaign_type === 'machine_purchase').length;
   const importReqCount = requests.filter((r) => r.import_allowed || r.desired_condition === 'import').length;
 
-  const isImporter =
-    profile?.supplier_type === 'importer' ||
-    profile?.supplier_type === 'all' ||
-    (profile?.import_countries && profile.import_countries.length > 0);
+  const isImporter = supplierScope === 'local_and_import';
 
   return (
     <div className="space-y-6 text-start">
@@ -126,13 +130,9 @@ export const SupplierDashboardPage: React.FC = () => {
           <p className="text-xs text-steel-500 font-bold mt-1 flex items-center gap-2 flex-wrap">
             <span>{lang === 'fr' ? supplierTypeOpt.shortFr : supplierTypeOpt.shortAr}</span>
             <span>·</span>
+            <span>{lang === 'fr' ? supplierScopeOpt.labelFr : supplierScopeOpt.labelAr}</span>
+            <span>·</span>
             <span>{profile?.city || 'المغرب'}</span>
-            {profile?.delivers_nationwide !== false && (
-              <>
-                <span>·</span>
-                <span>{lang === 'fr' ? 'Livraison tout le Maroc' : 'تغطية وطنية لكل المدن'}</span>
-              </>
-            )}
           </p>
         </div>
 

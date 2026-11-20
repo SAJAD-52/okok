@@ -43,11 +43,13 @@ import { CLIENT_SEGMENTS, getClientSegmentOption } from '../../data/clientSegmen
 import { DRIVER_EXPERIENCE_LEVELS } from '../../data/driverMachines';
 import {
   SUPPLIER_TYPES,
+  SUPPLIER_SUPPLY_SCOPES,
   IMPORT_ORIGIN_COUNTRIES,
   IMPORT_LEAD_TIMES,
   getSupplierTypeOption,
+  resolveSupplierScopeFromProfile,
 } from '../../data/supplierOptions';
-import { ClientSegment, SupplierType } from '../../types/database';
+import { ClientSegment, SupplierScope, SupplierType } from '../../types/database';
 import { supabase } from '../../lib/supabase';
 import { normalizeMoroccanPhone } from '../../lib/authHelpers';
 import {
@@ -89,9 +91,9 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
   const [driverExperienceYears, setDriverExperienceYears] = useState('3_5');
   const [driverAvailable, setDriverAvailable] = useState(true);
   const [supplierType, setSupplierType] = useState<SupplierType>('all');
-  const [importCountries, setImportCountries] = useState<string[]>(['europe']);
+  const [supplierScope, setSupplierScope] = useState<SupplierScope>('local');
+  const [importCountries, setImportCountries] = useState<string[]>(['europe', 'china']);
   const [importLeadTime, setImportLeadTime] = useState('15_30');
-  const [deliversNationwide, setDeliversNationwide] = useState(true);
   const [activeDriverContract, setActiveDriverContract] = useState<AgreedDriverDealItem | null>(null);
   const [fullName, setFullName] = useState('');
   const [companyName, setCompanyName] = useState('');
@@ -110,14 +112,16 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
       setDriverMachines(Array.isArray(profile.driver_machines) ? profile.driver_machines : []);
       setDriverExperienceYears(profile.driver_experience_years || '3_5');
       setDriverAvailable(profile.driver_available ?? true);
-      setSupplierType(profile.supplier_type || 'all');
+      setSupplierType(
+        profile.supplier_type === 'importer' ? 'all' : profile.supplier_type || 'all'
+      );
+      setSupplierScope(resolveSupplierScopeFromProfile(profile));
       setImportCountries(
         Array.isArray(profile.import_countries) && profile.import_countries.length > 0
           ? profile.import_countries
-          : ['europe']
+          : ['europe', 'china']
       );
       setImportLeadTime(profile.import_lead_time || '15_30');
-      setDeliversNationwide(profile.delivers_nationwide ?? true);
       setFullName(profile.full_name || '');
       setCompanyName(profile.company_name || '');
       const matchedCity = MOROCCAN_CITIES.find(
@@ -220,19 +224,20 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
         driver_experience_years: isDriver ? driverExperienceYears : undefined,
         driver_available: isDriver ? effectiveDriverAvailable : undefined,
         supplier_type: isSupplier ? supplierType : undefined,
+        supplier_scope: isSupplier ? supplierScope : undefined,
         import_countries:
-          isSupplier && (supplierType === 'importer' || supplierType === 'all')
+          isSupplier && supplierScope === 'local_and_import'
             ? importCountries
             : isSupplier
             ? []
             : undefined,
         import_lead_time:
-          isSupplier && (supplierType === 'importer' || supplierType === 'all')
+          isSupplier && supplierScope === 'local_and_import'
             ? importLeadTime
             : isSupplier
             ? ''
             : undefined,
-        delivers_nationwide: isSupplier ? deliversNationwide : undefined,
+        delivers_nationwide: isSupplier ? true : undefined,
         ice_number: !isClient && !isDriver && !isSupplier ? iceNumber.trim() : '',
         whatsapp_verified: true,
       };
@@ -586,13 +591,13 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
 
           {/* Supplier & Importer Specific Fields */}
           {isSupplier && (
-            <div className="space-y-3 p-3.5 rounded-2xl bg-steel-50 border border-steel-200">
+            <div className="space-y-3.5 p-3.5 rounded-2xl bg-steel-50 border border-steel-200">
               <div>
                 <label className="text-xs font-black text-ink flex items-center gap-1.5 mb-2">
-                  <Ship className="w-3.5 h-3.5 text-primary-dark" />
-                  <span>{lang === 'fr' ? 'Type d’activité & Spécialité' : 'طبيعة نشاط المورد أو شركة الاستيراد'}</span>
+                  <Package className="w-3.5 h-3.5 text-primary-dark" />
+                  <span>{lang === 'fr' ? 'Spécialité du fournisseur' : 'تخصص المورد'}</span>
                 </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   {SUPPLIER_TYPES.map((st) => {
                     const active = supplierType === st.id;
                     return (
@@ -600,10 +605,10 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
                         key={st.id}
                         type="button"
                         onClick={() => setSupplierType(st.id)}
-                        className={`p-2 rounded-xl border text-start transition-colors cursor-pointer min-h-[44px] ${
+                        className={`p-2.5 rounded-xl border text-start transition-colors cursor-pointer min-h-[44px] ${
                           active
                             ? 'bg-white border-primary ring-2 ring-primary/35 text-ink'
-                            : 'bg-white/75 border-steel-200 text-steel-700 hover:bg-white'
+                            : 'bg-white/80 border-steel-200 text-steel-700 hover:bg-white'
                         }`}
                       >
                         <span className="text-xs font-black block">
@@ -615,12 +620,43 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
                 </div>
               </div>
 
-              {(supplierType === 'importer' || supplierType === 'all') && (
-                <div className="space-y-2.5 pt-2 border-t border-steel-200/80">
+              <div>
+                <label className="text-xs font-black text-ink flex items-center gap-1.5 mb-2">
+                  <Ship className="w-3.5 h-3.5 text-primary-dark" />
+                  <span>{lang === 'fr' ? 'Mode d’approvisionnement' : 'نظام التوريد والاستيراد'}</span>
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {SUPPLIER_SUPPLY_SCOPES.map((sc, idx) => {
+                    const active = supplierScope === sc.id;
+                    return (
+                      <button
+                        key={sc.id}
+                        type="button"
+                        onClick={() => setSupplierScope(sc.id)}
+                        className={`p-2.5 rounded-xl border text-start transition-colors cursor-pointer min-h-[52px] ${
+                          active
+                            ? 'bg-white border-primary ring-2 ring-primary/35 text-ink'
+                            : 'bg-white/80 border-steel-200 text-steel-700 hover:bg-white'
+                        }`}
+                      >
+                        <span className="text-xs font-black block">
+                          {idx + 1}. {lang === 'fr' ? sc.labelFr : sc.labelAr}
+                        </span>
+                        <span className="text-[10px] text-steel-500 block mt-0.5 leading-snug">
+                          {lang === 'fr' ? sc.descFr : sc.descAr}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {supplierScope === 'local_and_import' && (
+                <div className="space-y-2.5 pt-2.5 border-t border-steel-200/80">
                   <div>
                     <label className="text-xs font-bold text-steel-700 flex items-center gap-1.5 mb-1.5">
                       <Globe className="w-3.5 h-3.5 text-primary-dark" />
-                      <span>{lang === 'fr' ? 'Pays d’importation' : 'بلدان الاستيراد المتاحة'}</span>
+                      <span>{lang === 'fr' ? 'Pays d’importation habituels' : 'دول الاستيراد المتاحة'}</span>
                     </label>
                     <div className="flex flex-wrap gap-1.5">
                       {IMPORT_ORIGIN_COUNTRIES.map((country) => {
@@ -645,7 +681,7 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
 
                   <div>
                     <label className="text-xs font-bold text-steel-700 block mb-1">
-                      {lang === 'fr' ? 'Délai moyen d’importation' : 'مدة التوريد والاستيراد المعتادة'}
+                      {lang === 'fr' ? 'Délai moyen d’importation' : 'مدة الوصول المعتادة'}
                     </label>
                     <Select
                       value={importLeadTime}
@@ -659,26 +695,11 @@ export const ProfileSettingsModal: React.FC<ProfileSettingsModalProps> = ({
                 </div>
               )}
 
-              <button
-                type="button"
-                role="checkbox"
-                aria-checked={deliversNationwide}
-                onClick={() => setDeliversNationwide((prev) => !prev)}
-                className={`w-full p-2.5 rounded-xl border text-start flex items-center gap-2 cursor-pointer min-h-[44px] ${
-                  deliversNationwide
-                    ? 'bg-emerald-50 border-emerald-300 text-ink'
-                    : 'bg-white border-steel-200 text-steel-700'
-                }`}
-              >
-                <span className={deliversNationwide ? 'text-emerald-600' : 'text-steel-400'}>
-                  {deliversNationwide ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
-                </span>
-                <span className="text-xs font-bold">
-                  {lang === 'fr'
-                    ? 'Livraison vers toutes les villes du Maroc'
-                    : 'نوفر الشحن والتوصيل لجميع مدن المغرب'}
-                </span>
-              </button>
+              <p className="text-[11px] text-steel-500 font-medium leading-relaxed">
+                {lang === 'fr'
+                  ? 'Les modalités de livraison sont convenues directement dans la discussion avec le propriétaire.'
+                  : 'يتم الاتفاق على طرق التوصيل والشحن مباشرة داخل المحادثة مع مالك الآلية.'}
+              </p>
             </div>
           )}
 

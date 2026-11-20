@@ -17,7 +17,9 @@ import {
   Inbox,
   Plus,
   Truck,
-  Building2,
+  Eye,
+  CheckCircle2,
+  Loader2,
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Skeleton } from '../components/ui/Skeleton';
@@ -26,6 +28,8 @@ import { useAuth } from '../hooks/useAuth';
 import { Machine } from '../types/database';
 import {
   fetchOpenOwnerRequestsForSupplier,
+  fetchSupplierCompletedOrders,
+  startSupplierChatWithOwner,
   subscribeLocalDispatchEvents,
   SupplierOpenRequestItem,
 } from '../lib/dispatchService';
@@ -39,6 +43,7 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { machineStore } from '../lib/machineStore';
 import { formatDistanceKm } from '../lib/geoUtils';
 import { formatPriceMAD } from '../data/rentalTerms';
+import { RequestDetailsModal } from '../components/supplier/RequestDetailsModal';
 
 export const SupplierDashboardPage: React.FC = () => {
   const { lang } = useLanguage();
@@ -48,7 +53,10 @@ export const SupplierDashboardPage: React.FC = () => {
   const supplierId = isImpersonating ? profile?.id : user?.id || profile?.id;
 
   const [requests, setRequests] = useState<SupplierOpenRequestItem[]>([]);
+  const [completedOrdersCount, setCompletedOrdersCount] = useState<number>(0);
   const [catalog, setCatalog] = useState<Machine[]>([]);
+  const [previewRequest, setPreviewRequest] = useState<SupplierOpenRequestItem | null>(null);
+  const [startingChatCampId, setStartingChatCampId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [hasError, setHasError] = useState<boolean>(false);
 
@@ -60,8 +68,9 @@ export const SupplierDashboardPage: React.FC = () => {
 
     setHasError(false);
     try {
-      const [openReqs, catalogRes] = await Promise.all([
+      const [openReqs, completedOrders, catalogRes] = await Promise.all([
         fetchOpenOwnerRequestsForSupplier(profile || { id: supplierId }),
+        fetchSupplierCompletedOrders(supplierId),
         isSupabaseConfigured
           ? supabase
               .from('machines')
@@ -72,6 +81,7 @@ export const SupplierDashboardPage: React.FC = () => {
       ]);
 
       setRequests(openReqs);
+      setCompletedOrdersCount(completedOrders.length);
 
       if (catalogRes.data && catalogRes.data.length > 0) {
         setCatalog(catalogRes.data as Machine[]);
@@ -202,21 +212,26 @@ export const SupplierDashboardPage: React.FC = () => {
           </span>
         </div>
 
-        <div className="bg-white border border-steel-200 rounded-2xl p-4 space-y-1">
-          <span className="text-xs font-bold text-steel-500 block">
-            {lang === 'fr' ? 'Pièces de rechange' : 'طلبات قطع الغيار'}
+        <button
+          type="button"
+          onClick={() => navigate('/supplier/orders')}
+          className="bg-white border border-steel-200 hover:border-emerald-400 rounded-2xl p-4 space-y-1 text-start transition-colors cursor-pointer"
+        >
+          <span className="text-xs font-bold text-steel-500 flex items-center justify-between gap-1">
+            <span>{lang === 'fr' ? 'Commandes clients' : 'طلبات الزبناء المنجزة'}</span>
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
           </span>
-          <span className="text-2xl font-black text-ink font-mono tabular-nums block">
-            {isLoading ? '—' : spareReqCount}
+          <span className="text-2xl font-black text-emerald-700 font-mono tabular-nums block">
+            {isLoading ? '—' : completedOrdersCount}
           </span>
-        </div>
+        </button>
 
         <div className="bg-white border border-steel-200 rounded-2xl p-4 space-y-1">
           <span className="text-xs font-bold text-steel-500 block">
-            {lang === 'fr' ? 'Achat & Import engins' : 'طلبات شراء واستيراد آليات'}
+            {lang === 'fr' ? 'Pièces / Engins' : 'قطع الغيار / الآليات'}
           </span>
           <span className="text-2xl font-black text-ink font-mono tabular-nums block">
-            {isLoading ? '—' : purchaseReqCount}
+            {isLoading ? '—' : `${spareReqCount} / ${purchaseReqCount}`}
           </span>
         </div>
 
@@ -342,16 +357,62 @@ export const SupplierDashboardPage: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPreviewRequest(req)}
+                      leftIcon={<Eye className="w-4 h-4" />}
+                      className="min-h-[44px] font-black whitespace-nowrap shrink-0 bg-white"
+                    >
+                      {lang === 'fr' ? 'Voir la demande' : 'ألق نظرة على الطلب'}
+                    </Button>
                     <Button
                       type="button"
                       variant="primary"
                       size="sm"
-                      onClick={() => navigate(`/supplier/requests?campaign=${req.campaign_id}`)}
-                      leftIcon={<MessageSquare className="w-4 h-4" />}
+                      disabled={startingChatCampId === req.campaign_id}
+                      onClick={async () => {
+                        if (!supplierId || startingChatCampId) return;
+                        setStartingChatCampId(req.campaign_id);
+                        try {
+                          const supplierName =
+                            profile?.company_name?.trim() ||
+                            profile?.full_name?.trim() ||
+                            (lang === 'fr' ? 'Fournisseur certifié' : 'مورد معتمد');
+                          const { conversationId } = await startSupplierChatWithOwner({
+                            supplierId,
+                            supplierName,
+                            request: req,
+                          });
+                          if (conversationId) {
+                            navigate(
+                              `/supplier/messages?conv=${encodeURIComponent(
+                                conversationId
+                              )}&campaign=${encodeURIComponent(req.campaign_id)}`
+                            );
+                          } else {
+                            navigate(
+                              `/supplier/messages?target=${encodeURIComponent(
+                                req.contractor_id
+                              )}&campaign=${encodeURIComponent(req.campaign_id)}`
+                            );
+                          }
+                        } finally {
+                          setStartingChatCampId(null);
+                        }
+                      }}
+                      leftIcon={
+                        startingChatCampId === req.campaign_id ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <MessageSquare className="w-4 h-4" />
+                        )
+                      }
                       className="min-h-[44px] font-black whitespace-nowrap shrink-0"
                     >
-                      {lang === 'fr' ? 'Envoyer un devis' : 'تقديم عرض سعر'}
+                      {lang === 'fr' ? 'Démarrer le chat' : 'ابدأ محادثة'}
                     </Button>
                   </div>
                 </div>
@@ -387,6 +448,17 @@ export const SupplierDashboardPage: React.FC = () => {
           {lang === 'fr' ? `Gérer (${catalog.length})` : `إدارة الكتالوج (${catalog.length})`}
         </Button>
       </div>
+
+      {/* Request Details Preview Modal */}
+      <RequestDetailsModal
+        isOpen={Boolean(previewRequest)}
+        request={previewRequest}
+        onClose={() => setPreviewRequest(null)}
+        onOpenQuoteForm={(req) => {
+          setPreviewRequest(null);
+          navigate(`/supplier/requests?campaign=${req.campaign_id}`);
+        }}
+      />
     </div>
   );
 };

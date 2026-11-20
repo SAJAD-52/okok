@@ -25,6 +25,8 @@ import {
   HardHat,
   Briefcase,
   FileText,
+  Package,
+  ShoppingBag,
 } from 'lucide-react';
 import { ChatConversationItem } from '../../types/chat';
 import { BusinessProfile, DispatchDealContext, DriverContractData, DriverDealContext } from '../../types/database';
@@ -36,6 +38,8 @@ import { toast } from '../../components/ui/Toast';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import {
   acceptDispatchDealParty,
+  agreeSupplyDealTermsParty,
+  closeSupplyDealParty,
   fetchDispatchContextForConversation,
   relocateMachineToSite,
   stripDispatchMarker,
@@ -74,6 +78,10 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
   const [driverDeal, setDriverDeal] = useState<DriverDealContext | null>(null);
   const [ownerBizProfile, setOwnerBizProfile] = useState<BusinessProfile | null>(null);
   const [isAcceptingDeal, setIsAcceptingDeal] = useState(false);
+  const [isAgreeingSupplyTerms, setIsAgreeingSupplyTerms] = useState(false);
+  const [isClosingSupplyDeal, setIsClosingSupplyDeal] = useState(false);
+  const [agreedPriceInput, setAgreedPriceInput] = useState<string>('');
+  const [agreedCurrencyInput, setAgreedCurrencyInput] = useState<'MAD' | 'EUR'>('MAD');
   const [isClosingDriverDeal, setIsClosingDriverDeal] = useState(false);
   const [isContractActionSubmitting, setIsContractActionSubmitting] = useState(false);
   const [contractModalOpen, setContractModalOpen] = useState(false);
@@ -97,6 +105,10 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
   const isSpareDeal = Boolean(
     dispatchDeal && (dispatchDeal.campaign_type === 'spare_part' || dispatchDeal.part_reference)
   );
+  const isMachinePurchaseDeal = Boolean(
+    dispatchDeal && dispatchDeal.campaign_type === 'machine_purchase'
+  );
+  const isSupplyDeal = isSpareDeal || isMachinePurchaseDeal;
   const partyRole: 'contractor' | 'owner' = dispatchDeal
     ? dispatchDeal.contractor_id === currentUserId
       ? 'contractor'
@@ -145,11 +157,24 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
 
       if (!cancelled) {
         setDispatchDeal(ctx);
-        const ctxIsSpare = ctx?.campaign_type === 'spare_part' || Boolean(ctx?.part_reference);
-        // When owner sees finalized machinery deal & contractor clicked 2nd, update machine location (never for spare parts!)
+        if (ctx && (ctx.agreed_price != null || ctx.budget_mad != null)) {
+          setAgreedPriceInput((prev) =>
+            prev.trim() !== ''
+              ? prev
+              : String(ctx.agreed_price ?? ctx.budget_mad ?? '')
+          );
+        }
+        if (ctx?.agreed_currency) {
+          setAgreedCurrencyInput(ctx.agreed_currency);
+        }
+        const ctxIsSupply =
+          ctx?.campaign_type === 'spare_part' ||
+          ctx?.campaign_type === 'machine_purchase' ||
+          Boolean(ctx?.part_reference);
+        // When owner sees finalized machinery deal & contractor clicked 2nd, update machine location (never for spare parts or purchases!)
         if (
           ctx &&
-          !ctxIsSpare &&
+          !ctxIsSupply &&
           ctx.deal_status === 'accepted' &&
           ctx.owner_id === currentUserId &&
           relocatedCampaignRef.current !== ctx.campaign_id
@@ -328,19 +353,33 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
           '💰 الشروط والأجرة نهائية، هل تناسبك؟',
           '🤝 متفقون على الشروط، اضغط على إغلاق الصفقة',
         ]
+    : isMachinePurchaseDeal
+    ? isRequesterParty
+      ? [
+          '🚜 ما هو السعر النهائي وهل يشمل الديوانة؟',
+          '🌍 من أي دولة الاستيراد وكم مدة الوصول؟',
+          '🚢 عبر أي ميناء يتم الشحن وما طريقة التسليم؟',
+          '🤝 متفقون على الشروط، اضغط على أتفق على شروط الطرف الآخر',
+        ]
+      : [
+          '✅ الآلية متوفرة ويمكننا توفيرها حسب المواصفات المطلوبة',
+          '🚢 يمكننا الاستيراد والتخليص الجمركي بالكامل',
+          '💰 هذا هو العرض النهائي شامل النقل والتسليم',
+          '🤝 متفقون، اضغط على أتفق على شروط الطرف الآخر لإغلاق الصفقة',
+        ]
     : isSpareDeal
     ? isRequesterParty
       ? [
           '🔧 هل القطعة مطابقة تماماً للمرجع Réf؟',
           '📦 هل القطعة جديدة أصلية أم مستعملة؟',
           '💰 ما هو السعر النهائي للقطعة؟',
-          '🚚 هل يمكن إرسالها عبر الإرسالية اليوم؟',
+          '🚚 كيف نتفق على طريقة التوصيل والمدة؟',
         ]
       : [
           '✅ نعم، القطعة متوفرة لدينا ومطابقة للمرجع',
           '📦 القطعة جديدة أصلية وجاهزة للتسليم',
-          '🚚 يمكننا شحنها فوراً عبر الإرسالية السريعة',
-          '📍 يمكنكم استلامها مباشرة من متجرنا',
+          '🚚 يمكننا شحنها فوراً أو الاتفاق على التوصيل',
+          '🤝 متفقون، اضغط على أتفق على شروط الطرف الآخر',
         ]
     : isContractor
     ? [
@@ -427,6 +466,100 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
       );
     } finally {
       setIsAcceptingDeal(false);
+    }
+  };
+
+  const handleAgreeSupplyTerms = async () => {
+    if (!dispatchDeal || isAgreeingSupplyTerms) return;
+    setIsAgreeingSupplyTerms(true);
+    try {
+      const parsedPrice = Number(agreedPriceInput);
+      const res = await agreeSupplyDealTermsParty({
+        deal: dispatchDeal,
+        partyRole,
+        currentUserId,
+        currentUserName: profile?.company_name || profile?.full_name || '',
+        conversationId: conversation.id,
+        agreedPrice: Number.isFinite(parsedPrice) && parsedPrice > 0 ? parsedPrice : null,
+        agreedCurrency: agreedCurrencyInput,
+      });
+      setDispatchDeal(res.updatedDeal);
+      if (res.bothAgreedTerms) {
+        toast.success(
+          lang === 'fr'
+            ? 'Les deux parties acceptent les conditions ! Vous pouvez maintenant clôturer l’accord.'
+            : 'اتفق الطرفان على الشروط! يمكنكم الآن الضغط على «إغلاق الصفقة» لتسجيل الطلب.'
+        );
+      } else {
+        toast.success(
+          lang === 'fr'
+            ? 'Votre accord sur les conditions est enregistré.'
+            : 'تم تسجيل موافقتك على شروط الطرف الآخر! في انتظار موافقة الطرف الثاني.'
+        );
+      }
+    } catch {
+      toast.error(
+        lang === 'fr'
+          ? 'Impossible d’enregistrer votre accord'
+          : 'تعذر تسجيل الموافقة حالياً، يرجى المحاولة مرة أخرى'
+      );
+    } finally {
+      setIsAgreeingSupplyTerms(false);
+    }
+  };
+
+  const handleCloseSupplyDeal = async () => {
+    if (!dispatchDeal || isClosingSupplyDeal) return;
+    const bothAgreed = Boolean(
+      dispatchDeal.contractor_terms_agreed && dispatchDeal.owner_terms_agreed
+    );
+    if (!bothAgreed) {
+      toast.error(
+        lang === 'fr'
+          ? 'Les deux parties doivent d’abord cliquer sur «Accepter les conditions».'
+          : 'يرجى ضغط الطرفين أولاً على زر «أتفق على شروط الطرف الآخر» قبل إغلاق الصفقة.'
+      );
+      return;
+    }
+
+    setIsClosingSupplyDeal(true);
+    try {
+      const parsedPrice = Number(agreedPriceInput);
+      const res = await closeSupplyDealParty({
+        deal: dispatchDeal,
+        partyRole,
+        currentUserId,
+        currentUserName: profile?.company_name || profile?.full_name || '',
+        currentUserPhone: profile?.phone || '',
+        currentUserCity: profile?.city || '',
+        otherParticipant: conversation.other_participant,
+        conversationId: conversation.id,
+        agreedPrice: Number.isFinite(parsedPrice) && parsedPrice > 0 ? parsedPrice : null,
+        agreedCurrency: agreedCurrencyInput,
+      });
+
+      setDispatchDeal(res.updatedDeal);
+      if (res.waitingForTerms) {
+        toast.error(
+          lang === 'fr'
+            ? 'En attente que le partenaire accepte aussi les conditions.'
+            : 'في انتظار موافقة الطرف الآخر على الشروط أولاً.'
+        );
+      } else if (res.finalized) {
+        toast.success(
+          lang === 'fr'
+            ? 'Affaire clôturée ! La commande est enregistrée dans vos tableaux de bord.'
+            : 'تم إغلاق الصفقة بنجاح! سُجل الطلب في قسم «طلبات للموردين» و«طلبات الزبناء».'
+        );
+      }
+    } catch {
+      toast.error(
+        lang === 'fr'
+          ? 'Impossible de clôturer l’affaire pour le moment'
+          : 'تعذر إغلاق الصفقة حالياً، يرجى المحاولة مرة أخرى'
+      );
+    } finally {
+      setIsClosingSupplyDeal(false);
     }
   };
 
@@ -602,6 +735,8 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
                 <Truck className="w-5 h-5 text-primary-dark" />
               ) : other.role === 'driver' ? (
                 <HardHat className="w-5 h-5 text-primary-dark" />
+              ) : other.role === 'supplier' || other.role === 'dealer' ? (
+                <Package className="w-5 h-5 text-primary-dark" />
               ) : (
                 <Building2 className="w-5 h-5 text-primary-dark" />
               )}
@@ -634,6 +769,10 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
                       ? lang === 'fr'
                         ? "Conducteur d'engins"
                         : 'سائق آليات ومعدات'
+                      : other.role === 'supplier' || other.role === 'dealer'
+                      ? lang === 'fr'
+                        ? 'Fournisseur engins & pièces'
+                        : 'مورد آليات وقطع غيار'
                       : lang === 'fr'
                       ? 'Client / Demandeur'
                       : 'زبون / صاحب موقع عمل'}
@@ -944,41 +1083,240 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* 4. Mutual "قبول الصفقة" Bar (Directly Below Messages for Dispatch Opportunities) */}
+      {/* 4. Mutual Deal Bar (Supply Deal: Two-Button Agreement + Deal Closure, Rental: Mutual Accept) */}
       {dispatchDeal && (
         <div className="shrink-0 z-10">
           {dispatchDeal.deal_status === 'closed_other' ? (
             <div className="px-3.5 py-3 bg-steel-100 border-t border-steel-300 flex items-center gap-2.5 text-xs text-steel-700 font-bold">
               <Lock className="w-4 h-4 text-steel-600 shrink-0" />
               <span>
-                {lang === 'fr'
+                {isSupplyDeal
+                  ? lang === 'fr'
+                    ? 'Campagne terminée : cette demande a été conclue avec un autre fournisseur.'
+                    : 'تم إغلاق هذا الطلب بعد اتفاق المالك مع مورد آخر — انتهت حملة البحث.'
+                  : lang === 'fr'
                   ? 'Campagne terminée : cette opportunité a été conclue avec un autre propriétaire.'
                   : 'تم إغلاق هذه المحادثة بعد اتفاق الزبون مع مالك آخر — انتهت حملة البحث.'}
               </span>
             </div>
           ) : dispatchDeal.deal_status === 'accepted' ? (
             <div className="px-3.5 py-2.5 bg-emerald-50 border-t-2 border-emerald-400 flex flex-wrap items-center justify-between gap-2 text-xs">
-              <div className="flex items-center gap-2 min-w-0 text-emerald-900 font-black">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span className="truncate">
-                  {isSpareDeal
-                    ? lang === 'fr'
-                      ? 'Accord confirmé ! Commande de pièce enregistrée.'
-                      : 'تم قبول الصفقة من الطرفين! تم تأكيد طلب قطعة الغيار.'
-                    : lang === 'fr'
-                    ? 'Accord confirmé ! Réservation créée & engin localisé sur le site.'
-                    : 'تم قبول الصفقة من الطرفين! الحجز مفعّل الآن وموقع الآلية تحوّل إلى موقع العمل.'}
-                </span>
+              <div className="flex items-center gap-2.5 min-w-0 text-emerald-900 font-black">
+                {dispatchDeal.fleet_machine_image ? (
+                  <img
+                    src={dispatchDeal.fleet_machine_image}
+                    alt={dispatchDeal.fleet_machine_title || dispatchDeal.machine_name}
+                    className="w-9 h-9 rounded-lg object-cover border border-emerald-300 shrink-0"
+                  />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                )}
+                <div className="min-w-0">
+                  <span className="truncate block">
+                    {isSupplyDeal
+                      ? lang === 'fr'
+                        ? 'Affaire clôturée ! Enregistrée dans vos commandes.'
+                        : 'تم إغلاق الصفقة بنجاح! الطلب مسجل الآن في لوحتي التحكم.'
+                      : lang === 'fr'
+                      ? 'Accord confirmé ! Réservation créée & engin localisé sur le site.'
+                      : 'تم قبول الصفقة من الطرفين! الحجز مفعّل الآن وموقع الآلية تحوّل إلى موقع العمل.'}
+                  </span>
+                  {isSupplyDeal && dispatchDeal.agreed_price && dispatchDeal.agreed_price > 0 && (
+                    <span className="text-[10px] font-bold text-emerald-700 font-mono tabular-nums block">
+                      {Number(dispatchDeal.agreed_price).toLocaleString('fr-FR')}{' '}
+                      {dispatchDeal.agreed_currency === 'EUR' ? '€' : 'MAD'}
+                    </span>
+                  )}
+                </div>
               </div>
               <button
                 type="button"
-                onClick={() => navigate(isContractor ? '/entreprise/bookings' : '/owner/bookings')}
-                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] flex items-center gap-1.5 cursor-pointer shrink-0 transition-colors"
+                onClick={() => {
+                  if (isSupplyDeal) {
+                    if (isRequesterParty && !isContractor) {
+                      navigate('/owner/suppliers');
+                    } else if (!isRequesterParty) {
+                      navigate('/supplier/orders');
+                    } else {
+                      navigate('/entreprise/bookings');
+                    }
+                  } else {
+                    navigate(isContractor ? '/entreprise/bookings' : '/owner/bookings');
+                  }
+                }}
+                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] flex items-center gap-1.5 cursor-pointer shrink-0 transition-colors min-h-[38px]"
               >
-                <CalendarCheck className="w-3.5 h-3.5" />
-                <span>{lang === 'fr' ? 'Voir la commande' : 'عرض الطلب في الحجوزات'}</span>
+                {isSupplyDeal ? (
+                  <ShoppingBag className="w-3.5 h-3.5" />
+                ) : (
+                  <CalendarCheck className="w-3.5 h-3.5" />
+                )}
+                <span>
+                  {isSupplyDeal
+                    ? isRequesterParty
+                      ? lang === 'fr'
+                        ? 'Voir dans Commandes Fournisseurs'
+                        : 'عرض في طلبات للموردين'
+                      : lang === 'fr'
+                      ? 'Voir dans Commandes Clients'
+                      : 'عرض في طلبات الزبناء'
+                    : lang === 'fr'
+                    ? 'Voir la commande'
+                    : 'عرض الطلب في الحجوزات'}
+                </span>
               </button>
             </div>
+          ) : isSupplyDeal ? (
+            (() => {
+              const hasCurrentSupplyTermsAgreed = Boolean(
+                isRequesterParty
+                  ? dispatchDeal.contractor_terms_agreed
+                  : dispatchDeal.owner_terms_agreed
+              );
+              const bothSupplyTermsAgreed = Boolean(
+                dispatchDeal.contractor_terms_agreed && dispatchDeal.owner_terms_agreed
+              );
+              return (
+                <div className="px-3.5 py-3 bg-ink text-white border-t-2 border-primary space-y-2.5">
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
+                    <div className="flex items-center gap-2.5 min-w-0 text-start">
+                      {dispatchDeal.fleet_machine_image ? (
+                        <img
+                          src={dispatchDeal.fleet_machine_image}
+                          alt={dispatchDeal.fleet_machine_title || dispatchDeal.machine_name}
+                          className="w-10 h-10 rounded-xl object-cover border border-primary/40 shrink-0 bg-white/10"
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded-xl bg-primary/15 border border-primary/40 flex items-center justify-center shrink-0">
+                          <Package className="w-5 h-5 text-primary" />
+                        </div>
+                      )}
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex items-center gap-1.5 text-[11px] font-black text-primary truncate">
+                          <span className="truncate">
+                            {dispatchDeal.part_reference
+                              ? `Réf: ${dispatchDeal.part_reference} · `
+                              : ''}
+                            {dispatchDeal.machine_name}
+                            {dispatchDeal.desired_model ? ` · ${dispatchDeal.desired_model}` : ''}
+                            {dispatchDeal.fleet_machine_title
+                              ? ` (${dispatchDeal.fleet_machine_title})`
+                              : ''}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-[10px] font-bold flex-wrap">
+                          <span
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg ${
+                              dispatchDeal.contractor_terms_agreed
+                                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40'
+                                : 'bg-white/10 text-steel-300'
+                            }`}
+                          >
+                            {dispatchDeal.contractor_terms_agreed ? (
+                              <Check className="w-3 h-3" />
+                            ) : (
+                              <Clock className="w-3 h-3" />
+                            )}
+                            <span>
+                              {lang === 'fr' ? 'Accord Propriétaire' : 'موافقة المالك على الشروط'}
+                            </span>
+                          </span>
+                          <span
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg ${
+                              dispatchDeal.owner_terms_agreed
+                                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40'
+                                : 'bg-white/10 text-steel-300'
+                            }`}
+                          >
+                            {dispatchDeal.owner_terms_agreed ? (
+                              <Check className="w-3 h-3" />
+                            ) : (
+                              <Clock className="w-3 h-3" />
+                            )}
+                            <span>
+                              {lang === 'fr' ? 'Accord Fournisseur' : 'موافقة المورد على الشروط'}
+                            </span>
+                          </span>
+                          {dispatchDeal.customs_clearance && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-500/20 text-amber-200 border border-amber-400/30">
+                              <span>{lang === 'fr' ? 'Dédouanement' : 'مع الديوانة'}</span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Optional Agreed Price + Two Required Buttons */}
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      <div className="flex items-center bg-white/10 border border-white/20 rounded-xl px-2 py-1 gap-1.5">
+                        <input
+                          type="number"
+                          min="0"
+                          value={agreedPriceInput}
+                          onChange={(e) => setAgreedPriceInput(e.target.value)}
+                          placeholder={lang === 'fr' ? 'Prix convenu' : 'الثمن المتفق عليه'}
+                          className="w-24 bg-transparent text-white placeholder:text-steel-400 text-[11px] font-bold font-mono focus:outline-none"
+                          dir="ltr"
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setAgreedCurrencyInput((prev) => (prev === 'MAD' ? 'EUR' : 'MAD'))
+                          }
+                          className="px-1.5 py-0.5 rounded-md bg-white/15 text-[10px] font-black text-primary cursor-pointer"
+                        >
+                          {agreedCurrencyInput}
+                        </button>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleAgreeSupplyTerms}
+                        disabled={isAgreeingSupplyTerms}
+                        className={`px-3.5 py-2 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer min-h-[44px] disabled:opacity-60 ${
+                          hasCurrentSupplyTermsAgreed
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/50 hover:bg-emerald-500/30'
+                            : 'bg-primary hover:bg-primary-hover text-ink shadow-md'
+                        }`}
+                      >
+                        {isAgreeingSupplyTerms ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <CheckCircle2 className="w-4 h-4" />
+                        )}
+                        <span>
+                          {hasCurrentSupplyTermsAgreed
+                            ? lang === 'fr'
+                              ? '✓ Conditions acceptées'
+                              : '✓ متفق على شروط الطرف الآخر'
+                            : lang === 'fr'
+                            ? 'Accepter les conditions'
+                            : 'أتفق على شروط الطرف الآخر'}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleCloseSupplyDeal}
+                        disabled={isClosingSupplyDeal}
+                        className={`px-4 py-2 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer min-h-[44px] disabled:opacity-60 ${
+                          bothSupplyTermsAgreed
+                            ? 'bg-emerald-500 hover:bg-emerald-400 text-ink shadow-md'
+                            : 'bg-white/10 hover:bg-white/20 text-white border border-white/25'
+                        }`}
+                      >
+                        {isClosingSupplyDeal ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Handshake className="w-4 h-4" />
+                        )}
+                        <span>{lang === 'fr' ? 'Clôturer l’affaire' : 'إغلاق الصفقة'}</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()
           ) : (
             <div className="px-3.5 py-2.5 bg-ink text-white border-t-2 border-primary flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
               <div className="min-w-0 space-y-1 text-start">
@@ -1003,15 +1341,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
                     ) : (
                       <Clock className="w-3 h-3" />
                     )}
-                    <span>
-                      {isSpareDeal
-                        ? lang === 'fr'
-                          ? 'Demandeur'
-                          : 'موافقة الطالب'
-                        : lang === 'fr'
-                        ? 'Entreprise'
-                        : 'موافقة الزبون'}
-                    </span>
+                    <span>{lang === 'fr' ? 'Entreprise' : 'موافقة الزبون'}</span>
                   </span>
                   <span
                     className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg ${
@@ -1025,15 +1355,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
                     ) : (
                       <Clock className="w-3 h-3" />
                     )}
-                    <span>
-                      {isSpareDeal
-                        ? lang === 'fr'
-                          ? 'Fournisseur'
-                          : 'موافقة المورد'
-                        : lang === 'fr'
-                        ? 'Propriétaire'
-                        : 'موافقة المالك'}
-                    </span>
+                    <span>{lang === 'fr' ? 'Propriétaire' : 'موافقة المالك'}</span>
                   </span>
                 </div>
               </div>

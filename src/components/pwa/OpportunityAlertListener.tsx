@@ -15,6 +15,7 @@ import {
   Globe,
   Navigation,
   Volume2,
+  Eye,
 } from 'lucide-react';
 import { DispatchNotification } from '../../types/database';
 import {
@@ -23,6 +24,7 @@ import {
   parseDispatchDealMessageRow,
   parseDispatchMessageRow,
   relocateMachineToSite,
+  startSupplierChatWithOwner,
   subscribeLocalDispatchEvents,
   updateDispatchNotificationStatus,
 } from '../../lib/dispatchService';
@@ -38,8 +40,10 @@ import {
 } from '../../lib/pushService';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { useLanguage } from '../../hooks/useLanguage';
+import { useAuth } from '../../hooks/useAuth';
 import { formatDistanceKm } from '../../lib/geoUtils';
 import { Button } from '../ui/Button';
+import { RequestDetailsModal } from '../supplier/RequestDetailsModal';
 
 interface OpportunityAlertListenerProps {
   ownerId: string;
@@ -75,9 +79,11 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
   onNotificationsSync,
 }) => {
   const { lang } = useLanguage();
+  const { profile } = useAuth();
   const navigate = useNavigate();
 
   const [activeAlert, setActiveAlert] = useState<DispatchNotification | null>(null);
+  const [previewRequest, setPreviewRequest] = useState<DispatchNotification | null>(null);
   const alertedKeysRef = useRef<Set<string>>(getSessionAlertedKeys());
   const onSyncRef = useRef(onNotificationsSync);
   onSyncRef.current = onNotificationsSync;
@@ -349,6 +355,69 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
     if (!activeAlert) return;
     const alertTarget = activeAlert;
     setActiveAlert(null);
+
+    if (userRole === 'supplier') {
+      const supplierName =
+        profile?.company_name?.trim() ||
+        profile?.full_name?.trim() ||
+        (lang === 'fr' ? 'Fournisseur JADIJCB' : 'مورد معتمد');
+      const { conversationId } = await startSupplierChatWithOwner({
+        supplierId: ownerId,
+        supplierName,
+        request: {
+          campaign_id: alertTarget.campaign_id,
+          notification_id: alertTarget.id,
+          contractor_id: alertTarget.contractor_id,
+          company_name: alertTarget.company_name,
+          campaign_type: alertTarget.campaign_type,
+          machine_category: alertTarget.part_category || 'all',
+          machine_name: alertTarget.machine_name,
+          part_reference: alertTarget.part_reference,
+          part_category: alertTarget.part_category,
+          budget_mad: alertTarget.budget_mad ?? null,
+          import_allowed: alertTarget.import_allowed,
+          preferred_origin: alertTarget.preferred_origin,
+          desired_condition: alertTarget.desired_condition,
+          desired_model: alertTarget.desired_model,
+          customs_clearance: alertTarget.customs_clearance,
+          has_fleet_machine: alertTarget.has_fleet_machine,
+          fleet_machine_id: alertTarget.fleet_machine_id,
+          fleet_machine_title: alertTarget.fleet_machine_title,
+          fleet_machine_image: alertTarget.fleet_machine_image,
+          fleet_machine_brand: alertTarget.fleet_machine_brand,
+          fleet_machine_model: alertTarget.fleet_machine_model,
+          fleet_machine_year: alertTarget.fleet_machine_year ?? null,
+          site_name: alertTarget.site_name,
+          site_city: alertTarget.site_city,
+          site_lat: alertTarget.site_lat,
+          site_lng: alertTarget.site_lng,
+          site_phone: alertTarget.site_phone,
+          distance_km: alertTarget.distance_km,
+          is_nationwide: alertTarget.is_nationwide,
+          notes: alertTarget.notes,
+          matched_machine_id: alertTarget.machine_id,
+          matched_machine_title: alertTarget.matched_machine_title,
+        },
+      });
+      syncFromSource(false);
+      if (conversationId) {
+        navigate(
+          `/supplier/messages?conv=${encodeURIComponent(conversationId)}&campaign=${encodeURIComponent(
+            alertTarget.campaign_id
+          )}`
+        );
+      } else {
+        navigate(
+          `/supplier/messages?target=${encodeURIComponent(
+            alertTarget.contractor_id
+          )}&machine=${encodeURIComponent(alertTarget.machine_id || '')}&campaign=${encodeURIComponent(
+            alertTarget.campaign_id
+          )}`
+        );
+      }
+      return;
+    }
+
     await Promise.allSettled([
       updateDispatchNotificationStatus(
         alertTarget.id,
@@ -362,22 +431,31 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
       }),
     ]);
     syncFromSource(false);
-    if (userRole === 'supplier') {
-      navigate(`/supplier/requests?campaign=${alertTarget.campaign_id}`);
-      return;
-    }
     navigate(
       `/owner/messages?target=${alertTarget.contractor_id}&machine=${alertTarget.machine_id || ''}&campaign=${alertTarget.campaign_id}`
     );
   };
 
-  if (!activeAlert) return null;
+  const handleInspectRequest = async () => {
+    if (!activeAlert) return;
+    const target = activeAlert;
+    setActiveAlert(null);
+    setPreviewRequest(target);
+    await updateDispatchNotificationStatus(
+      target.id,
+      { is_read: true, status: 'read' },
+      target.campaign_id
+    );
+    syncFromSource(false);
+  };
 
   const isSpareAlert =
-    activeAlert.campaign_type === 'spare_part' || Boolean(activeAlert.part_reference);
-  const isPurchaseAlert = activeAlert.campaign_type === 'machine_purchase';
+    activeAlert?.campaign_type === 'spare_part' || Boolean(activeAlert?.part_reference);
+  const isPurchaseAlert = activeAlert?.campaign_type === 'machine_purchase';
 
   return (
+    <>
+      {activeAlert && (
     <div
       role="alert"
       aria-live="assertive"
@@ -502,22 +580,41 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
 
           {/* Action Buttons */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
-            <Button
-              type="button"
-              variant="primary"
-              size="sm"
-              onClick={handleAcceptAndChat}
-              leftIcon={<MessageSquare className="w-4 h-4" />}
-              className="flex-1 justify-center font-black text-xs min-h-[44px]"
-            >
-              {isSpareAlert || isPurchaseAlert
-                ? lang === 'fr'
-                  ? 'Envoyer un devis maintenant'
-                  : 'تقديم عرض سعر ومراسلة المالك'
-                : lang === 'fr'
-                ? 'Accepter & Discuter'
-                : 'أوافق على الكراء — محادثة الآن'}
-            </Button>
+            {userRole === 'supplier' || isSpareAlert || isPurchaseAlert ? (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleInspectRequest}
+                  leftIcon={<Eye className="w-4 h-4" />}
+                  className="flex-1 justify-center font-black text-xs min-h-[44px] bg-white/10 text-white border-white/25 hover:bg-white/20"
+                >
+                  {lang === 'fr' ? 'Voir la demande' : 'ألق نظرة على الطلب'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={handleAcceptAndChat}
+                  leftIcon={<MessageSquare className="w-4 h-4" />}
+                  className="flex-1 justify-center font-black text-xs min-h-[44px]"
+                >
+                  {lang === 'fr' ? 'Démarrer le chat' : 'ابدأ محادثة'}
+                </Button>
+              </>
+            ) : (
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                onClick={handleAcceptAndChat}
+                leftIcon={<MessageSquare className="w-4 h-4" />}
+                className="flex-1 justify-center font-black text-xs min-h-[44px]"
+              >
+                {lang === 'fr' ? 'Accepter & Discuter' : 'أوافق على الكراء — محادثة الآن'}
+              </Button>
+            )}
 
             {activeAlert.site_phone && (
               <a
@@ -533,6 +630,19 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
         </div>
       </div>
     </div>
+      )}
+
+      {/* Full Request Preview Modal ("ألق نظرة على الطلب") */}
+      <RequestDetailsModal
+        isOpen={Boolean(previewRequest)}
+        request={previewRequest}
+        onClose={() => setPreviewRequest(null)}
+        onOpenQuoteForm={(req) => {
+          setPreviewRequest(null);
+          navigate(`/supplier/requests?campaign=${req.campaign_id}`);
+        }}
+      />
+    </>
   );
 };
 

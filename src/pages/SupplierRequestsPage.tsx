@@ -18,6 +18,7 @@ import {
   Loader2,
   Inbox,
   CheckCircle2,
+  Eye,
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Skeleton } from '../components/ui/Skeleton';
@@ -27,6 +28,7 @@ import { useAuth } from '../hooks/useAuth';
 import {
   fetchOpenOwnerRequestsForSupplier,
   sendSupplierQuoteToOwner,
+  startSupplierChatWithOwner,
   subscribeLocalDispatchEvents,
   SupplierOpenRequestItem,
 } from '../lib/dispatchService';
@@ -39,6 +41,7 @@ import {
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { formatDistanceKm } from '../lib/geoUtils';
 import { formatPriceMAD } from '../data/rentalTerms';
+import { RequestDetailsModal } from '../components/supplier/RequestDetailsModal';
 
 type FilterTab = 'all' | 'spare_part' | 'machine_purchase' | 'import';
 
@@ -62,7 +65,9 @@ export const SupplierRequestsPage: React.FC = () => {
   );
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Structured Quote Modal state
+  // Preview ("ألق نظرة على الطلب") & Quote modal states
+  const [previewRequest, setPreviewRequest] = useState<SupplierOpenRequestItem | null>(null);
+  const [startingChatCampId, setStartingChatCampId] = useState<string | null>(null);
   const [quoteTarget, setQuoteTarget] = useState<SupplierOpenRequestItem | null>(null);
   const [priceAmount, setPriceAmount] = useState<string>('');
   const [currency, setCurrency] = useState<'MAD' | 'EUR'>('MAD');
@@ -112,14 +117,47 @@ export const SupplierRequestsPage: React.FC = () => {
     };
   }, [loadRequests, supplierId]);
 
-  // Auto-open quote modal if ?campaign= is provided
+  // Auto-open request preview modal if ?campaign= is provided
   useEffect(() => {
     const campId = searchParams.get('campaign');
-    if (campId && requests.length > 0 && !quoteTarget) {
+    if (campId && requests.length > 0 && !previewRequest && !quoteTarget) {
       const found = requests.find((r) => r.campaign_id === campId);
-      if (found) openQuoteModal(found);
+      if (found) setPreviewRequest(found);
     }
   }, [searchParams, requests]);
+
+  const handleStartDirectChat = async (req: SupplierOpenRequestItem) => {
+    if (!supplierId || startingChatCampId) return;
+    setStartingChatCampId(req.campaign_id);
+    try {
+      const supplierName =
+        profile?.company_name?.trim() ||
+        profile?.full_name?.trim() ||
+        (lang === 'fr' ? 'Fournisseur certifié' : 'مورد معتمد');
+      const { conversationId } = await startSupplierChatWithOwner({
+        supplierId,
+        supplierName,
+        request: req,
+      });
+      if (conversationId) {
+        navigate(
+          `/supplier/messages?conv=${encodeURIComponent(conversationId)}&campaign=${encodeURIComponent(
+            req.campaign_id
+          )}`
+        );
+      } else {
+        navigate(
+          `/supplier/messages?target=${encodeURIComponent(
+            req.contractor_id
+          )}&machine=${encodeURIComponent(req.matched_machine_id || '')}&campaign=${encodeURIComponent(
+            req.campaign_id
+          )}`
+        );
+      }
+    } finally {
+      setStartingChatCampId(null);
+    }
+  };
 
   const openQuoteModal = (req: SupplierOpenRequestItem) => {
     setQuoteTarget(req);
@@ -410,11 +448,11 @@ export const SupplierRequestsPage: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2.5 shrink-0">
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
                   {req.site_phone && (
                     <a
                       href={`tel:${req.site_phone}`}
-                      className="min-h-[44px] px-3.5 rounded-xl bg-white border border-steel-300 text-ink font-black text-xs inline-flex items-center justify-center gap-1.5 hover:bg-steel-50 whitespace-nowrap shrink-0"
+                      className="min-h-[44px] px-3 rounded-xl bg-white border border-steel-300 text-ink font-black text-xs inline-flex items-center justify-center gap-1.5 hover:bg-steel-50 whitespace-nowrap shrink-0"
                     >
                       <Phone className="w-4 h-4 text-emerald-700" />
                       <span>{lang === 'fr' ? 'Appeler' : 'اتصال'}</span>
@@ -422,13 +460,30 @@ export const SupplierRequestsPage: React.FC = () => {
                   )}
                   <Button
                     type="button"
+                    variant="outline"
+                    size="md"
+                    onClick={() => setPreviewRequest(req)}
+                    leftIcon={<Eye className="w-4 h-4" />}
+                    className="min-h-[44px] font-black whitespace-nowrap shrink-0 bg-white"
+                  >
+                    {lang === 'fr' ? 'Voir la demande' : 'ألق نظرة على الطلب'}
+                  </Button>
+                  <Button
+                    type="button"
                     variant="primary"
                     size="md"
-                    onClick={() => openQuoteModal(req)}
-                    leftIcon={<Send className="w-4 h-4" />}
+                    disabled={startingChatCampId === req.campaign_id}
+                    onClick={() => handleStartDirectChat(req)}
+                    leftIcon={
+                      startingChatCampId === req.campaign_id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <MessageSquare className="w-4 h-4" />
+                      )
+                    }
                     className="min-h-[44px] font-black whitespace-nowrap shrink-0"
                   >
-                    {lang === 'fr' ? 'Envoyer un devis' : 'إرسال عرض سعر'}
+                    {lang === 'fr' ? 'Démarrer le chat' : 'ابدأ محادثة'}
                   </Button>
                 </div>
               </div>
@@ -659,6 +714,17 @@ export const SupplierRequestsPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Request Details Preview Modal ("ألق نظرة على الطلب") */}
+      <RequestDetailsModal
+        isOpen={Boolean(previewRequest)}
+        request={previewRequest}
+        onClose={() => setPreviewRequest(null)}
+        onOpenQuoteForm={(req) => {
+          setPreviewRequest(null);
+          openQuoteModal(req as SupplierOpenRequestItem);
+        }}
+      />
     </div>
   );
 };

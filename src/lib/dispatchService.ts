@@ -19,6 +19,7 @@ import {
   DispatchDealStatus,
   DispatchNotification,
   Machine,
+  SupplierOrderDealItem,
   SupplierType,
   UserProfile,
 } from '../types/database';
@@ -31,6 +32,7 @@ import { sendWebPushForDispatch } from './pushService';
 const DISPATCH_CHANNEL_NAME = 'jadijcb_dispatch_channel';
 const LOCAL_CAMPAIGNS_KEY = 'jadijcb_local_dispatch_campaigns';
 const LOCAL_NOTIFS_KEY = 'jadijcb_local_dispatch_notifs';
+const LOCAL_SUPPLIER_ORDERS_KEY = 'jadijcb_supplier_orders';
 export const DISPATCH_MSG_MARKER = '\n#DISPATCH_DATA:';
 export const DISPATCH_DEAL_MARKER = '\n#DISPATCH_DEAL:';
 
@@ -796,6 +798,15 @@ async function sendFallbackDispatchMessage(params: {
       import_allowed: params.notification.import_allowed ?? false,
       preferred_origin: params.notification.preferred_origin || '',
       desired_condition: params.notification.desired_condition || 'any',
+      desired_model: params.notification.desired_model || '',
+      customs_clearance: Boolean(params.notification.customs_clearance),
+      has_fleet_machine: Boolean(params.notification.has_fleet_machine),
+      fleet_machine_id: params.notification.fleet_machine_id || '',
+      fleet_machine_title: params.notification.fleet_machine_title || '',
+      fleet_machine_image: params.notification.fleet_machine_image || '',
+      fleet_machine_brand: params.notification.fleet_machine_brand || '',
+      fleet_machine_model: params.notification.fleet_machine_model || '',
+      fleet_machine_year: params.notification.fleet_machine_year ?? null,
       company_name: params.notification.company_name,
       machine_name: params.notification.machine_name,
       matched_machine_title: params.notification.matched_machine_title,
@@ -810,6 +821,10 @@ async function sendFallbackDispatchMessage(params: {
       notes: params.notification.notes,
       contractor_accepted: Boolean(params.notification.contractor_accepted),
       owner_accepted: Boolean(params.notification.owner_accepted),
+      contractor_terms_agreed: Boolean(params.notification.contractor_terms_agreed),
+      owner_terms_agreed: Boolean(params.notification.owner_terms_agreed),
+      agreed_price: params.notification.agreed_price ?? null,
+      agreed_currency: params.notification.agreed_currency || 'MAD',
       deal_status: params.notification.deal_status || 'open',
     });
 
@@ -855,6 +870,15 @@ export async function launchDispatchCampaign(params: {
   importAllowed?: boolean;
   preferredOrigin?: string;
   desiredCondition?: 'any' | 'new' | 'used' | 'import';
+  desiredModel?: string;
+  customsClearance?: boolean;
+  hasFleetMachine?: boolean;
+  fleetMachineId?: string;
+  fleetMachineTitle?: string;
+  fleetMachineImage?: string;
+  fleetMachineBrand?: string;
+  fleetMachineModel?: string;
+  fleetMachineYear?: number | null;
   siteId?: string;
   siteName: string;
   siteCity?: string;
@@ -902,6 +926,15 @@ export async function launchDispatchCampaign(params: {
     import_allowed: Boolean(params.importAllowed),
     preferred_origin: params.preferredOrigin || '',
     desired_condition: params.desiredCondition || 'any',
+    desired_model: params.desiredModel || '',
+    customs_clearance: Boolean(params.customsClearance),
+    has_fleet_machine: Boolean(params.hasFleetMachine),
+    fleet_machine_id: params.fleetMachineId || '',
+    fleet_machine_title: params.fleetMachineTitle || '',
+    fleet_machine_image: params.fleetMachineImage || '',
+    fleet_machine_brand: params.fleetMachineBrand || '',
+    fleet_machine_model: params.fleetMachineModel || '',
+    fleet_machine_year: params.fleetMachineYear ?? null,
     site_id: params.siteId || null,
     site_name: params.siteName,
     site_city: params.siteCity || '',
@@ -930,6 +963,15 @@ export async function launchDispatchCampaign(params: {
     import_allowed: Boolean(params.importAllowed),
     preferred_origin: params.preferredOrigin || '',
     desired_condition: params.desiredCondition || 'any',
+    desired_model: params.desiredModel || '',
+    customs_clearance: Boolean(params.customsClearance),
+    has_fleet_machine: Boolean(params.hasFleetMachine),
+    fleet_machine_id: params.fleetMachineId || '',
+    fleet_machine_title: params.fleetMachineTitle || '',
+    fleet_machine_image: params.fleetMachineImage || '',
+    fleet_machine_brand: params.fleetMachineBrand || '',
+    fleet_machine_model: params.fleetMachineModel || '',
+    fleet_machine_year: params.fleetMachineYear ?? null,
     company_name: params.companyName,
     machine_name: params.machineName,
     matched_machine_title: t.matched_machine_title,
@@ -946,6 +988,8 @@ export async function launchDispatchCampaign(params: {
     is_read: false,
     contractor_accepted: false,
     owner_accepted: false,
+    contractor_terms_agreed: false,
+    owner_terms_agreed: false,
     deal_status: 'open',
     created_at: now,
   }));
@@ -955,7 +999,7 @@ export async function launchDispatchCampaign(params: {
     try {
       const insertCampPayload = { ...campaignPayload };
       let campErr: any = null;
-      for (let attempt = 0; attempt < 8; attempt++) {
+      for (let attempt = 0; attempt < 20; attempt++) {
         const res = await supabase.from('dispatch_campaigns').insert(insertCampPayload);
         campErr = res.error;
         if (!campErr) break;
@@ -983,6 +1027,15 @@ export async function launchDispatchCampaign(params: {
             import_allowed: Boolean(params.importAllowed),
             preferred_origin: params.preferredOrigin || '',
             desired_condition: params.desiredCondition || 'any',
+            desired_model: params.desiredModel || '',
+            customs_clearance: Boolean(params.customsClearance),
+            has_fleet_machine: Boolean(params.hasFleetMachine),
+            fleet_machine_id: params.fleetMachineId || '',
+            fleet_machine_title: params.fleetMachineTitle || '',
+            fleet_machine_image: params.fleetMachineImage || '',
+            fleet_machine_brand: params.fleetMachineBrand || '',
+            fleet_machine_model: params.fleetMachineModel || '',
+            fleet_machine_year: params.fleetMachineYear ?? null,
             company_name: n.company_name,
             machine_name: n.machine_name,
             matched_machine_title: n.matched_machine_title || '',
@@ -1000,7 +1053,7 @@ export async function launchDispatchCampaign(params: {
           }));
 
           let notifErr: any = null;
-          for (let attempt = 0; attempt < 8; attempt++) {
+          for (let attempt = 0; attempt < 20; attempt++) {
             const res = await supabase.from('dispatch_notifications').insert(notifRows);
             notifErr = res.error;
             if (!notifErr) break;
@@ -1083,6 +1136,15 @@ export async function launchDispatchCampaign(params: {
               import_allowed: Boolean(params.importAllowed),
               preferred_origin: params.preferredOrigin || '',
               desired_condition: params.desiredCondition || 'any',
+              desired_model: params.desiredModel || '',
+              customs_clearance: Boolean(params.customsClearance),
+              has_fleet_machine: Boolean(params.hasFleetMachine),
+              fleet_machine_id: params.fleetMachineId || '',
+              fleet_machine_title: params.fleetMachineTitle || '',
+              fleet_machine_image: params.fleetMachineImage || '',
+              fleet_machine_brand: params.fleetMachineBrand || '',
+              fleet_machine_model: params.fleetMachineModel || '',
+              fleet_machine_year: params.fleetMachineYear ?? null,
               company_name: n.company_name,
               machine_name: n.machine_name,
               matched_machine_title: n.matched_machine_title,
@@ -1171,6 +1233,15 @@ export async function launchDispatchCampaign(params: {
             import_allowed: Boolean(params.importAllowed),
             preferred_origin: params.preferredOrigin || '',
             desired_condition: params.desiredCondition || 'any',
+            desired_model: params.desiredModel || '',
+            customs_clearance: Boolean(params.customsClearance),
+            has_fleet_machine: Boolean(params.hasFleetMachine),
+            fleet_machine_id: params.fleetMachineId || '',
+            fleet_machine_title: params.fleetMachineTitle || '',
+            fleet_machine_image: params.fleetMachineImage || '',
+            fleet_machine_brand: params.fleetMachineBrand || '',
+            fleet_machine_model: params.fleetMachineModel || '',
+            fleet_machine_year: params.fleetMachineYear ?? null,
             company_name: n.company_name,
             machine_name: n.machine_name,
             matched_machine_title: n.matched_machine_title,
@@ -1247,6 +1318,15 @@ function mapGenericNotificationToDispatch(row: any): DispatchNotification | null
     import_allowed: Boolean(data.import_allowed),
     preferred_origin: data.preferred_origin || undefined,
     desired_condition: data.desired_condition || undefined,
+    desired_model: data.desired_model || undefined,
+    customs_clearance: Boolean(data.customs_clearance),
+    has_fleet_machine: Boolean(data.has_fleet_machine),
+    fleet_machine_id: data.fleet_machine_id || undefined,
+    fleet_machine_title: data.fleet_machine_title || undefined,
+    fleet_machine_image: data.fleet_machine_image || undefined,
+    fleet_machine_brand: data.fleet_machine_brand || undefined,
+    fleet_machine_model: data.fleet_machine_model || undefined,
+    fleet_machine_year: data.fleet_machine_year != null ? Number(data.fleet_machine_year) : null,
     company_name: data.company_name || 'مقاولة أشغال',
     machine_name: data.machine_name || 'آلية بناء',
     matched_machine_title: data.matched_machine_title || undefined,
@@ -1263,6 +1343,10 @@ function mapGenericNotificationToDispatch(row: any): DispatchNotification | null
     is_read: Boolean(row.is_read || row.read),
     contractor_accepted: Boolean(data.contractor_accepted),
     owner_accepted: Boolean(data.owner_accepted),
+    contractor_terms_agreed: Boolean(data.contractor_terms_agreed),
+    owner_terms_agreed: Boolean(data.owner_terms_agreed),
+    agreed_price: data.agreed_price != null ? Number(data.agreed_price) : null,
+    agreed_currency: data.agreed_currency || undefined,
     deal_status: (data.deal_status as DispatchDealStatus) || 'open',
     booking_id: data.booking_id || null,
     created_at: row.created_at || new Date().toISOString(),
@@ -1295,6 +1379,15 @@ export function parseDispatchMessageRow(msg: any, ownerId: string): DispatchNoti
       import_allowed: Boolean(data.import_allowed),
       preferred_origin: data.preferred_origin || undefined,
       desired_condition: data.desired_condition || undefined,
+      desired_model: data.desired_model || undefined,
+      customs_clearance: Boolean(data.customs_clearance),
+      has_fleet_machine: Boolean(data.has_fleet_machine),
+      fleet_machine_id: data.fleet_machine_id || undefined,
+      fleet_machine_title: data.fleet_machine_title || undefined,
+      fleet_machine_image: data.fleet_machine_image || undefined,
+      fleet_machine_brand: data.fleet_machine_brand || undefined,
+      fleet_machine_model: data.fleet_machine_model || undefined,
+      fleet_machine_year: data.fleet_machine_year != null ? Number(data.fleet_machine_year) : null,
       company_name: data.company_name || 'مقاولة أشغال',
       machine_name: data.machine_name || 'آلية بناء',
       matched_machine_title: data.matched_machine_title || undefined,
@@ -1311,6 +1404,10 @@ export function parseDispatchMessageRow(msg: any, ownerId: string): DispatchNoti
       is_read: isRead,
       contractor_accepted: Boolean(data.contractor_accepted),
       owner_accepted: Boolean(data.owner_accepted),
+      contractor_terms_agreed: Boolean(data.contractor_terms_agreed),
+      owner_terms_agreed: Boolean(data.owner_terms_agreed),
+      agreed_price: data.agreed_price != null ? Number(data.agreed_price) : null,
+      agreed_currency: data.agreed_currency || undefined,
       deal_status: (data.deal_status as DispatchDealStatus) || 'open',
       created_at: msg.created_at || new Date().toISOString(),
     };
@@ -1514,6 +1611,10 @@ export async function updateDispatchNotificationStatus(
     is_read?: boolean;
     contractor_accepted?: boolean;
     owner_accepted?: boolean;
+    contractor_terms_agreed?: boolean;
+    owner_terms_agreed?: boolean;
+    agreed_price?: number | null;
+    agreed_currency?: 'MAD' | 'EUR';
     deal_status?: DispatchDealStatus;
     booking_id?: string | null;
   },
@@ -1854,6 +1955,18 @@ export async function fetchDispatchContextForConversation(params: {
   const ownerAccepted = Boolean(
     dbNotif?.owner_accepted || latestDealMsg?.owner_accepted || localNotif?.owner_accepted
   );
+  const contractorTermsAgreed = Boolean(
+    dbNotif?.contractor_terms_agreed ||
+      latestDealMsg?.contractor_terms_agreed ||
+      localNotif?.contractor_terms_agreed ||
+      contractorAccepted
+  );
+  const ownerTermsAgreed = Boolean(
+    dbNotif?.owner_terms_agreed ||
+      latestDealMsg?.owner_terms_agreed ||
+      localNotif?.owner_terms_agreed ||
+      ownerAccepted
+  );
 
   let dealStatus: DispatchDealStatus =
     (latestDealMsg?.deal_status as DispatchDealStatus) ||
@@ -1949,6 +2062,78 @@ export async function fetchDispatchContextForConversation(params: {
       localNotif?.desired_condition ||
       localCamp?.desired_condition ||
       undefined,
+    desired_model:
+      dbNotif?.desired_model ||
+      dbCampaign?.desired_model ||
+      latestDealMsg?.desired_model ||
+      baseData?.desired_model ||
+      localNotif?.desired_model ||
+      localCamp?.desired_model ||
+      undefined,
+    customs_clearance: Boolean(
+      dbNotif?.customs_clearance ??
+      dbCampaign?.customs_clearance ??
+      latestDealMsg?.customs_clearance ??
+      baseData?.customs_clearance ??
+      localNotif?.customs_clearance ??
+      localCamp?.customs_clearance
+    ),
+    has_fleet_machine: Boolean(
+      dbNotif?.has_fleet_machine ??
+      dbCampaign?.has_fleet_machine ??
+      latestDealMsg?.has_fleet_machine ??
+      baseData?.has_fleet_machine ??
+      localNotif?.has_fleet_machine ??
+      localCamp?.has_fleet_machine
+    ),
+    fleet_machine_id:
+      dbNotif?.fleet_machine_id ||
+      dbCampaign?.fleet_machine_id ||
+      latestDealMsg?.fleet_machine_id ||
+      baseData?.fleet_machine_id ||
+      localNotif?.fleet_machine_id ||
+      localCamp?.fleet_machine_id ||
+      undefined,
+    fleet_machine_title:
+      dbNotif?.fleet_machine_title ||
+      dbCampaign?.fleet_machine_title ||
+      latestDealMsg?.fleet_machine_title ||
+      baseData?.fleet_machine_title ||
+      localNotif?.fleet_machine_title ||
+      localCamp?.fleet_machine_title ||
+      undefined,
+    fleet_machine_image:
+      dbNotif?.fleet_machine_image ||
+      dbCampaign?.fleet_machine_image ||
+      latestDealMsg?.fleet_machine_image ||
+      baseData?.fleet_machine_image ||
+      localNotif?.fleet_machine_image ||
+      localCamp?.fleet_machine_image ||
+      undefined,
+    fleet_machine_brand:
+      dbNotif?.fleet_machine_brand ||
+      dbCampaign?.fleet_machine_brand ||
+      latestDealMsg?.fleet_machine_brand ||
+      baseData?.fleet_machine_brand ||
+      localNotif?.fleet_machine_brand ||
+      localCamp?.fleet_machine_brand ||
+      undefined,
+    fleet_machine_model:
+      dbNotif?.fleet_machine_model ||
+      dbCampaign?.fleet_machine_model ||
+      latestDealMsg?.fleet_machine_model ||
+      baseData?.fleet_machine_model ||
+      localNotif?.fleet_machine_model ||
+      localCamp?.fleet_machine_model ||
+      undefined,
+    fleet_machine_year:
+      dbNotif?.fleet_machine_year ??
+      dbCampaign?.fleet_machine_year ??
+      latestDealMsg?.fleet_machine_year ??
+      baseData?.fleet_machine_year ??
+      localNotif?.fleet_machine_year ??
+      localCamp?.fleet_machine_year ??
+      null,
     company_name:
       dbNotif?.company_name ||
       latestDealMsg?.company_name ||
@@ -2011,6 +2196,43 @@ export async function fetchDispatchContextForConversation(params: {
       '',
     contractor_accepted: contractorAccepted || dealStatus === 'accepted',
     owner_accepted: ownerAccepted || dealStatus === 'accepted',
+    contractor_terms_agreed: contractorTermsAgreed || dealStatus === 'accepted',
+    owner_terms_agreed: ownerTermsAgreed || dealStatus === 'accepted',
+    agreed_price:
+      latestDealMsg?.agreed_price ??
+      dbNotif?.agreed_price ??
+      dbCampaign?.agreed_price ??
+      baseData?.agreed_price ??
+      localNotif?.agreed_price ??
+      localCamp?.agreed_price ??
+      null,
+    agreed_currency:
+      latestDealMsg?.agreed_currency ||
+      dbNotif?.agreed_currency ||
+      dbCampaign?.agreed_currency ||
+      baseData?.agreed_currency ||
+      localNotif?.agreed_currency ||
+      'MAD',
+    agreed_supply_source:
+      latestDealMsg?.agreed_supply_source ||
+      dbCampaign?.agreed_supply_source ||
+      baseData?.agreed_supply_source ||
+      undefined,
+    won_supplier_name:
+      latestDealMsg?.won_supplier_name ||
+      dbCampaign?.won_supplier_name ||
+      localCamp?.won_supplier_name ||
+      undefined,
+    won_supplier_phone:
+      latestDealMsg?.won_supplier_phone ||
+      dbCampaign?.won_supplier_phone ||
+      localCamp?.won_supplier_phone ||
+      undefined,
+    won_supplier_city:
+      latestDealMsg?.won_supplier_city ||
+      dbCampaign?.won_supplier_city ||
+      localCamp?.won_supplier_city ||
+      undefined,
     deal_status: dealStatus,
     booking_id:
       dbNotif?.booking_id ||
@@ -2440,6 +2662,15 @@ export interface SupplierOpenRequestItem {
   import_allowed?: boolean;
   preferred_origin?: string;
   desired_condition?: 'any' | 'new' | 'used' | 'import';
+  desired_model?: string;
+  customs_clearance?: boolean;
+  has_fleet_machine?: boolean;
+  fleet_machine_id?: string;
+  fleet_machine_title?: string;
+  fleet_machine_image?: string;
+  fleet_machine_brand?: string;
+  fleet_machine_model?: string;
+  fleet_machine_year?: number | null;
   site_name: string;
   site_city?: string;
   site_lat?: number;
@@ -2495,6 +2726,15 @@ export async function fetchOpenOwnerRequestsForSupplier(
         import_allowed: Boolean(n.import_allowed),
         preferred_origin: n.preferred_origin,
         desired_condition: n.desired_condition,
+        desired_model: n.desired_model,
+        customs_clearance: Boolean(n.customs_clearance),
+        has_fleet_machine: Boolean(n.has_fleet_machine),
+        fleet_machine_id: n.fleet_machine_id,
+        fleet_machine_title: n.fleet_machine_title,
+        fleet_machine_image: n.fleet_machine_image,
+        fleet_machine_brand: n.fleet_machine_brand,
+        fleet_machine_model: n.fleet_machine_model,
+        fleet_machine_year: n.fleet_machine_year ?? null,
         site_name: n.site_name || n.site_city || 'المغرب',
         site_city: n.site_city || '',
         site_lat: n.site_lat,
@@ -2536,6 +2776,15 @@ export async function fetchOpenOwnerRequestsForSupplier(
             import_allowed: Boolean(c.import_allowed ?? existing.import_allowed),
             preferred_origin: c.preferred_origin || existing.preferred_origin,
             desired_condition: c.desired_condition || existing.desired_condition,
+            desired_model: c.desired_model || existing.desired_model,
+            customs_clearance: Boolean(c.customs_clearance ?? existing.customs_clearance),
+            has_fleet_machine: Boolean(c.has_fleet_machine ?? existing.has_fleet_machine),
+            fleet_machine_id: c.fleet_machine_id || existing.fleet_machine_id,
+            fleet_machine_title: c.fleet_machine_title || existing.fleet_machine_title,
+            fleet_machine_image: c.fleet_machine_image || existing.fleet_machine_image,
+            fleet_machine_brand: c.fleet_machine_brand || existing.fleet_machine_brand,
+            fleet_machine_model: c.fleet_machine_model || existing.fleet_machine_model,
+            fleet_machine_year: c.fleet_machine_year ?? existing.fleet_machine_year ?? null,
           });
           continue;
         }
@@ -2552,6 +2801,15 @@ export async function fetchOpenOwnerRequestsForSupplier(
           import_allowed: Boolean(c.import_allowed),
           preferred_origin: c.preferred_origin,
           desired_condition: c.desired_condition,
+          desired_model: c.desired_model,
+          customs_clearance: Boolean(c.customs_clearance),
+          has_fleet_machine: Boolean(c.has_fleet_machine),
+          fleet_machine_id: c.fleet_machine_id,
+          fleet_machine_title: c.fleet_machine_title,
+          fleet_machine_image: c.fleet_machine_image,
+          fleet_machine_brand: c.fleet_machine_brand,
+          fleet_machine_model: c.fleet_machine_model,
+          fleet_machine_year: c.fleet_machine_year ?? null,
           site_name: c.site_name || c.site_city || 'المغرب',
           site_city: c.site_city || '',
           site_lat: c.site_lat,
@@ -2594,6 +2852,15 @@ export async function fetchOpenOwnerRequestsForSupplier(
         import_allowed: Boolean(c.import_allowed),
         preferred_origin: c.preferred_origin,
         desired_condition: c.desired_condition,
+        desired_model: c.desired_model,
+        customs_clearance: Boolean(c.customs_clearance),
+        has_fleet_machine: Boolean(c.has_fleet_machine),
+        fleet_machine_id: c.fleet_machine_id,
+        fleet_machine_title: c.fleet_machine_title,
+        fleet_machine_image: c.fleet_machine_image,
+        fleet_machine_brand: c.fleet_machine_brand,
+        fleet_machine_model: c.fleet_machine_model,
+        fleet_machine_year: c.fleet_machine_year ?? null,
         site_name: c.site_name || c.site_city || 'المغرب',
         site_city: c.site_city || '',
         site_lat: c.site_lat,
@@ -2665,6 +2932,15 @@ export async function sendSupplierQuoteToOwner(params: {
     import_allowed: Boolean(request.import_allowed),
     preferred_origin: request.preferred_origin || '',
     desired_condition: request.desired_condition || 'any',
+    desired_model: request.desired_model || '',
+    customs_clearance: Boolean(request.customs_clearance),
+    has_fleet_machine: Boolean(request.has_fleet_machine),
+    fleet_machine_id: request.fleet_machine_id || '',
+    fleet_machine_title: request.fleet_machine_title || '',
+    fleet_machine_image: request.fleet_machine_image || '',
+    fleet_machine_brand: request.fleet_machine_brand || '',
+    fleet_machine_model: request.fleet_machine_model || '',
+    fleet_machine_year: request.fleet_machine_year ?? null,
     company_name: request.company_name,
     machine_name: request.machine_name,
     matched_machine_title: supplierName,
@@ -2679,6 +2955,11 @@ export async function sendSupplierQuoteToOwner(params: {
     notes: params.notes || request.notes || '',
     contractor_accepted: false,
     owner_accepted: false,
+    contractor_terms_agreed: false,
+    owner_terms_agreed: false,
+    agreed_price: params.priceAmount,
+    agreed_currency: params.currency,
+    agreed_supply_source: params.supplySource,
     deal_status: 'open',
   });
 
@@ -2777,4 +3058,747 @@ export async function sendSupplierQuoteToOwner(params: {
 
   return { success: Boolean(conversationId), conversationId: conversationId || undefined };
 }
+
+export async function startSupplierChatWithOwner(params: {
+  supplierId: string;
+  supplierName: string;
+  request: {
+    campaign_id: string;
+    notification_id?: string;
+    contractor_id: string;
+    company_name: string;
+    campaign_type?: DispatchCampaignType;
+    machine_category?: string;
+    machine_name: string;
+    part_reference?: string;
+    part_category?: string;
+    budget_mad?: number | null;
+    import_allowed?: boolean;
+    preferred_origin?: string;
+    desired_condition?: 'any' | 'new' | 'used' | 'import';
+    desired_model?: string;
+    customs_clearance?: boolean;
+    has_fleet_machine?: boolean;
+    fleet_machine_id?: string;
+    fleet_machine_title?: string;
+    fleet_machine_image?: string;
+    fleet_machine_brand?: string;
+    fleet_machine_model?: string;
+    fleet_machine_year?: number | null;
+    site_name: string;
+    site_city?: string;
+    site_lat?: number;
+    site_lng?: number;
+    site_phone?: string;
+    distance_km?: number | null;
+    is_nationwide?: boolean;
+    notes?: string;
+    matched_machine_id?: string;
+    matched_machine_title?: string;
+  };
+}): Promise<{ conversationId?: string }> {
+  const { supplierId, supplierName, request } = params;
+  if (!supplierId || !request.contractor_id) return {};
+
+  const notifObj: DispatchNotification = {
+    id: request.notification_id || makeUuid(),
+    campaign_id: request.campaign_id,
+    owner_id: supplierId,
+    contractor_id: request.contractor_id,
+    machine_id: request.matched_machine_id,
+    campaign_type: request.campaign_type || 'spare_part',
+    part_reference: request.part_reference,
+    part_category: request.part_category,
+    budget_mad: request.budget_mad ?? null,
+    import_allowed: Boolean(request.import_allowed),
+    preferred_origin: request.preferred_origin,
+    desired_condition: request.desired_condition,
+    desired_model: request.desired_model,
+    customs_clearance: Boolean(request.customs_clearance),
+    has_fleet_machine: Boolean(request.has_fleet_machine),
+    fleet_machine_id: request.fleet_machine_id,
+    fleet_machine_title: request.fleet_machine_title,
+    fleet_machine_image: request.fleet_machine_image,
+    fleet_machine_brand: request.fleet_machine_brand,
+    fleet_machine_model: request.fleet_machine_model,
+    fleet_machine_year: request.fleet_machine_year ?? null,
+    company_name: request.company_name,
+    machine_name: request.machine_name,
+    matched_machine_title: request.matched_machine_title || supplierName,
+    site_name: request.site_name,
+    site_city: request.site_city,
+    site_lat: request.site_lat,
+    site_lng: request.site_lng,
+    site_phone: request.site_phone,
+    distance_km: request.distance_km ?? null,
+    is_nationwide: Boolean(request.is_nationwide),
+    radius_km: null,
+    notes: request.notes,
+    status: 'accepted',
+    is_read: true,
+    created_at: new Date().toISOString(),
+  };
+
+  await Promise.allSettled([
+    request.notification_id
+      ? updateDispatchNotificationStatus(
+          request.notification_id,
+          { is_read: true, status: 'accepted' },
+          request.campaign_id
+        )
+      : Promise.resolve(),
+    ensureDispatchConversationLinked({
+      contractorId: request.contractor_id,
+      ownerId: supplierId,
+      notification: notifObj,
+    }),
+  ]);
+
+  let convId: string | undefined;
+  try {
+    const conv = await chatStore.getOrCreateConversation(
+      supplierId,
+      request.contractor_id,
+      request.matched_machine_id ? { id: request.matched_machine_id } : null,
+      {
+        id: request.contractor_id,
+        company_name: request.company_name,
+        phone: request.site_phone,
+        city: request.site_city,
+        role: 'owner',
+      }
+    );
+    convId = conv.id;
+  } catch {
+    // ignore
+  }
+
+  return { conversationId: convId };
+}
+
+function saveLocalSupplierOrder(order: SupplierOrderDealItem) {
+  try {
+    const existing: SupplierOrderDealItem[] = JSON.parse(
+      localStorage.getItem(LOCAL_SUPPLIER_ORDERS_KEY) || '[]'
+    );
+    const filtered = existing.filter((o) => o.campaign_id !== order.campaign_id);
+    localStorage.setItem(
+      LOCAL_SUPPLIER_ORDERS_KEY,
+      JSON.stringify([order, ...filtered].slice(0, 100))
+    );
+  } catch {
+    // ignore
+  }
+}
+
+async function persistSupplierOrderForBothSides(order: SupplierOrderDealItem): Promise<void> {
+  saveLocalSupplierOrder(order);
+
+  const recipients = Array.from(new Set([order.owner_id, order.supplier_id].filter(Boolean)));
+  const itemSummary = order.part_reference
+    ? `${order.item_title} (Réf: ${order.part_reference})`
+    : order.item_title;
+
+  if (isSupabaseConfigured) {
+    await Promise.allSettled(
+      recipients
+        .filter((uid) => isUuid(uid))
+        .map((uid) =>
+          supabase.from('notifications').insert({
+            user_id: uid,
+            title_ar:
+              order.campaign_type === 'spare_part'
+                ? 'تم إغلاق صفقة قطعة غيار ✅'
+                : 'تم إغلاق صفقة شراء / استيراد آلية ✅',
+            title_fr:
+              order.campaign_type === 'spare_part'
+                ? 'Commande pièce clôturée ✅'
+                : 'Commande engin clôturée ✅',
+            body_ar: `${itemSummary}${order.agreed_price ? ` · ${order.agreed_price.toLocaleString()} ${order.agreed_currency === 'EUR' ? '€' : 'د.م'}` : ''}`,
+            body_fr: `${itemSummary}${order.agreed_price ? ` · ${order.agreed_price.toLocaleString()} ${order.agreed_currency === 'EUR' ? '€' : 'MAD'}` : ''}`,
+            type: 'supplier_order_closed',
+            data: order,
+            is_read: false,
+          })
+        )
+    );
+  }
+
+  await Promise.allSettled(
+    recipients.map((uid) =>
+      serverApi.createNotification({
+        user_id: uid,
+        title_ar:
+          order.campaign_type === 'spare_part'
+            ? 'تم إغلاق صفقة قطعة غيار ✅'
+            : 'تم إغلاق صفقة شراء / استيراد آلية ✅',
+        title_fr:
+          order.campaign_type === 'spare_part'
+            ? 'Commande pièce clôturée ✅'
+            : 'Commande engin clôturée ✅',
+        body_ar: itemSummary,
+        body_fr: itemSummary,
+        type: 'supplier_order_closed',
+        data: order as any,
+      })
+    )
+  );
+}
+
+export async function agreeSupplyDealTermsParty(params: {
+  deal: DispatchDealContext;
+  partyRole: 'contractor' | 'owner';
+  currentUserId: string;
+  currentUserName?: string;
+  conversationId: string;
+  agreedPrice?: number | null;
+  agreedCurrency?: 'MAD' | 'EUR';
+}): Promise<{ updatedDeal: DispatchDealContext; bothAgreedTerms: boolean }> {
+  const { deal, partyRole, currentUserId, conversationId } = params;
+
+  const latest =
+    (await fetchDispatchContextForConversation({
+      currentUserId,
+      otherUserId: partyRole === 'contractor' ? deal.owner_id : deal.contractor_id,
+      machineId: deal.machine_id,
+      campaignIdHint: deal.campaign_id,
+    })) || deal;
+
+  if (latest.deal_status === 'accepted' || latest.deal_status === 'closed_other') {
+    return {
+      updatedDeal: latest,
+      bothAgreedTerms: Boolean(latest.contractor_terms_agreed && latest.owner_terms_agreed),
+    };
+  }
+
+  const nextContractorTerms =
+    partyRole === 'contractor' ? true : Boolean(latest.contractor_terms_agreed);
+  const nextOwnerTerms = partyRole === 'owner' ? true : Boolean(latest.owner_terms_agreed);
+  const bothAgreedTerms = nextContractorTerms && nextOwnerTerms;
+
+  const updatedDeal: DispatchDealContext = {
+    ...latest,
+    contractor_terms_agreed: nextContractorTerms,
+    owner_terms_agreed: nextOwnerTerms,
+    agreed_price:
+      params.agreedPrice != null && params.agreedPrice > 0
+        ? params.agreedPrice
+        : latest.agreed_price ?? null,
+    agreed_currency: params.agreedCurrency || latest.agreed_currency || 'MAD',
+  };
+
+  if (latest.notification_id) {
+    await updateDispatchNotificationStatus(
+      latest.notification_id,
+      {
+        is_read: true,
+        contractor_terms_agreed: nextContractorTerms,
+        owner_terms_agreed: nextOwnerTerms,
+        agreed_price: updatedDeal.agreed_price ?? null,
+        agreed_currency: updatedDeal.agreed_currency,
+      },
+      latest.campaign_id
+    );
+  }
+
+  const priceSuffix =
+    updatedDeal.agreed_price && updatedDeal.agreed_price > 0
+      ? ` (${Number(updatedDeal.agreed_price).toLocaleString()} ${
+          updatedDeal.agreed_currency === 'EUR' ? '€' : 'د.م'
+        })`
+      : '';
+
+  const textMsg = bothAgreedTerms
+    ? `🤝 وافق الطرفان على الشروط المتفق عليها${priceSuffix}! يمكن الآن الضغط على «إغلاق الصفقة» لتسجيل الطلب في لوحتي التحكم.`
+    : partyRole === 'contractor'
+    ? `✅ وافق مالك الآلية على شروط المورد${priceSuffix} — في انتظار ضغط المورد على «أتفق على شروط الطرف الآخر».`
+    : `✅ وافق المورد على شروط المالك${priceSuffix} — في انتظار ضغط المالك على «أتفق على شروط الطرف الآخر».`;
+
+  await chatStore.sendMessage(
+    conversationId,
+    currentUserId,
+    `${textMsg}${DISPATCH_DEAL_MARKER}${JSON.stringify(updatedDeal)}`,
+    partyRole === 'contractor' ? latest.owner_id : latest.contractor_id,
+    { senderName: params.currentUserName }
+  );
+
+  broadcastDispatchEvent({
+    type: 'DEAL_STEP_UPDATED',
+    campaignId: latest.campaign_id,
+    deal: updatedDeal,
+  });
+
+  return { updatedDeal, bothAgreedTerms };
+}
+
+export async function closeSupplyDealParty(params: {
+  deal: DispatchDealContext;
+  partyRole: 'contractor' | 'owner';
+  currentUserId: string;
+  currentUserName?: string;
+  currentUserPhone?: string;
+  currentUserCity?: string;
+  otherParticipant?: {
+    id: string;
+    full_name?: string;
+    company_name?: string;
+    phone?: string;
+    city?: string;
+  };
+  conversationId: string;
+  agreedPrice?: number | null;
+  agreedCurrency?: 'MAD' | 'EUR';
+}): Promise<{
+  updatedDeal: DispatchDealContext;
+  finalized: boolean;
+  waitingForTerms?: boolean;
+}> {
+  const { deal, partyRole, currentUserId, conversationId, otherParticipant } = params;
+
+  const latest =
+    (await fetchDispatchContextForConversation({
+      currentUserId,
+      otherUserId: partyRole === 'contractor' ? deal.owner_id : deal.contractor_id,
+      machineId: deal.machine_id,
+      campaignIdHint: deal.campaign_id,
+    })) || deal;
+
+  if (latest.deal_status === 'accepted') {
+    return { updatedDeal: latest, finalized: true };
+  }
+  if (latest.deal_status === 'closed_other') {
+    return { updatedDeal: latest, finalized: false };
+  }
+
+  const bothTermsAgreed = Boolean(latest.contractor_terms_agreed && latest.owner_terms_agreed);
+  if (!bothTermsAgreed) {
+    return { updatedDeal: latest, finalized: false, waitingForTerms: true };
+  }
+
+  const supplierId = latest.owner_id;
+  const ownerRequesterId = latest.contractor_id;
+  const isSupplierParty = partyRole === 'owner';
+
+  let supplierName =
+    (isSupplierParty
+      ? params.currentUserName
+      : otherParticipant?.company_name || otherParticipant?.full_name) ||
+    latest.won_supplier_name ||
+    latest.matched_machine_title ||
+    'مورد معتمد';
+  let supplierPhone =
+    (isSupplierParty ? params.currentUserPhone : otherParticipant?.phone) ||
+    latest.won_supplier_phone ||
+    '';
+  let supplierCity =
+    (isSupplierParty ? params.currentUserCity : otherParticipant?.city) ||
+    latest.won_supplier_city ||
+    '';
+
+  let ownerName =
+    (!isSupplierParty
+      ? params.currentUserName
+      : otherParticipant?.company_name || otherParticipant?.full_name) ||
+    latest.company_name ||
+    'مالك آليات';
+  let ownerPhone =
+    (!isSupplierParty ? params.currentUserPhone : otherParticipant?.phone) ||
+    latest.site_phone ||
+    '';
+  let ownerCity =
+    (!isSupplierParty ? params.currentUserCity : otherParticipant?.city) ||
+    latest.site_city ||
+    '';
+
+  if (isSupabaseConfigured) {
+    try {
+      const idsToLoad = [supplierId, ownerRequesterId].filter((id) => isUuid(id));
+      if (idsToLoad.length > 0) {
+        const { data: profs } = await supabase
+          .from('profiles')
+          .select('id, full_name, company_name, phone, city')
+          .in('id', idsToLoad);
+        for (const p of profs || []) {
+          if (p.id === supplierId) {
+            supplierName = p.company_name || p.full_name || supplierName;
+            supplierPhone = p.phone || supplierPhone;
+            supplierCity = p.city || supplierCity;
+          }
+          if (p.id === ownerRequesterId) {
+            ownerName = p.company_name || p.full_name || ownerName;
+            ownerPhone = p.phone || ownerPhone;
+            ownerCity = p.city || ownerCity;
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const finalPrice =
+    params.agreedPrice != null && params.agreedPrice > 0
+      ? params.agreedPrice
+      : latest.agreed_price ?? latest.budget_mad ?? null;
+  const finalCurrency: 'MAD' | 'EUR' = params.agreedCurrency || latest.agreed_currency || 'MAD';
+  const nowIso = new Date().toISOString();
+
+  await closeDispatchCampaign(latest.campaign_id, {
+    won_owner_id: supplierId,
+    won_machine_id: latest.machine_id,
+    won_machine_title: supplierName,
+  });
+
+  if (latest.notification_id) {
+    await updateDispatchNotificationStatus(
+      latest.notification_id,
+      {
+        is_read: true,
+        status: 'accepted',
+        contractor_accepted: true,
+        owner_accepted: true,
+        contractor_terms_agreed: true,
+        owner_terms_agreed: true,
+        agreed_price: finalPrice,
+        agreed_currency: finalCurrency,
+        deal_status: 'accepted',
+      },
+      latest.campaign_id
+    );
+  }
+
+  // Dismiss competing notifications for the same campaign
+  try {
+    if (isSupabaseConfigured && isUuid(latest.campaign_id)) {
+      await supabase
+        .from('dispatch_notifications')
+        .update({
+          status: 'dismissed',
+          deal_status: 'closed_other',
+          is_read: true,
+        })
+        .eq('campaign_id', latest.campaign_id)
+        .neq('owner_id', supplierId);
+    }
+
+    const localNotifs: DispatchNotification[] = JSON.parse(
+      localStorage.getItem(LOCAL_NOTIFS_KEY) || '[]'
+    );
+    const updatedLocalNotifs = localNotifs.map((n) => {
+      if (n.campaign_id !== latest.campaign_id) return n;
+      if (n.owner_id === supplierId) {
+        return {
+          ...n,
+          status: 'accepted' as const,
+          is_read: true,
+          contractor_accepted: true,
+          owner_accepted: true,
+          contractor_terms_agreed: true,
+          owner_terms_agreed: true,
+          agreed_price: finalPrice,
+          agreed_currency: finalCurrency,
+          deal_status: 'accepted' as const,
+        };
+      }
+      return {
+        ...n,
+        status: 'dismissed' as const,
+        deal_status: 'closed_other' as const,
+        is_read: true,
+      };
+    });
+    localStorage.setItem(LOCAL_NOTIFS_KEY, JSON.stringify(updatedLocalNotifs));
+
+    const localCamps: DispatchCampaign[] = JSON.parse(
+      localStorage.getItem(LOCAL_CAMPAIGNS_KEY) || '[]'
+    );
+    const updatedCamps = localCamps.map((c) =>
+      c.id === latest.campaign_id
+        ? {
+            ...c,
+            status: 'closed' as const,
+            won_owner_id: supplierId,
+            won_supplier_name: supplierName,
+            won_supplier_phone: supplierPhone,
+            won_supplier_city: supplierCity,
+            agreed_price: finalPrice,
+            agreed_currency: finalCurrency,
+            agreed_supply_source: latest.agreed_supply_source,
+            won_at: nowIso,
+          }
+        : c
+    );
+    localStorage.setItem(LOCAL_CAMPAIGNS_KEY, JSON.stringify(updatedCamps));
+  } catch {
+    // ignore
+  }
+
+  const orderItem: SupplierOrderDealItem = {
+    id: makeUuid(),
+    campaign_id: latest.campaign_id,
+    campaign_type:
+      latest.campaign_type === 'machine_purchase' ? 'machine_purchase' : 'spare_part',
+    item_title: latest.machine_name,
+    part_reference: latest.part_reference,
+    part_category: latest.part_category,
+    desired_model: latest.desired_model,
+    desired_condition: latest.desired_condition,
+    customs_clearance: Boolean(latest.customs_clearance),
+    import_allowed: Boolean(latest.import_allowed),
+    preferred_origin: latest.preferred_origin,
+    fleet_machine_id: latest.fleet_machine_id,
+    fleet_machine_title: latest.fleet_machine_title,
+    fleet_machine_image: latest.fleet_machine_image,
+    fleet_machine_brand: latest.fleet_machine_brand,
+    fleet_machine_model: latest.fleet_machine_model,
+    fleet_machine_year: latest.fleet_machine_year ?? null,
+    owner_id: ownerRequesterId,
+    owner_name: ownerName,
+    owner_phone: ownerPhone,
+    owner_city: ownerCity,
+    supplier_id: supplierId,
+    supplier_name: supplierName,
+    supplier_phone: supplierPhone,
+    supplier_city: supplierCity,
+    agreed_price: finalPrice,
+    agreed_currency: finalCurrency,
+    agreed_supply_source:
+      latest.agreed_supply_source || (latest.import_allowed ? 'import_order' : 'morocco_stock'),
+    notes: latest.notes,
+    closed_at: nowIso,
+    created_at: nowIso,
+  };
+
+  await persistSupplierOrderForBothSides(orderItem);
+
+  const finalizedDeal: DispatchDealContext = {
+    ...latest,
+    contractor_accepted: true,
+    owner_accepted: true,
+    contractor_terms_agreed: true,
+    owner_terms_agreed: true,
+    agreed_price: finalPrice,
+    agreed_currency: finalCurrency,
+    won_supplier_name: supplierName,
+    won_supplier_phone: supplierPhone,
+    won_supplier_city: supplierCity,
+    deal_status: 'accepted',
+  };
+
+  const confirmText =
+    orderItem.campaign_type === 'spare_part'
+      ? `✅🤝 تم إغلاق الصفقة بنجاح! سُجل طلب قطعة الغيار (${latest.part_reference ? `Réf ${latest.part_reference} · ` : ''}${latest.machine_name}) في قسم «طلبات للموردين» للمالك و«طلبات الزبناء» للمورد.`
+      : `✅🤝 تم إغلاق الصفقة بنجاح! سُجل طلب الآلية (${latest.machine_name}) في قسم «طلبات للموردين» للمالك و«طلبات الزبناء» للمورد.`;
+
+  await chatStore.sendMessage(
+    conversationId,
+    currentUserId,
+    `${confirmText}${DISPATCH_DEAL_MARKER}${JSON.stringify(finalizedDeal)}`,
+    partyRole === 'contractor' ? supplierId : ownerRequesterId,
+    { senderName: params.currentUserName }
+  );
+
+  broadcastDispatchEvent({
+    type: 'DEAL_ACCEPTED',
+    campaignId: latest.campaign_id,
+    deal: finalizedDeal,
+  });
+
+  return { updatedDeal: finalizedDeal, finalized: true };
+}
+
+export async function fetchOwnerSupplyCampaigns(ownerId: string): Promise<DispatchCampaign[]> {
+  if (!ownerId) return [];
+  const all = await fetchContractorCampaigns(ownerId);
+  const supplyOnly = all.filter(
+    (c) => c.campaign_type === 'spare_part' || c.campaign_type === 'machine_purchase'
+  );
+
+  // Enrich from local notifications / orders if DB campaign lacked optional columns
+  const orders = await fetchOwnerSupplierOrders(ownerId);
+  const orderByCamp = new Map(orders.map((o) => [o.campaign_id, o]));
+
+  let localCampsMap = new Map<string, DispatchCampaign>();
+  try {
+    const local: DispatchCampaign[] = JSON.parse(
+      localStorage.getItem(LOCAL_CAMPAIGNS_KEY) || '[]'
+    );
+    local.forEach((c) => localCampsMap.set(c.id, c));
+  } catch {
+    // ignore
+  }
+
+  return supplyOnly.map((c) => {
+    const lc = localCampsMap.get(c.id);
+    const ord = orderByCamp.get(c.id);
+    return {
+      ...lc,
+      ...c,
+      desired_model: c.desired_model || lc?.desired_model || ord?.desired_model,
+      customs_clearance: c.customs_clearance ?? lc?.customs_clearance ?? ord?.customs_clearance,
+      has_fleet_machine: c.has_fleet_machine ?? lc?.has_fleet_machine ?? Boolean(ord?.fleet_machine_id),
+      fleet_machine_id: c.fleet_machine_id || lc?.fleet_machine_id || ord?.fleet_machine_id,
+      fleet_machine_title: c.fleet_machine_title || lc?.fleet_machine_title || ord?.fleet_machine_title,
+      fleet_machine_image: c.fleet_machine_image || lc?.fleet_machine_image || ord?.fleet_machine_image,
+      fleet_machine_brand: c.fleet_machine_brand || lc?.fleet_machine_brand || ord?.fleet_machine_brand,
+      fleet_machine_model: c.fleet_machine_model || lc?.fleet_machine_model || ord?.fleet_machine_model,
+      fleet_machine_year: c.fleet_machine_year ?? lc?.fleet_machine_year ?? ord?.fleet_machine_year,
+      won_supplier_name: c.won_supplier_name || lc?.won_supplier_name || ord?.supplier_name,
+      won_supplier_phone: c.won_supplier_phone || lc?.won_supplier_phone || ord?.supplier_phone,
+      won_supplier_city: c.won_supplier_city || lc?.won_supplier_city || ord?.supplier_city,
+      agreed_price: c.agreed_price ?? lc?.agreed_price ?? ord?.agreed_price ?? null,
+      agreed_currency: c.agreed_currency || lc?.agreed_currency || ord?.agreed_currency || 'MAD',
+      status: ord ? 'closed' : c.status,
+    };
+  });
+}
+
+async function fetchClosedSupplierOrdersForUser(
+  userId: string,
+  roleFilter: 'owner' | 'supplier'
+): Promise<SupplierOrderDealItem[]> {
+  if (!userId) return [];
+  const byCampaign = new Map<string, SupplierOrderDealItem>();
+
+  const mergeOrder = (item: SupplierOrderDealItem) => {
+    if (!item || !item.campaign_id) return;
+    if (roleFilter === 'owner' && item.owner_id !== userId) return;
+    if (roleFilter === 'supplier' && item.supplier_id !== userId) return;
+    const existing = byCampaign.get(item.campaign_id);
+    if (!existing) {
+      byCampaign.set(item.campaign_id, item);
+    } else {
+      byCampaign.set(item.campaign_id, {
+        ...existing,
+        ...item,
+        fleet_machine_image: item.fleet_machine_image || existing.fleet_machine_image,
+        fleet_machine_title: item.fleet_machine_title || existing.fleet_machine_title,
+        agreed_price: item.agreed_price ?? existing.agreed_price,
+      });
+    }
+  };
+
+  // 1. Supabase notifications (type = 'supplier_order_closed')
+  if (isSupabaseConfigured && isUuid(userId)) {
+    try {
+      const { data: notifRows } = await supabase
+        .from('notifications')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('type', 'supplier_order_closed')
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      for (const r of notifRows || []) {
+        if (r?.data?.campaign_id) {
+          mergeOrder(r.data as SupplierOrderDealItem);
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    // Also pull closed supply campaigns directly in case notification was missed
+    try {
+      let campQ = supabase
+        .from('dispatch_campaigns')
+        .select('*')
+        .eq('status', 'closed')
+        .in('campaign_type', ['spare_part', 'machine_purchase'])
+        .order('created_at', { ascending: false })
+        .limit(40);
+
+      campQ =
+        roleFilter === 'owner'
+          ? campQ.eq('contractor_id', userId)
+          : campQ.eq('won_owner_id', userId);
+
+      const { data: closedCamps } = await campQ;
+      for (const c of (closedCamps || []) as DispatchCampaign[]) {
+        if (!c.won_owner_id) continue;
+        if (!byCampaign.has(c.id)) {
+          mergeOrder({
+            id: c.id,
+            campaign_id: c.id,
+            campaign_type:
+              c.campaign_type === 'machine_purchase' ? 'machine_purchase' : 'spare_part',
+            item_title: c.machine_name,
+            part_reference: c.part_reference,
+            part_category: c.part_category,
+            desired_model: c.desired_model,
+            desired_condition: c.desired_condition,
+            customs_clearance: Boolean(c.customs_clearance),
+            import_allowed: Boolean(c.import_allowed),
+            preferred_origin: c.preferred_origin,
+            fleet_machine_id: c.fleet_machine_id,
+            fleet_machine_title: c.fleet_machine_title,
+            fleet_machine_image: c.fleet_machine_image,
+            fleet_machine_brand: c.fleet_machine_brand,
+            fleet_machine_model: c.fleet_machine_model,
+            fleet_machine_year: c.fleet_machine_year ?? null,
+            owner_id: c.contractor_id,
+            owner_name: c.company_name || 'مالك آليات',
+            owner_phone: c.site_phone,
+            owner_city: c.site_city,
+            supplier_id: c.won_owner_id,
+            supplier_name: c.won_supplier_name || c.won_machine_title || 'مورد معتمد',
+            supplier_phone: c.won_supplier_phone || undefined,
+            supplier_city: c.won_supplier_city || undefined,
+            agreed_price: c.agreed_price ?? c.budget_mad ?? null,
+            agreed_currency: c.agreed_currency || 'MAD',
+            agreed_supply_source: c.agreed_supply_source,
+            notes: c.notes,
+            closed_at: c.won_at || c.created_at,
+            created_at: c.created_at,
+          });
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // 2. Express Server SQLite notifications fallback
+  try {
+    const serverRes = await serverApi.getNotifications({ user_id: userId });
+    for (const s of serverRes.notifications || []) {
+      if (s.type === 'supplier_order_closed' && s.data?.campaign_id) {
+        mergeOrder(s.data as SupplierOrderDealItem);
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // 3. LocalStorage fallback
+  try {
+    const localOrders: SupplierOrderDealItem[] = JSON.parse(
+      localStorage.getItem(LOCAL_SUPPLIER_ORDERS_KEY) || '[]'
+    );
+    for (const o of localOrders) {
+      mergeOrder(o);
+    }
+  } catch {
+    // ignore
+  }
+
+  return Array.from(byCampaign.values()).sort(
+    (a, b) =>
+      new Date(b.closed_at || b.created_at).getTime() -
+      new Date(a.closed_at || a.created_at).getTime()
+  );
+}
+
+export async function fetchOwnerSupplierOrders(
+  ownerId: string
+): Promise<SupplierOrderDealItem[]> {
+  return fetchClosedSupplierOrdersForUser(ownerId, 'owner');
+}
+
+export async function fetchSupplierCompletedOrders(
+  supplierId: string
+): Promise<SupplierOrderDealItem[]> {
+  return fetchClosedSupplierOrdersForUser(supplierId, 'supplier');
+}
+
 

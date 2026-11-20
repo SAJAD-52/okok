@@ -34,6 +34,8 @@ import {
   Radar,
   Package,
   Ship,
+  ShoppingBag,
+  Handshake,
 } from 'lucide-react';
 import { Logo } from '../ui/Logo';
 import { LanguageSwitcher } from '../ui/LanguageSwitcher';
@@ -59,6 +61,7 @@ import { serverApi, ServerNotification } from '../../lib/serverApi';
 import {
   ensureDispatchConversationLinked,
   fetchOpenOwnerRequestsForSupplier,
+  startSupplierChatWithOwner,
   updateDispatchNotificationStatus,
 } from '../../lib/dispatchService';
 import {
@@ -1061,6 +1064,11 @@ export const DashboardLayout: React.FC = () => {
       icon: <HardHat className="w-5 h-5" />,
     },
     {
+      to: '/owner/suppliers',
+      label: lang === 'fr' ? 'Commandes Fournisseurs' : 'طلبات للموردين',
+      icon: <ShoppingBag className="w-5 h-5" />,
+    },
+    {
       to: '/owner/analytics',
       label: lang === 'fr' ? 'Finances & Rentabilité' : 'المالية والأرباح',
       icon: <TrendingUp className="w-5 h-5" />,
@@ -1117,10 +1125,16 @@ export const DashboardLayout: React.FC = () => {
     },
     {
       to: '/supplier/requests',
-      label: lang === 'fr' ? 'Demandes des Propriétaires' : 'طلبات الملاك والكمبيات',
+      label: lang === 'fr' ? 'Demandes des Propriétaires' : 'طلبات الملاك',
       mobileLabel: lang === 'fr' ? 'Demandes' : 'الطلبات',
       icon: <Package className="w-5 h-5" />,
       badge: supplierOpenRequestsCount,
+    },
+    {
+      to: '/supplier/orders',
+      label: lang === 'fr' ? 'Commandes Clients' : 'طلبات الزبناء',
+      mobileLabel: lang === 'fr' ? 'Commandes' : 'الصفقات',
+      icon: <Handshake className="w-5 h-5" />,
     },
     {
       to: '/supplier/catalog',
@@ -1815,11 +1829,88 @@ export const DashboardLayout: React.FC = () => {
                                       </div>
                                     </div>
 
-                                    <div className="flex items-center gap-2 pt-1">
+                                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                                      {(isSpareOpp || isPurchaseOpp) && isSupplier && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setIsNotificationsOpen(false);
+                                            navigate('/supplier/requests');
+                                          }}
+                                          className="px-2.5 py-1.5 rounded-lg bg-white border border-steel-300 text-ink font-black text-[11px] hover:bg-steel-50 transition-colors cursor-pointer"
+                                        >
+                                          {lang === 'fr' ? 'Voir la demande' : 'ألق نظرة على الطلب'}
+                                        </button>
+                                      )}
                                       <button
                                         type="button"
                                         onClick={async () => {
                                           const ownerTargetId = profile?.id || user?.id || '';
+                                          if (isSpareOpp || isPurchaseOpp) {
+                                            const started = await startSupplierChatWithOwner({
+                                              supplierId: ownerTargetId,
+                                              supplierName:
+                                                profile?.company_name ||
+                                                profile?.full_name ||
+                                                'مورد معتمد',
+                                              request: {
+                                                campaign_id: opp.campaign_id,
+                                                notification_id: opp.id,
+                                                contractor_id: opp.contractor_id,
+                                                company_name: opp.company_name || 'مالك آليات',
+                                                campaign_type: opp.campaign_type,
+                                                machine_name: opp.machine_name,
+                                                part_reference: opp.part_reference,
+                                                part_category: opp.part_category,
+                                                budget_mad: opp.budget_mad,
+                                                import_allowed: opp.import_allowed,
+                                                preferred_origin: opp.preferred_origin,
+                                                desired_condition: opp.desired_condition,
+                                                desired_model: opp.desired_model,
+                                                customs_clearance: opp.customs_clearance,
+                                                has_fleet_machine: opp.has_fleet_machine,
+                                                fleet_machine_id: opp.fleet_machine_id,
+                                                fleet_machine_title: opp.fleet_machine_title,
+                                                fleet_machine_image: opp.fleet_machine_image,
+                                                fleet_machine_brand: opp.fleet_machine_brand,
+                                                fleet_machine_model: opp.fleet_machine_model,
+                                                fleet_machine_year: opp.fleet_machine_year,
+                                                site_name: opp.site_name,
+                                                site_city: opp.site_city,
+                                                site_lat: opp.site_lat,
+                                                site_lng: opp.site_lng,
+                                                site_phone: opp.site_phone,
+                                                distance_km: opp.distance_km,
+                                                is_nationwide: opp.is_nationwide,
+                                                notes: opp.notes,
+                                                matched_machine_id: opp.machine_id,
+                                              },
+                                            });
+                                            setOpportunityNotifications((prev) =>
+                                              prev.map((item) =>
+                                                item.id === opp.id
+                                                  ? { ...item, is_read: true, status: 'accepted' }
+                                                  : item
+                                              )
+                                            );
+                                            setIsNotificationsOpen(false);
+                                            const msgPrefix = isSupplier
+                                              ? '/supplier/messages'
+                                              : '/owner/messages';
+                                            navigate(
+                                              started.conversationId
+                                                ? `${msgPrefix}?conv=${encodeURIComponent(
+                                                    started.conversationId
+                                                  )}&target=${opp.contractor_id}&campaign=${
+                                                    opp.campaign_id
+                                                  }`
+                                                : `${msgPrefix}?target=${opp.contractor_id}&machine=${
+                                                    opp.machine_id || ''
+                                                  }&campaign=${opp.campaign_id}`
+                                            );
+                                            return;
+                                          }
+
                                           await Promise.allSettled([
                                             updateDispatchNotificationStatus(
                                               opp.id,
@@ -1843,17 +1934,21 @@ export const DashboardLayout: React.FC = () => {
                                             )
                                           );
                                           setIsNotificationsOpen(false);
-                                          const msgPrefix = isSupplier ? '/supplier/messages' : '/owner/messages';
+                                          const msgPrefix = isSupplier
+                                            ? '/supplier/messages'
+                                            : '/owner/messages';
                                           navigate(
-                                            `${msgPrefix}?target=${opp.contractor_id}&machine=${opp.machine_id || ''}&campaign=${opp.campaign_id}`
+                                            `${msgPrefix}?target=${opp.contractor_id}&machine=${
+                                              opp.machine_id || ''
+                                            }&campaign=${opp.campaign_id}`
                                           );
                                         }}
                                         className="px-2.5 py-1.5 rounded-lg bg-primary text-ink font-black text-[11px] hover:bg-primary-hover transition-colors cursor-pointer"
                                       >
                                         {isSpareOpp || isPurchaseOpp
                                           ? lang === 'fr'
-                                            ? 'Proposer un devis'
-                                            : 'تقديم عرض ومحادثة'
+                                            ? 'Démarrer discussion'
+                                            : 'ابدأ محادثة'
                                           : lang === 'fr'
                                           ? 'Accepter & Discuter'
                                           : 'موافقة ومحادثة المقاولة'}
@@ -2040,6 +2135,10 @@ export const DashboardLayout: React.FC = () => {
                                       notif.type === 'booking_repair_confirmed'
                                     ) {
                                       navigate('/owner/bookings?tab=active');
+                                    } else if (notif.type === 'supplier_order_closed') {
+                                      navigate(isSupplier ? '/supplier/orders' : '/owner/suppliers');
+                                    } else if (notif.type === 'supplier_quote') {
+                                      navigate(isSupplier ? '/supplier/messages' : '/owner/messages');
                                     } else if (
                                       notif.type === 'booking_breakdown_resolved' ||
                                       notif.type === 'booking_paused' ||
@@ -2486,6 +2585,7 @@ export const DashboardLayout: React.FC = () => {
             {(() => {
               const isMoreActive =
                 location.pathname.startsWith('/owner/drivers') ||
+                location.pathname.startsWith('/owner/suppliers') ||
                 location.pathname.startsWith('/owner/analytics') ||
                 location.pathname.startsWith('/owner/storefront') ||
                 location.pathname.startsWith('/owner/settings/business') ||
@@ -2559,6 +2659,23 @@ export const DashboardLayout: React.FC = () => {
             </div>
 
             <div className="space-y-1.5">
+              {/* Suppliers & Parts Orders ("طلبات للموردين") */}
+              <NavLink
+                to="/owner/suppliers"
+                onClick={() => setIsMoreMenuOpen(false)}
+                className={({ isActive }) =>
+                  `flex items-center justify-between p-3 rounded-2xl text-xs font-bold transition-colors ${
+                    isActive ? 'bg-primary text-ink font-black' : 'bg-surface hover:bg-steel-100 text-steel-700'
+                  }`
+                }
+              >
+                <div className="flex items-center gap-3">
+                  <ShoppingBag className="w-5 h-5 text-primary-dark" />
+                  <span>{lang === 'fr' ? 'Commandes Fournisseurs' : 'طلبات للموردين'}</span>
+                </div>
+                <ChevronLeft className="w-4 h-4 rtl:rotate-0 ltr:rotate-180 text-steel-400" />
+              </NavLink>
+
               {/* Agreed Drivers ("السائقون") */}
               <NavLink
                 to="/owner/drivers"

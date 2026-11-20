@@ -160,7 +160,13 @@ export const Messages: React.FC = () => {
                 full_name:
                   otherProfile?.full_name ||
                   otherProfile?.company_name ||
-                  (otherProfile?.role === 'owner' ? 'مالك الآلية' : 'مقاولة البناء'),
+                  (otherProfile?.role === 'owner'
+                    ? 'مالك الآلية'
+                    : otherProfile?.role === 'supplier' || otherProfile?.role === 'dealer'
+                    ? 'مورد آليات وقطع غيار'
+                    : otherProfile?.role === 'driver'
+                    ? 'سائق آليات'
+                    : 'مقاولة البناء'),
                 company_name: otherProfile?.company_name,
                 role: otherProfile?.role || 'owner',
                 city: otherProfile?.city || 'المغرب',

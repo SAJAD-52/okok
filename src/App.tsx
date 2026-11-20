@@ -38,6 +38,8 @@ import { PublicTendersRadarPage } from './pages/PublicTendersRadarPage';
 import { SupplierDashboardPage } from './pages/SupplierDashboardPage';
 import { SupplierRequestsPage } from './pages/SupplierRequestsPage';
 import { SupplierCatalogPage } from './pages/SupplierCatalogPage';
+import { SupplierOrdersPage } from './pages/SupplierOrdersPage';
+import { OwnerSuppliersPage } from './pages/OwnerSuppliersPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -109,6 +111,7 @@ export const App: React.FC = () => {
               <Route path="clients" element={<ClientsPage />} />
               <Route path="tenders" element={<Navigate to="/tenders" replace />} />
               <Route path="drivers" element={<OwnerDriversPage />} />
+              <Route path="suppliers" element={<OwnerSuppliersPage />} />
               <Route path="analytics" element={<AnalyticsPage />} />
               <Route path="storefront" element={<StorefrontPage />} />
               <Route path="settings/business" element={<BusinessSettingsPage />} />
@@ -168,6 +171,7 @@ export const App: React.FC = () => {
             >
               <Route index element={<SupplierDashboardPage />} />
               <Route path="requests" element={<SupplierRequestsPage />} />
+              <Route path="orders" element={<SupplierOrdersPage />} />
               <Route path="catalog" element={<SupplierCatalogPage />} />
               <Route path="messages" element={<MessagesPage />} />
             </Route>

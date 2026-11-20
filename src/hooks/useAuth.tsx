@@ -266,6 +266,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           ? 'supplier'
           : dbRole || metaRole || 'client';
 
+      // Auto-sync supplier role/details to profiles DB so suppliers always receive live Owner search campaigns
+      if (resolvedRole === 'supplier' && dbRole !== 'supplier' && dbRole !== 'dealer') {
+        try {
+          supabase
+            .from('profiles')
+            .update({
+              role: 'supplier',
+              supplier_type: (data as any)?.supplier_type || meta?.supplier_type || meta?.supplierType || 'all',
+              supplier_scope: (data as any)?.supplier_scope || meta?.supplier_scope || meta?.supplierScope || 'local',
+              delivers_nationwide: (data as any)?.delivers_nationwide ?? meta?.delivers_nationwide ?? true,
+            })
+            .eq('id', userId)
+            .then(() => {}, () => {});
+        } catch {
+          // ignore
+        }
+      }
+
       const normalized: UserProfile = {
         id: userId,
         phone: mergedPhone,

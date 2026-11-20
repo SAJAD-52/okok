@@ -319,18 +319,35 @@ export async function findMatchingSparePartSuppliersForCampaign(params: {
     }
   }
 
-  // Also include registered supplier/importer profiles specialized in spare parts or full supply
+  // Also include ALL registered supplier/importer profiles (prioritizing spare-parts/all specialists)
   if (isSupabaseConfigured) {
     try {
-      const { data: supplierProfiles } = await supabase
+      let supplierProfiles: any[] = [];
+      const { data: qData, error: qErr } = await supabase
         .from('profiles')
         .select('*')
-        .in('role', ['supplier', 'dealer']);
+        .or('role.in.(supplier,dealer),supplier_type.not.is.null');
 
-      for (const sp of (supplierProfiles || []) as any[]) {
+      if (!qErr && Array.isArray(qData)) {
+        supplierProfiles = qData;
+      } else {
+        const { data: fallbackData } = await supabase
+          .from('profiles')
+          .select('*')
+          .limit(400);
+        supplierProfiles = (fallbackData || []).filter(
+          (sp: any) =>
+            sp?.role === 'supplier' ||
+            sp?.role === 'dealer' ||
+            Boolean(sp?.supplier_type) ||
+            Boolean(sp?.supplier_scope)
+        );
+      }
+
+      for (const sp of supplierProfiles) {
         if (!sp?.id || sp.id === params.excludeOwnerId) continue;
         const sType = String(sp.supplier_type || 'all') as SupplierType;
-        if (sType === 'machinery_dealer') continue; // pure machinery dealers only match machine_purchase
+        const isSpareSpecialist = sType !== 'machinery_dealer';
 
         const canImport =
           sp.supplier_scope === 'local_and_import' ||
@@ -343,17 +360,15 @@ export async function findMatchingSparePartSuppliersForCampaign(params: {
           ? calculateDistanceKm(params.originLat, params.originLng, coords.lat, coords.lng)
           : 0;
 
-        const isNationwideSupplier = Boolean(sp.delivers_nationwide ?? true) || canImport;
-        if (!params.isNationwide && !isNationwideSupplier && params.radiusKm !== null && distKm > params.radiusKm) {
-          continue;
-        }
-
         const existing = bestBySupplier.get(sp.id);
-        const specsList = Array.isArray(sp.supplier_specialties) ? sp.supplier_specialties.join(' ').toLowerCase() : '';
+        const specsList = Array.isArray(sp.supplier_specialties)
+          ? sp.supplier_specialties.join(' ').toLowerCase()
+          : '';
         const brandMatch =
           (queryBrand.length >= 2 && specsList.includes(queryBrand)) ||
           (queryModel.length >= 2 && specsList.includes(queryModel));
-        const profileScore = 15 + (brandMatch ? 15 : 0) + (canImport ? 5 : 0);
+        const profileScore =
+          10 + (isSpareSpecialist ? 30 : 0) + (brandMatch ? 15 : 0) + (canImport ? 5 : 0);
 
         if (!existing || profileScore > existing.priorityScore) {
           bestBySupplier.set(sp.id, {
@@ -404,12 +419,26 @@ export async function findMatchingMachinerySuppliersForCampaign(params: {
 
   if (isSupabaseConfigured) {
     try {
-      const [{ data: mData }, { data: pData }] = await Promise.all([
+      const [{ data: mData }, pRes] = await Promise.all([
         supabase.from('machines').select('*').neq('is_published', false),
-        supabase.from('profiles').select('*').in('role', ['supplier', 'dealer']),
+        supabase
+          .from('profiles')
+          .select('*')
+          .or('role.in.(supplier,dealer),supplier_type.not.is.null'),
       ]);
       if (mData) rawMachines = mData;
-      if (pData) supplierProfiles = pData;
+      if (!pRes.error && pRes.data) {
+        supplierProfiles = pRes.data;
+      } else {
+        const { data: fallbackP } = await supabase.from('profiles').select('*').limit(400);
+        supplierProfiles = (fallbackP || []).filter(
+          (sp: any) =>
+            sp?.role === 'supplier' ||
+            sp?.role === 'dealer' ||
+            Boolean(sp?.supplier_type) ||
+            Boolean(sp?.supplier_scope)
+        );
+      }
     } catch (err) {
       console.warn('Error querying machinery suppliers:', err);
     }
@@ -476,11 +505,11 @@ export async function findMatchingMachinerySuppliersForCampaign(params: {
     }
   }
 
-  // 2. Match registered machinery dealers & international import companies
+  // 2. Match ALL registered suppliers, dealers & international import companies (rank specialists highest)
   for (const sp of supplierProfiles) {
     if (!sp?.id || sp.id === params.excludeOwnerId) continue;
     const sType = String(sp.supplier_type || 'all') as SupplierType;
-    if (sType === 'spare_parts') continue;
+    const isMachinerySpecialist = sType !== 'spare_parts';
 
     const importCountries: string[] = Array.isArray(sp.import_countries) ? sp.import_countries : [];
     const canImport =
@@ -488,9 +517,6 @@ export async function findMatchingMachinerySuppliersForCampaign(params: {
       sType === 'importer' ||
       importCountries.length > 0 ||
       Boolean(sp.import_lead_time);
-
-    if (!allowImporters && sType === 'importer') continue;
-    if (params.desiredCondition === 'import' && !canImport) continue;
 
     const originMatch =
       preferredOriginLower &&
@@ -501,20 +527,14 @@ export async function findMatchingMachinerySuppliersForCampaign(params: {
       ? calculateDistanceKm(params.originLat, params.originLng, coords.lat, coords.lng)
       : 0;
 
-    const isNationwideSupplier =
-      canImport || sType === 'all' || Boolean(sp.delivers_nationwide ?? true);
-
-    if (!params.isNationwide && !isNationwideSupplier && params.radiusKm !== null && distKm > params.radiusKm) {
-      continue;
-    }
-
     const specsList = Array.isArray(sp.supplier_specialties) ? sp.supplier_specialties.join(' ').toLowerCase() : '';
     const specMatch =
       (queryLower.length >= 2 && specsList.includes(queryLower)) ||
       (params.machineCategory && params.machineCategory !== 'all' && specsList.includes(params.machineCategory.toLowerCase()));
 
     const priorityScore =
-      20 +
+      10 +
+      (isMachinerySpecialist ? 30 : 0) +
       (canImport ? 10 : 5) +
       (originMatch ? 25 : 0) +
       (specMatch ? 15 : 0);
@@ -915,6 +935,39 @@ export async function launchDispatchCampaign(params: {
   let genericNotifsSent = false;
   let chatFallbackSent = false;
 
+  // For supply campaigns (spare_part / machine_purchase), guarantee ALL suppliers are targeted even if UI scan hadn't finished
+  let effectiveTargets: MatchedOwnerTarget[] = Array.isArray(params.targets) ? [...params.targets] : [];
+  if ((isSpare || isPurchase) && effectiveTargets.length === 0) {
+    try {
+      effectiveTargets = isPurchase
+        ? await findMatchingMachinerySuppliersForCampaign({
+            originLat: params.siteLat,
+            originLng: params.siteLng,
+            machineCategory: params.machineCategory,
+            machineName: params.machineName,
+            desiredCondition: params.desiredCondition,
+            importAllowed: params.importAllowed,
+            preferredOrigin: params.preferredOrigin,
+            radiusKm: params.radiusKm,
+            isNationwide: params.isNationwide,
+            excludeOwnerId: effectiveContractorId,
+          })
+        : await findMatchingSparePartSuppliersForCampaign({
+            originLat: params.siteLat,
+            originLng: params.siteLng,
+            partReference: params.partReference || params.machineName,
+            partCategory: params.partCategory,
+            machineBrand: params.fleetMachineBrand,
+            machineModel: params.fleetMachineModel || params.desiredModel,
+            radiusKm: params.radiusKm,
+            isNationwide: params.isNationwide,
+            excludeOwnerId: effectiveContractorId,
+          });
+    } catch {
+      // ignore fallback scan failure
+    }
+  }
+
   const campaignPayload: any = {
     id: resolvedCampaignId,
     contractor_id: effectiveContractorId,
@@ -946,11 +999,11 @@ export async function launchDispatchCampaign(params: {
     radius_km: params.isNationwide ? null : params.radiusKm,
     is_nationwide: params.isNationwide,
     notes: params.notes || '',
-    matched_owners_count: params.targets.length,
+    matched_owners_count: effectiveTargets.length,
     status: 'active' as const,
   };
 
-  const preparedNotifs: DispatchNotification[] = params.targets.map((t) => ({
+  const preparedNotifs: DispatchNotification[] = effectiveTargets.map((t) => ({
     id: makeUuid(),
     campaign_id: resolvedCampaignId,
     owner_id: t.owner_id,
@@ -994,18 +1047,27 @@ export async function launchDispatchCampaign(params: {
     created_at: now,
   }));
 
+  const extractMissingColumnName = (msg?: string): string | null => {
+    if (!msg) return null;
+    const m1 = msg.match(/Could not find the '([^']+)' column/i);
+    if (m1?.[1]) return m1[1];
+    const m2 = msg.match(/column "([^"]+)" of relation/i);
+    if (m2?.[1]) return m2[1];
+    return null;
+  };
+
   // Channel 1: Dedicated dispatch_campaigns + dispatch_notifications tables (adaptive for optional new columns)
   if (isSupabaseConfigured && isUuid(effectiveContractorId)) {
     try {
       const insertCampPayload = { ...campaignPayload };
       let campErr: any = null;
-      for (let attempt = 0; attempt < 20; attempt++) {
+      for (let attempt = 0; attempt < 24; attempt++) {
         const res = await supabase.from('dispatch_campaigns').insert(insertCampPayload);
         campErr = res.error;
         if (!campErr) break;
-        const missingColMatch = campErr.message?.match(/Could not find the '([^']+)' column/i);
-        if (missingColMatch && missingColMatch[1]) {
-          delete insertCampPayload[missingColMatch[1]];
+        const missingCol = extractMissingColumnName(campErr.message);
+        if (missingCol && missingCol in insertCampPayload) {
+          delete insertCampPayload[missingCol];
           continue;
         }
         break;
@@ -1053,16 +1115,15 @@ export async function launchDispatchCampaign(params: {
           }));
 
           let notifErr: any = null;
-          for (let attempt = 0; attempt < 20; attempt++) {
+          for (let attempt = 0; attempt < 24; attempt++) {
             const res = await supabase.from('dispatch_notifications').insert(notifRows);
             notifErr = res.error;
             if (!notifErr) break;
-            const missingColMatch = notifErr.message?.match(/Could not find the '([^']+)' column/i);
-            if (missingColMatch && missingColMatch[1]) {
-              const col = missingColMatch[1];
+            const missingCol = extractMissingColumnName(notifErr.message);
+            if (missingCol) {
               notifRows = notifRows.map((row) => {
                 const clone = { ...row };
-                delete clone[col];
+                delete clone[missingCol];
                 return clone;
               });
               continue;
@@ -1076,7 +1137,7 @@ export async function launchDispatchCampaign(params: {
             console.warn('dispatch_notifications insert notice:', notifErr.message);
           }
         } else {
-          dispatchNotifsSent = params.targets.length === 0;
+          dispatchNotifsSent = effectiveTargets.length === 0;
         }
       } else {
         console.warn('dispatch_campaigns insert notice:', campErr.message);
@@ -1163,9 +1224,23 @@ export async function launchDispatchCampaign(params: {
           };
         });
 
-        const { error: genErr } = await supabase
-          .from('notifications')
-          .insert(genericRows);
+        let adaptiveGenericRows: Record<string, any>[] = genericRows;
+        let genErr: any = null;
+        for (let attempt = 0; attempt < 6; attempt++) {
+          const res = await supabase.from('notifications').insert(adaptiveGenericRows);
+          genErr = res.error;
+          if (!genErr) break;
+          const missingCol = extractMissingColumnName(genErr.message);
+          if (missingCol) {
+            adaptiveGenericRows = adaptiveGenericRows.map((row) => {
+              const clone = { ...row };
+              delete clone[missingCol];
+              return clone;
+            });
+            continue;
+          }
+          break;
+        }
 
         if (!genErr) {
           genericNotifsSent = true;
@@ -1490,16 +1565,28 @@ export async function fetchOwnerDispatchNotifications(ownerId: string): Promise<
     }
 
     try {
-      const { data: msgRows } = await supabase
+      const { data: msgRows, error: msgQueryErr } = await supabase
         .from('messages')
         .select('id, conversation_id, sender_id, content, body, created_at')
         .neq('sender_id', ownerId)
-        .ilike('content', '%[JADIJCB_DISPATCH:%')
+        .or('body.ilike.%#DISPATCH_DATA:%,content.ilike.%#DISPATCH_DATA:%')
         .order('created_at', { ascending: false })
-        .limit(10);
+        .limit(15);
 
-      if (msgRows) {
+      if (!msgQueryErr && msgRows) {
         for (const m of msgRows) {
+          const parsed = parseDispatchMessageRow(m, ownerId);
+          if (parsed) mergeNotif(parsed, false);
+        }
+      } else if (msgQueryErr) {
+        const { data: bodyOnlyRows } = await supabase
+          .from('messages')
+          .select('id, conversation_id, sender_id, body, created_at')
+          .neq('sender_id', ownerId)
+          .ilike('body', '%#DISPATCH_DATA:%')
+          .order('created_at', { ascending: false })
+          .limit(15);
+        for (const m of bodyOnlyRows || []) {
           const parsed = parseDispatchMessageRow(m, ownerId);
           if (parsed) mergeNotif(parsed, false);
         }
@@ -2685,12 +2772,46 @@ export interface SupplierOpenRequestItem {
   created_at: string;
 }
 
+const SUPPLIER_SEEN_CAMPAIGNS_PREFIX = 'jadijcb_supplier_seen_campaigns_';
+
+export function getSupplierSeenCampaignIds(supplierId: string): Set<string> {
+  if (!supplierId) return new Set();
+  try {
+    const raw = localStorage.getItem(`${SUPPLIER_SEEN_CAMPAIGNS_PREFIX}${supplierId}`);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? new Set(arr.filter((x) => typeof x === 'string')) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+export function markSupplierCampaignSeen(supplierId: string, campaignId: string) {
+  if (!supplierId || !campaignId) return;
+  try {
+    const set = getSupplierSeenCampaignIds(supplierId);
+    if (!set.has(campaignId)) {
+      set.add(campaignId);
+      localStorage.setItem(
+        `${SUPPLIER_SEEN_CAMPAIGNS_PREFIX}${supplierId}`,
+        JSON.stringify(Array.from(set).slice(-200))
+      );
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('jadijcb_dispatch_campaigns_updated'));
+      }
+    }
+  } catch {
+    // ignore
+  }
+}
+
 export async function fetchOpenOwnerRequestsForSupplier(
   supplierProfile: Partial<UserProfile> | null
 ): Promise<SupplierOpenRequestItem[]> {
   if (!supplierProfile?.id) return [];
 
   const supplierId = supplierProfile.id;
+  const seenCampaignIds = getSupplierSeenCampaignIds(supplierId);
   const supplierCoords = resolveMachineCoordinates({ city: supplierProfile.city });
   const byCampaign = new Map<string, SupplierOpenRequestItem>();
 
@@ -2744,7 +2865,7 @@ export async function fetchOpenOwnerRequestsForSupplier(
         is_nationwide: Boolean(n.is_nationwide),
         notes: n.notes || '',
         is_targeted: true,
-        is_read: Boolean(n.is_read),
+        is_read: Boolean(n.is_read) || seenCampaignIds.has(n.campaign_id),
         matched_machine_id: n.machine_id,
         created_at: n.created_at,
       });
@@ -2819,7 +2940,7 @@ export async function fetchOpenOwnerRequestsForSupplier(
           is_nationwide: Boolean(c.is_nationwide),
           notes: c.notes || '',
           is_targeted: false,
-          is_read: false,
+          is_read: seenCampaignIds.has(c.id),
           created_at: c.created_at,
         });
       }
@@ -2870,7 +2991,7 @@ export async function fetchOpenOwnerRequestsForSupplier(
         is_nationwide: Boolean(c.is_nationwide),
         notes: c.notes || '',
         is_targeted: false,
-        is_read: false,
+        is_read: seenCampaignIds.has(c.id),
         created_at: c.created_at,
       });
     }

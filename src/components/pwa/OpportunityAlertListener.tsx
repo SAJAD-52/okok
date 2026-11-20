@@ -17,15 +17,19 @@ import {
   Volume2,
   Eye,
 } from 'lucide-react';
-import { DispatchNotification } from '../../types/database';
+import { DispatchCampaign, DispatchNotification } from '../../types/database';
 import {
   ensureDispatchConversationLinked,
+  fetchOpenOwnerRequestsForSupplier,
   fetchOwnerDispatchNotifications,
+  getSupplierSeenCampaignIds,
+  markSupplierCampaignSeen,
   parseDispatchDealMessageRow,
   parseDispatchMessageRow,
   relocateMachineToSite,
   startSupplierChatWithOwner,
   subscribeLocalDispatchEvents,
+  SupplierOpenRequestItem,
   updateDispatchNotificationStatus,
 } from '../../lib/dispatchService';
 import {
@@ -73,6 +77,104 @@ function addSessionAlertedKey(key: string) {
   }
 }
 
+function mapOpenRequestToNotification(
+  req: SupplierOpenRequestItem,
+  supplierId: string,
+  isSeen: boolean
+): DispatchNotification {
+  return {
+    id: req.notification_id || `open_${req.campaign_id}`,
+    campaign_id: req.campaign_id,
+    owner_id: supplierId,
+    contractor_id: req.contractor_id,
+    machine_id: req.matched_machine_id || '',
+    campaign_type: req.campaign_type,
+    part_reference: req.part_reference,
+    part_category: req.part_category,
+    budget_mad: req.budget_mad ?? null,
+    import_allowed: req.import_allowed,
+    preferred_origin: req.preferred_origin,
+    desired_condition: req.desired_condition,
+    desired_model: req.desired_model,
+    customs_clearance: req.customs_clearance,
+    has_fleet_machine: req.has_fleet_machine,
+    fleet_machine_id: req.fleet_machine_id,
+    fleet_machine_title: req.fleet_machine_title,
+    fleet_machine_image: req.fleet_machine_image,
+    fleet_machine_brand: req.fleet_machine_brand,
+    fleet_machine_model: req.fleet_machine_model,
+    fleet_machine_year: req.fleet_machine_year ?? null,
+    company_name: req.company_name || 'مالك آليات',
+    machine_name: req.machine_name,
+    matched_machine_title:
+      req.campaign_type === 'spare_part'
+        ? 'طلب قطعة غيار مفتوح لكل الموردين'
+        : 'طلب شراء / استيراد آلية مفتوح لكل الموردين',
+    site_name: req.site_name || req.site_city || 'المغرب',
+    site_city: req.site_city || '',
+    site_lat: req.site_lat,
+    site_lng: req.site_lng,
+    site_phone: req.site_phone || '',
+    distance_km: req.distance_km ?? null,
+    is_nationwide: Boolean(req.is_nationwide),
+    radius_km: null,
+    notes: req.notes || '',
+    status: isSeen ? 'read' : 'sent',
+    deal_status: 'open',
+    is_read: isSeen,
+    created_at: req.created_at,
+  };
+}
+
+function mapCampaignRowToNotification(
+  c: DispatchCampaign,
+  supplierId: string
+): DispatchNotification {
+  const cType = c.campaign_type || (c.part_reference ? 'spare_part' : 'machine_purchase');
+  return {
+    id: `open_${c.id}`,
+    campaign_id: c.id,
+    owner_id: supplierId,
+    contractor_id: c.contractor_id,
+    machine_id: '',
+    campaign_type: cType,
+    part_reference: c.part_reference,
+    part_category: c.part_category,
+    budget_mad: c.budget_mad ?? null,
+    import_allowed: Boolean(c.import_allowed),
+    preferred_origin: c.preferred_origin,
+    desired_condition: c.desired_condition,
+    desired_model: c.desired_model,
+    customs_clearance: Boolean(c.customs_clearance),
+    has_fleet_machine: Boolean(c.has_fleet_machine),
+    fleet_machine_id: c.fleet_machine_id,
+    fleet_machine_title: c.fleet_machine_title,
+    fleet_machine_image: c.fleet_machine_image,
+    fleet_machine_brand: c.fleet_machine_brand,
+    fleet_machine_model: c.fleet_machine_model,
+    fleet_machine_year: c.fleet_machine_year ?? null,
+    company_name: c.company_name || 'مالك آليات',
+    machine_name: c.machine_name,
+    matched_machine_title:
+      cType === 'spare_part'
+        ? 'طلب قطعة غيار مفتوح لكل الموردين'
+        : 'طلب شراء / استيراد آلية مفتوح لكل الموردين',
+    site_name: c.site_name || c.site_city || 'المغرب',
+    site_city: c.site_city || '',
+    site_lat: c.site_lat,
+    site_lng: c.site_lng,
+    site_phone: c.site_phone || '',
+    distance_km: null,
+    is_nationwide: Boolean(c.is_nationwide),
+    radius_km: c.radius_km ?? null,
+    notes: c.notes || '',
+    status: 'sent',
+    deal_status: 'open',
+    is_read: false,
+    created_at: c.created_at || new Date().toISOString(),
+  };
+}
+
 export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> = ({
   ownerId,
   userRole = 'owner',
@@ -87,6 +189,8 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
   const alertedKeysRef = useRef<Set<string>>(getSessionAlertedKeys());
   const onSyncRef = useRef(onNotificationsSync);
   onSyncRef.current = onNotificationsSync;
+  const profileCityRef = useRef<string | undefined>(profile?.city);
+  profileCityRef.current = profile?.city;
 
   const triggerCelebrationAlert = useCallback((notif: DispatchNotification) => {
     if (!notif?.id) return;
@@ -149,38 +253,78 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
       if (!ownerId || syncInFlightRef.current) return;
       syncInFlightRef.current = true;
       try {
-      const list = await fetchOwnerDispatchNotifications(ownerId);
-      onSyncRef.current(list);
+        const directList = await fetchOwnerDispatchNotifications(ownerId);
+        let mergedList: DispatchNotification[] = directList;
 
-      // Dismiss open popup if that campaign was closed by another winner
-      setActiveAlert((prev) => {
-        if (!prev) return null;
-        const stillOpen = list.find(
-          (n) => n.campaign_id === prev.campaign_id && n.status !== 'dismissed' && n.deal_status !== 'closed_other'
-        );
-        return stillOpen ? prev : null;
-      });
+        if (userRole === 'supplier') {
+          const seenSet = getSupplierSeenCampaignIds(ownerId);
+          const openRequests = await fetchOpenOwnerRequestsForSupplier({
+            id: ownerId,
+            role: 'supplier',
+            city: profileCityRef.current,
+          });
 
-      if (notifyUnread) {
-        const newestUnread = list.find((n) => {
-          const key = n.campaign_id || n.id;
-          return (
-            !n.is_read &&
-            n.status === 'sent' &&
-            n.deal_status !== 'closed_other' &&
-            !alertedKeysRef.current.has(key) &&
-            !alertedKeysRef.current.has(n.id)
+          const byCampaign = new Map<string, DispatchNotification>();
+          for (const n of directList) {
+            const isSeen = Boolean(n.is_read) || seenSet.has(n.campaign_id);
+            byCampaign.set(n.campaign_id || n.id, {
+              ...n,
+              is_read: isSeen,
+              status: n.status === 'accepted' ? 'accepted' : isSeen && n.status === 'sent' ? 'read' : n.status,
+            });
+          }
+
+          for (const req of openRequests) {
+            if (!byCampaign.has(req.campaign_id)) {
+              const isSeen = req.is_read || seenSet.has(req.campaign_id);
+              byCampaign.set(
+                req.campaign_id,
+                mapOpenRequestToNotification(req, ownerId, isSeen)
+              );
+            }
+          }
+
+          mergedList = Array.from(byCampaign.values()).sort(
+            (a, b) =>
+              (new Date(b.created_at || 0).getTime() || 0) -
+              (new Date(a.created_at || 0).getTime() || 0)
           );
-        });
-        if (newestUnread) {
-          triggerCelebrationAlert(newestUnread);
         }
-      }
+
+        onSyncRef.current(mergedList);
+
+        // Dismiss open popup if that campaign was closed by another winner
+        setActiveAlert((prev) => {
+          if (!prev) return null;
+          const stillOpen = mergedList.find(
+            (n) =>
+              n.campaign_id === prev.campaign_id &&
+              n.status !== 'dismissed' &&
+              n.deal_status !== 'closed_other'
+          );
+          return stillOpen ? prev : null;
+        });
+
+        if (notifyUnread) {
+          const newestUnread = mergedList.find((n) => {
+            const key = n.campaign_id || n.id;
+            return (
+              !n.is_read &&
+              n.status === 'sent' &&
+              n.deal_status !== 'closed_other' &&
+              !alertedKeysRef.current.has(key) &&
+              !alertedKeysRef.current.has(n.id)
+            );
+          });
+          if (newestUnread) {
+            triggerCelebrationAlert(newestUnread);
+          }
+        }
       } finally {
         syncInFlightRef.current = false;
       }
     },
-    [ownerId, triggerCelebrationAlert]
+    [ownerId, userRole, triggerCelebrationAlert]
   );
 
   useEffect(() => {
@@ -190,11 +334,11 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
   // Keep Service Worker push context & Web Push subscription synced for closed-app phone alerts
   useEffect(() => {
     if (!ownerId) return;
-    syncServiceWorkerPushContext(ownerId, 'owner').catch(() => {});
+    syncServiceWorkerPushContext(ownerId, userRole).catch(() => {});
     if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-      subscribeOwnerWebPush(ownerId, 'owner').catch(() => {});
+      subscribeOwnerWebPush(ownerId, userRole).catch(() => {});
     }
-  }, [ownerId]);
+  }, [ownerId, userRole]);
 
   useEffect(() => {
     if (!ownerId) return;
@@ -204,24 +348,35 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
 
     // 2. Same-browser BroadcastChannel listener
     const unsubscribeLocal = subscribeLocalDispatchEvents((detail) => {
-      if (detail?.type === 'CAMPAIGN_LAUNCHED' && Array.isArray(detail.notifications)) {
-        const mine = (detail.notifications as DispatchNotification[]).filter(
-          (n) => n.owner_id === ownerId
-        );
+      if (detail?.type === 'CAMPAIGN_LAUNCHED') {
+        const notifications = Array.isArray(detail.notifications)
+          ? (detail.notifications as DispatchNotification[])
+          : [];
+        const mine = notifications.filter((n) => n.owner_id === ownerId);
         if (mine.length > 0) {
           syncFromSource(false);
           triggerCelebrationAlert(mine[0]);
+        } else if (
+          userRole === 'supplier' &&
+          detail.campaign &&
+          (detail.campaign.campaign_type === 'spare_part' ||
+            detail.campaign.campaign_type === 'machine_purchase') &&
+          detail.campaign.contractor_id !== ownerId
+        ) {
+          const synth = mapCampaignRowToNotification(detail.campaign as DispatchCampaign, ownerId);
+          syncFromSource(false);
+          triggerCelebrationAlert(synth);
         }
       } else if (detail?.type === 'NOTIF_UPDATED' || detail?.type === 'DEAL_ACCEPTED' || detail?.type === 'CAMPAIGN_UPDATED') {
         syncFromSource(false);
       }
     });
 
-    // 3. Cross-device Supabase Realtime listeners (dispatch_notifications, notifications, messages)
+    // 3. Cross-device Supabase Realtime listeners (dispatch_notifications, dispatch_campaigns for suppliers, notifications, messages)
     let realtimeChannel: any = null;
     if (isSupabaseConfigured) {
-      realtimeChannel = supabase
-        .channel(`owner_dispatch_all_${ownerId}`)
+      let channel = supabase
+        .channel(`${userRole}_dispatch_all_${ownerId}`)
         .on(
           'postgres_changes',
           {
@@ -310,8 +465,51 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
               triggerCelebrationAlert(parsed);
             }
           }
-        )
-        .subscribe();
+        );
+
+      if (userRole === 'supplier') {
+        channel = channel
+          .on(
+            'postgres_changes',
+            {
+              event: 'INSERT',
+              schema: 'public',
+              table: 'dispatch_campaigns',
+            },
+            (payload: any) => {
+              const row = payload?.new as DispatchCampaign | undefined;
+              if (
+                row &&
+                row.status === 'active' &&
+                (row.campaign_type === 'spare_part' || row.campaign_type === 'machine_purchase') &&
+                row.contractor_id !== ownerId
+              ) {
+                const synth = mapCampaignRowToNotification(row, ownerId);
+                syncFromSource(false);
+                triggerCelebrationAlert(synth);
+                window.dispatchEvent(new CustomEvent('jadijcb_dispatch_campaigns_updated'));
+              }
+            }
+          )
+          .on(
+            'postgres_changes',
+            {
+              event: 'UPDATE',
+              schema: 'public',
+              table: 'dispatch_campaigns',
+            },
+            (payload: any) => {
+              const row = payload?.new as DispatchCampaign | undefined;
+              if (row && (row.status !== 'active' || row.won_owner_id)) {
+                setActiveAlert((prev) => (prev?.campaign_id === row.id ? null : prev));
+                syncFromSource(false);
+                window.dispatchEvent(new CustomEvent('jadijcb_dispatch_campaigns_updated'));
+              }
+            }
+          );
+      }
+
+      realtimeChannel = channel.subscribe();
     }
 
     // 4. Lightweight 90s fallback polling while tab is visible (Realtime handles instant push)
@@ -324,7 +522,7 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
         syncFromSource(true);
-        syncServiceWorkerPushContext(ownerId, 'owner').catch(() => {});
+        syncServiceWorkerPushContext(ownerId, userRole).catch(() => {});
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);
@@ -337,17 +535,22 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
         supabase.removeChannel(realtimeChannel);
       }
     };
-  }, [ownerId, syncFromSource, triggerCelebrationAlert]);
+  }, [ownerId, userRole, syncFromSource, triggerCelebrationAlert]);
 
   const handleDismiss = async () => {
     if (!activeAlert) return;
     const target = activeAlert;
     setActiveAlert(null);
-    await updateDispatchNotificationStatus(
-      target.id,
-      { is_read: true, status: 'read' },
-      target.campaign_id
-    );
+    if (userRole === 'supplier') {
+      markSupplierCampaignSeen(ownerId, target.campaign_id);
+    }
+    if (!target.id.startsWith('open_')) {
+      await updateDispatchNotificationStatus(
+        target.id,
+        { is_read: true, status: 'read' },
+        target.campaign_id
+      );
+    }
     syncFromSource(false);
   };
 
@@ -357,6 +560,7 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
     setActiveAlert(null);
 
     if (userRole === 'supplier') {
+      markSupplierCampaignSeen(ownerId, alertTarget.campaign_id);
       const supplierName =
         profile?.company_name?.trim() ||
         profile?.full_name?.trim() ||
@@ -366,7 +570,7 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
         supplierName,
         request: {
           campaign_id: alertTarget.campaign_id,
-          notification_id: alertTarget.id,
+          notification_id: alertTarget.id.startsWith('open_') ? undefined : alertTarget.id,
           contractor_id: alertTarget.contractor_id,
           company_name: alertTarget.company_name,
           campaign_type: alertTarget.campaign_type,
@@ -441,11 +645,16 @@ export const OpportunityAlertListener: React.FC<OpportunityAlertListenerProps> =
     const target = activeAlert;
     setActiveAlert(null);
     setPreviewRequest(target);
-    await updateDispatchNotificationStatus(
-      target.id,
-      { is_read: true, status: 'read' },
-      target.campaign_id
-    );
+    if (userRole === 'supplier') {
+      markSupplierCampaignSeen(ownerId, target.campaign_id);
+    }
+    if (!target.id.startsWith('open_')) {
+      await updateDispatchNotificationStatus(
+        target.id,
+        { is_read: true, status: 'read' },
+        target.campaign_id
+      );
+    }
     syncFromSource(false);
   };
 

@@ -3,6 +3,42 @@
 -- Migration: 20261120010000_owner_supplier_orders_and_terms.sql
 -- ============================================================================
 
+-- 0. Ensure supplier_scope column & repair any existing supplier profile roles
+ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS supplier_scope text DEFAULT 'local';
+
+DO $$ BEGIN
+  ALTER TYPE public.user_role ADD VALUE IF NOT EXISTS 'supplier';
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  UPDATE public.profiles p
+  SET role = 'supplier'
+  FROM auth.users u
+  WHERE u.id = p.id
+    AND (
+      u.raw_user_meta_data->>'role' IN ('supplier', 'dealer')
+      OR p.supplier_type IS NOT NULL
+    )
+    AND p.role::text NOT IN ('supplier', 'dealer', 'admin');
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.rls_is_supplier()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = auth.uid()
+      AND (role::text IN ('supplier', 'dealer') OR supplier_type IS NOT NULL)
+  );
+$$;
+
 -- 1. Extend public.dispatch_campaigns with fleet-machine link, model, customs, and closed supplier order fields
 ALTER TABLE public.dispatch_campaigns
   ADD COLUMN IF NOT EXISTS desired_model text DEFAULT '',
@@ -47,6 +83,16 @@ CREATE INDEX IF NOT EXISTS idx_notifications_user_type
 
 -- 4. Allow both Owner (requester) and winning Supplier to close/update supply campaigns safely
 DO $$ BEGIN
+  DROP POLICY IF EXISTS "Suppliers can view open owner supply campaigns" ON public.dispatch_campaigns;
+  CREATE POLICY "Suppliers can view open owner supply campaigns"
+    ON public.dispatch_campaigns FOR SELECT
+    USING (
+      (status = 'active' AND campaign_type IN ('spare_part', 'machine_purchase') AND public.rls_is_supplier())
+      OR contractor_id = auth.uid()
+      OR won_owner_id = auth.uid()
+      OR public.rls_is_admin()
+    );
+
   DROP POLICY IF EXISTS "Supply campaign participants can close deal" ON public.dispatch_campaigns;
   CREATE POLICY "Supply campaign participants can close deal"
     ON public.dispatch_campaigns FOR UPDATE
@@ -91,5 +137,24 @@ DO $$ BEGIN
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
--- 6. Reload PostgREST schema cache
+-- 6. Ensure Realtime is enabled for campaigns & notifications
+DO $$ BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.dispatch_campaigns;
+EXCEPTION WHEN duplicate_object THEN NULL;
+WHEN OTHERS THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.dispatch_notifications;
+EXCEPTION WHEN duplicate_object THEN NULL;
+WHEN OTHERS THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.notifications;
+EXCEPTION WHEN duplicate_object THEN NULL;
+WHEN OTHERS THEN NULL;
+END $$;
+
+-- 7. Reload PostgREST schema cache
 NOTIFY pgrst, 'reload schema';

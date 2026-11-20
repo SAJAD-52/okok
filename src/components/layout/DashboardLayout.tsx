@@ -61,6 +61,7 @@ import { serverApi, ServerNotification } from '../../lib/serverApi';
 import {
   ensureDispatchConversationLinked,
   fetchOpenOwnerRequestsForSupplier,
+  markSupplierCampaignSeen,
   startSupplierChatWithOwner,
   updateDispatchNotificationStatus,
 } from '../../lib/dispatchService';
@@ -1834,8 +1835,19 @@ export const DashboardLayout: React.FC = () => {
                                         <button
                                           type="button"
                                           onClick={() => {
+                                            const ownerTargetId = profile?.id || user?.id || '';
+                                            if (ownerTargetId) {
+                                              markSupplierCampaignSeen(ownerTargetId, opp.campaign_id);
+                                            }
+                                            setOpportunityNotifications((prev) =>
+                                              prev.map((item) =>
+                                                item.id === opp.id
+                                                  ? { ...item, is_read: true, status: item.status === 'sent' ? 'read' : item.status }
+                                                  : item
+                                              )
+                                            );
                                             setIsNotificationsOpen(false);
-                                            navigate('/supplier/requests');
+                                            navigate(`/supplier/requests?campaign=${encodeURIComponent(opp.campaign_id)}`);
                                           }}
                                           className="px-2.5 py-1.5 rounded-lg bg-white border border-steel-300 text-ink font-black text-[11px] hover:bg-steel-50 transition-colors cursor-pointer"
                                         >
@@ -1847,6 +1859,9 @@ export const DashboardLayout: React.FC = () => {
                                         onClick={async () => {
                                           const ownerTargetId = profile?.id || user?.id || '';
                                           if (isSpareOpp || isPurchaseOpp) {
+                                            if (ownerTargetId) {
+                                              markSupplierCampaignSeen(ownerTargetId, opp.campaign_id);
+                                            }
                                             const started = await startSupplierChatWithOwner({
                                               supplierId: ownerTargetId,
                                               supplierName:
@@ -1855,7 +1870,7 @@ export const DashboardLayout: React.FC = () => {
                                                 'مورد معتمد',
                                               request: {
                                                 campaign_id: opp.campaign_id,
-                                                notification_id: opp.id,
+                                                notification_id: opp.id.startsWith('open_') ? undefined : opp.id,
                                                 contractor_id: opp.contractor_id,
                                                 company_name: opp.company_name || 'مالك آليات',
                                                 campaign_type: opp.campaign_type,

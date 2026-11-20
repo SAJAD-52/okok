@@ -381,6 +381,22 @@ export const SupplierSearchCampaignModal: React.FC<SupplierSearchCampaignModalPr
           .filter(Boolean)
           .join(' · ');
 
+        const finalTargets =
+          matchedTargets.length > 0
+            ? matchedTargets
+            : await findMatchingMachinerySuppliersForCampaign({
+                originLat: originCoords.lat,
+                originLng: originCoords.lng,
+                machineCategory,
+                machineName: `${cleanTitle} ${desiredModel}`.trim(),
+                desiredCondition,
+                importAllowed,
+                preferredOrigin: preferredOrigin || undefined,
+                radiusKm: isNationwide ? null : radiusKm,
+                isNationwide,
+                excludeOwnerId: ownerId,
+              });
+
         const res = await launchDispatchCampaign({
           contractorId: ownerId,
           companyName,
@@ -401,14 +417,15 @@ export const SupplierSearchCampaignModal: React.FC<SupplierSearchCampaignModalPr
           radiusKm: isNationwide ? null : radiusKm,
           isNationwide,
           notes: combinedNotes,
-          targets: matchedTargets,
+          targets: finalTargets,
         });
 
+        const notifiedCount = res.notifications.length || finalTargets.length;
         toast.success(
-          matchedTargets.length > 0
+          notifiedCount > 0
             ? lang === 'fr'
-              ? `Campagne lancée ! ${matchedTargets.length} fournisseur(s) notifié(s).`
-              : `تم إطلاق حملة البحث بنجاح وإشعار ${matchedTargets.length} مورد/مستورد!`
+              ? `Campagne lancée ! ${notifiedCount} fournisseur(s) notifié(s).`
+              : `تم إطلاق حملة البحث بنجاح وإشعار ${notifiedCount} مورد/مستورد!`
             : lang === 'fr'
             ? 'Campagne publiée dans la bourse des fournisseurs !'
             : 'تم نشر حملة البحث في بورصة الموردين بنجاح!'
@@ -452,6 +469,19 @@ export const SupplierSearchCampaignModal: React.FC<SupplierSearchCampaignModalPr
           .filter(Boolean)
           .join(' · ');
 
+        const finalTargets =
+          matchedTargets.length > 0
+            ? matchedTargets
+            : await findMatchingSparePartSuppliersForCampaign({
+                originLat: originCoords.lat,
+                originLng: originCoords.lng,
+                partCategory,
+                partReference: partReference.trim() || resolvedPartTitle,
+                radiusKm: isNationwide ? null : radiusKm,
+                isNationwide,
+                excludeOwnerId: ownerId,
+              });
+
         const res = await launchDispatchCampaign({
           contractorId: ownerId,
           companyName,
@@ -478,14 +508,15 @@ export const SupplierSearchCampaignModal: React.FC<SupplierSearchCampaignModalPr
           radiusKm: isNationwide ? null : radiusKm,
           isNationwide,
           notes: combinedNotes,
-          targets: matchedTargets,
+          targets: finalTargets,
         });
 
+        const notifiedCount = res.notifications.length || finalTargets.length;
         toast.success(
-          matchedTargets.length > 0
+          notifiedCount > 0
             ? lang === 'fr'
-              ? `Campagne pièce lancée ! ${matchedTargets.length} fournisseur(s) notifié(s).`
-              : `تم إطلاق طلب قطعة الغيار وإشعار ${matchedTargets.length} مورد!`
+              ? `Campagne pièce lancée ! ${notifiedCount} fournisseur(s) notifié(s).`
+              : `تم إطلاق طلب قطعة الغيار وإشعار ${notifiedCount} مورد!`
             : lang === 'fr'
             ? 'Campagne pièce publiée dans la bourse des fournisseurs !'
             : 'تم نشر طلب قطعة الغيار في بورصة الموردين بنجاح!'

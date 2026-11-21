@@ -3,9 +3,9 @@
 -- Migration: 20261120010000_owner_supplier_orders_and_terms.sql
 -- ============================================================================
 
--- 0. Ensure supplier_scope column & repair any existing supplier profile roles
+-- 0. Ensure supplier_scope column & repair ONLY genuine supplier accounts from auth metadata
 ALTER TABLE public.profiles
-  ADD COLUMN IF NOT EXISTS supplier_scope text DEFAULT 'local';
+  ADD COLUMN IF NOT EXISTS supplier_scope text DEFAULT NULL;
 
 DO $$ BEGIN
   ALTER TYPE public.user_role ADD VALUE IF NOT EXISTS 'supplier';
@@ -17,11 +17,8 @@ DO $$ BEGIN
   SET role = 'supplier'
   FROM auth.users u
   WHERE u.id = p.id
-    AND (
-      u.raw_user_meta_data->>'role' IN ('supplier', 'dealer')
-      OR p.supplier_type IS NOT NULL
-    )
-    AND p.role::text NOT IN ('supplier', 'dealer', 'admin');
+    AND u.raw_user_meta_data->>'role' IN ('supplier', 'dealer')
+    AND p.role::text NOT IN ('supplier', 'dealer', 'admin', 'owner', 'driver');
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
@@ -35,7 +32,7 @@ AS $$
   SELECT EXISTS (
     SELECT 1 FROM public.profiles
     WHERE id = auth.uid()
-      AND (role::text IN ('supplier', 'dealer') OR supplier_type IS NOT NULL)
+      AND role::text IN ('supplier', 'dealer')
   );
 $$;
 

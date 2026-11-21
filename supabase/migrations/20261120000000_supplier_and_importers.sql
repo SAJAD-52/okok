@@ -9,9 +9,9 @@ DO $$ BEGIN
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
--- 2. Add supplier & international importer columns to public.profiles
+-- 2. Add supplier & international importer columns to public.profiles (NULL by default for non-suppliers)
 ALTER TABLE public.profiles
-  ADD COLUMN IF NOT EXISTS supplier_type text DEFAULT 'all',
+  ADD COLUMN IF NOT EXISTS supplier_type text DEFAULT NULL,
   ADD COLUMN IF NOT EXISTS import_countries text[] DEFAULT '{}'::text[],
   ADD COLUMN IF NOT EXISTS import_lead_time text DEFAULT '',
   ADD COLUMN IF NOT EXISTS supplier_specialties text[] DEFAULT '{}'::text[],
@@ -66,7 +66,10 @@ BEGIN
     v_client_segment := NEW.raw_user_meta_data->>'client_segment';
     v_client_note := COALESCE(NEW.raw_user_meta_data->>'client_activity_note', '');
     v_driver_exp := NEW.raw_user_meta_data->>'driver_experience_years';
-    v_supplier_type := COALESCE(NEW.raw_user_meta_data->>'supplier_type', 'all');
+    v_supplier_type := CASE
+      WHEN v_role_str IN ('supplier', 'dealer') THEN COALESCE(NEW.raw_user_meta_data->>'supplier_type', 'all')
+      ELSE NULL
+    END;
     v_import_lead_time := COALESCE(NEW.raw_user_meta_data->>'import_lead_time', '');
     v_delivers_nationwide := COALESCE((NEW.raw_user_meta_data->>'delivers_nationwide')::boolean, true);
 

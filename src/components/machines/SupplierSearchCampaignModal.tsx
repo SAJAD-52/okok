@@ -118,6 +118,7 @@ export const SupplierSearchCampaignModal: React.FC<SupplierSearchCampaignModalPr
   const [matchedTargets, setMatchedTargets] = useState<MatchedOwnerTarget[]>([]);
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [isLaunching, setIsLaunching] = useState<boolean>(false);
+  const scanSeqRef = useRef<number>(0);
 
   // Sync initial prop & reset when opening
   useEffect(() => {
@@ -141,6 +142,8 @@ export const SupplierSearchCampaignModal: React.FC<SupplierSearchCampaignModalPr
     setPartCondition('any');
     setIsNationwide(true);
     setNotes('');
+    setIsScanning(false);
+    setIsLaunching(false);
 
     if (profile?.city) {
       const matchedCity = MOROCCAN_CITIES.find(
@@ -179,7 +182,7 @@ export const SupplierSearchCampaignModal: React.FC<SupplierSearchCampaignModalPr
         try {
           const { data } = await supabase
             .from('machines')
-            .select('*')
+            .select('id,owner_id,title_ar,title_fr,brand,model,year,category,city,lat,lng,images')
             .eq('owner_id', ownerId)
             .neq('category', 'spare-parts')
             .order('created_at', { ascending: false });
@@ -232,48 +235,66 @@ export const SupplierSearchCampaignModal: React.FC<SupplierSearchCampaignModalPr
   useEffect(() => {
     if (!isOpen || !needType) {
       setMatchedTargets([]);
+      setIsScanning(false);
       return;
     }
 
+    const seq = ++scanSeqRef.current;
     let cancelled = false;
     const timer = setTimeout(async () => {
+      if (cancelled || scanSeqRef.current !== seq) return;
       setIsScanning(true);
       try {
-        if (needType === 'machine_purchase') {
-          const catObj = MACHINERY_CATS.find((c) => c.id === machineCategory);
-          const effectiveName =
-            machineName.trim() || (lang === 'fr' ? catObj?.name_fr : catObj?.name_ar) || 'آلية بناء';
-          const found = await findMatchingMachinerySuppliersForCampaign({
-            originLat: originCoords.lat,
-            originLng: originCoords.lng,
-            machineCategory,
-            machineName: `${effectiveName} ${desiredModel}`.trim(),
-            desiredCondition,
-            importAllowed,
-            preferredOrigin: preferredOrigin || undefined,
-            radiusKm: isNationwide ? null : radiusKm,
-            isNationwide,
-            excludeOwnerId: ownerId,
-          });
-          if (!cancelled) setMatchedTargets(found);
-        } else {
-          const found = await findMatchingSparePartSuppliersForCampaign({
-            originLat: originCoords.lat,
-            originLng: originCoords.lng,
-            partReference: partReference.trim() || partName.trim(),
-            partCategory,
-            machineBrand: selectedFleetMachine?.brand || manualMachineLabel.trim(),
-            machineModel: selectedFleetMachine?.model || '',
-            radiusKm: isNationwide ? null : radiusKm,
-            isNationwide,
-            excludeOwnerId: ownerId,
-          });
-          if (!cancelled) setMatchedTargets(found);
+        const scanPromise =
+          needType === 'machine_purchase'
+            ? (() => {
+                const catObj = MACHINERY_CATS.find((c) => c.id === machineCategory);
+                const effectiveName =
+                  machineName.trim() ||
+                  (lang === 'fr' ? catObj?.name_fr : catObj?.name_ar) ||
+                  'آلية بناء';
+                return findMatchingMachinerySuppliersForCampaign({
+                  originLat: originCoords.lat,
+                  originLng: originCoords.lng,
+                  machineCategory,
+                  machineName: `${effectiveName} ${desiredModel}`.trim(),
+                  desiredCondition,
+                  importAllowed,
+                  preferredOrigin: preferredOrigin || undefined,
+                  radiusKm: isNationwide ? null : radiusKm,
+                  isNationwide,
+                  excludeOwnerId: ownerId,
+                });
+              })()
+            : findMatchingSparePartSuppliersForCampaign({
+                originLat: originCoords.lat,
+                originLng: originCoords.lng,
+                partReference: partReference.trim() || partName.trim(),
+                partCategory,
+                machineBrand: selectedFleetMachine?.brand || manualMachineLabel.trim(),
+                machineModel: selectedFleetMachine?.model || '',
+                radiusKm: isNationwide ? null : radiusKm,
+                isNationwide,
+                excludeOwnerId: ownerId,
+              });
+
+        const found = await Promise.race([
+          scanPromise,
+          new Promise<MatchedOwnerTarget[]>((resolve) =>
+            setTimeout(() => resolve([]), 6000)
+          ),
+        ]);
+        if (!cancelled && scanSeqRef.current === seq) {
+          setMatchedTargets(found);
         }
       } catch {
-        if (!cancelled) setMatchedTargets([]);
+        if (!cancelled && scanSeqRef.current === seq) {
+          setMatchedTargets([]);
+        }
       } finally {
-        if (!cancelled) setIsScanning(false);
+        if (scanSeqRef.current === seq) {
+          setIsScanning(false);
+        }
       }
     }, 250);
 

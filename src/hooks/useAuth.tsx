@@ -255,19 +255,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // ignore sessionStorage / network errors
       }
 
+      const sameUserCached = localCached?.id === userId ? localCached : {};
       const dbRole = (data as any)?.role;
-      const metaRole = meta?.role || localCached?.role;
+      const metaRole = meta?.role || sameUserCached?.role;
       const resolvedRole: UserRole =
         dbRole === 'admin'
           ? 'admin'
-          : metaRole === 'driver' || dbRole === 'driver'
+          : dbRole === 'owner' || dbRole === 'contractor' || dbRole === 'driver'
+          ? dbRole
+          : metaRole === 'driver'
           ? 'driver'
-          : metaRole === 'supplier' || dbRole === 'supplier'
+          : dbRole === 'supplier' || dbRole === 'dealer' || meta?.role === 'supplier' || meta?.role === 'dealer'
           ? 'supplier'
           : dbRole || metaRole || 'client';
 
-      // Auto-sync supplier role/details to profiles DB so suppliers always receive live Owner search campaigns
-      if (resolvedRole === 'supplier' && dbRole !== 'supplier' && dbRole !== 'dealer') {
+      // Auto-sync supplier role/details to profiles DB ONLY if auth metadata explicitly specifies supplier
+      if (
+        (meta?.role === 'supplier' || meta?.role === 'dealer') &&
+        dbRole !== 'supplier' &&
+        dbRole !== 'dealer' &&
+        dbRole !== 'admin' &&
+        dbRole !== 'owner' &&
+        dbRole !== 'driver'
+      ) {
         try {
           supabase
             .from('profiles')

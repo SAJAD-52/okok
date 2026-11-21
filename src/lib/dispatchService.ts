@@ -74,6 +74,27 @@ function makeUuid(): string {
   });
 }
 
+async function withTimeout<T>(promise: PromiseLike<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      Promise.resolve(promise),
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(fallback), ms);
+      }),
+    ]);
+  } catch {
+    return fallback;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+const LIGHTWEIGHT_MACHINE_COLS =
+  'id,owner_id,title_ar,title_fr,description_ar,description_fr,category,brand,model,year,listing_mode,condition,city,lat,lng,specs,is_published';
+const LIGHTWEIGHT_SUPPLIER_PROFILE_COLS =
+  'id,role,full_name,company_name,city,supplier_type,supplier_scope,import_countries,import_lead_time,supplier_specialties,delivers_nationwide';
+
 export interface MatchedOwnerTarget {
   owner_id: string;
   machine_id: string;
@@ -236,10 +257,15 @@ export async function findMatchingSparePartSuppliersForCampaign(params: {
 
   if (isSupabaseConfigured) {
     try {
-      const { data, error } = await supabase
-        .from('machines')
-        .select('*')
-        .neq('is_published', false);
+      const { data, error } = await withTimeout(
+        supabase
+          .from('machines')
+          .select(LIGHTWEIGHT_MACHINE_COLS)
+          .eq('category', 'spare-parts')
+          .neq('is_published', false),
+        5000,
+        { data: null, error: null } as any
+      );
 
       if (!error && data) {
         rawMachines = data;
@@ -323,24 +349,28 @@ export async function findMatchingSparePartSuppliersForCampaign(params: {
   if (isSupabaseConfigured) {
     try {
       let supplierProfiles: any[] = [];
-      const { data: qData, error: qErr } = await supabase
-        .from('profiles')
-        .select('*')
-        .or('role.in.(supplier,dealer),supplier_type.not.is.null');
+      const { data: qData, error: qErr } = await withTimeout(
+        supabase
+          .from('profiles')
+          .select(LIGHTWEIGHT_SUPPLIER_PROFILE_COLS)
+          .eq('role', 'supplier'),
+        5000,
+        { data: null, error: { message: 'timeout' } } as any
+      );
 
       if (!qErr && Array.isArray(qData)) {
         supplierProfiles = qData;
       } else {
-        const { data: fallbackData } = await supabase
-          .from('profiles')
-          .select('*')
-          .limit(400);
+        const { data: fallbackData } = await withTimeout(
+          supabase
+            .from('profiles')
+            .select(LIGHTWEIGHT_SUPPLIER_PROFILE_COLS)
+            .limit(200),
+          5000,
+          { data: [] } as any
+        );
         supplierProfiles = (fallbackData || []).filter(
-          (sp: any) =>
-            sp?.role === 'supplier' ||
-            sp?.role === 'dealer' ||
-            Boolean(sp?.supplier_type) ||
-            Boolean(sp?.supplier_scope)
+          (sp: any) => sp?.role === 'supplier' || sp?.role === 'dealer'
         );
       }
 
@@ -420,23 +450,38 @@ export async function findMatchingMachinerySuppliersForCampaign(params: {
   if (isSupabaseConfigured) {
     try {
       const [{ data: mData }, pRes] = await Promise.all([
-        supabase.from('machines').select('*').neq('is_published', false),
-        supabase
-          .from('profiles')
-          .select('*')
-          .or('role.in.(supplier,dealer),supplier_type.not.is.null'),
+        withTimeout(
+          supabase
+            .from('machines')
+            .select(LIGHTWEIGHT_MACHINE_COLS)
+            .eq('listing_mode', 'sale')
+            .neq('is_published', false),
+          5000,
+          { data: null } as any
+        ),
+        withTimeout(
+          supabase
+            .from('profiles')
+            .select(LIGHTWEIGHT_SUPPLIER_PROFILE_COLS)
+            .eq('role', 'supplier'),
+          5000,
+          { data: null, error: { message: 'timeout' } } as any
+        ),
       ]);
       if (mData) rawMachines = mData;
       if (!pRes.error && pRes.data) {
         supplierProfiles = pRes.data;
       } else {
-        const { data: fallbackP } = await supabase.from('profiles').select('*').limit(400);
+        const { data: fallbackP } = await withTimeout(
+          supabase
+            .from('profiles')
+            .select(LIGHTWEIGHT_SUPPLIER_PROFILE_COLS)
+            .limit(200),
+          5000,
+          { data: [] } as any
+        );
         supplierProfiles = (fallbackP || []).filter(
-          (sp: any) =>
-            sp?.role === 'supplier' ||
-            sp?.role === 'dealer' ||
-            Boolean(sp?.supplier_type) ||
-            Boolean(sp?.supplier_scope)
+          (sp: any) => sp?.role === 'supplier' || sp?.role === 'dealer'
         );
       }
     } catch (err) {
@@ -919,11 +964,15 @@ export async function launchDispatchCampaign(params: {
   const isPurchase = campaignType === 'machine_purchase';
 
   let authUid: string | null = isUuid(params.contractorId) ? params.contractorId : null;
-  if (isSupabaseConfigured) {
+  if (!authUid && isSupabaseConfigured) {
     try {
-      const { data: sessionData } = await supabase.auth.getUser();
-      if (isUuid(sessionData?.user?.id)) {
-        authUid = sessionData.user.id;
+      const sessionRes = await withTimeout(
+        supabase.auth.getSession(),
+        2500,
+        { data: { session: null } } as any
+      );
+      if (isUuid(sessionRes?.data?.session?.user?.id)) {
+        authUid = sessionRes.data.session.user.id;
       }
     } catch {
       // ignore
@@ -939,30 +988,34 @@ export async function launchDispatchCampaign(params: {
   let effectiveTargets: MatchedOwnerTarget[] = Array.isArray(params.targets) ? [...params.targets] : [];
   if ((isSpare || isPurchase) && effectiveTargets.length === 0) {
     try {
-      effectiveTargets = isPurchase
-        ? await findMatchingMachinerySuppliersForCampaign({
-            originLat: params.siteLat,
-            originLng: params.siteLng,
-            machineCategory: params.machineCategory,
-            machineName: params.machineName,
-            desiredCondition: params.desiredCondition,
-            importAllowed: params.importAllowed,
-            preferredOrigin: params.preferredOrigin,
-            radiusKm: params.radiusKm,
-            isNationwide: params.isNationwide,
-            excludeOwnerId: effectiveContractorId,
-          })
-        : await findMatchingSparePartSuppliersForCampaign({
-            originLat: params.siteLat,
-            originLng: params.siteLng,
-            partReference: params.partReference || params.machineName,
-            partCategory: params.partCategory,
-            machineBrand: params.fleetMachineBrand,
-            machineModel: params.fleetMachineModel || params.desiredModel,
-            radiusKm: params.radiusKm,
-            isNationwide: params.isNationwide,
-            excludeOwnerId: effectiveContractorId,
-          });
+      effectiveTargets = await withTimeout(
+        isPurchase
+          ? findMatchingMachinerySuppliersForCampaign({
+              originLat: params.siteLat,
+              originLng: params.siteLng,
+              machineCategory: params.machineCategory,
+              machineName: params.machineName,
+              desiredCondition: params.desiredCondition,
+              importAllowed: params.importAllowed,
+              preferredOrigin: params.preferredOrigin,
+              radiusKm: params.radiusKm,
+              isNationwide: params.isNationwide,
+              excludeOwnerId: effectiveContractorId,
+            })
+          : findMatchingSparePartSuppliersForCampaign({
+              originLat: params.siteLat,
+              originLng: params.siteLng,
+              partReference: params.partReference || params.machineName,
+              partCategory: params.partCategory,
+              machineBrand: params.fleetMachineBrand,
+              machineModel: params.fleetMachineModel || params.desiredModel,
+              radiusKm: params.radiusKm,
+              isNationwide: params.isNationwide,
+              excludeOwnerId: effectiveContractorId,
+            }),
+        5500,
+        []
+      );
     } catch {
       // ignore fallback scan failure
     }
@@ -1062,7 +1115,11 @@ export async function launchDispatchCampaign(params: {
       const insertCampPayload = { ...campaignPayload };
       let campErr: any = null;
       for (let attempt = 0; attempt < 24; attempt++) {
-        const res = await supabase.from('dispatch_campaigns').insert(insertCampPayload);
+        const res = await withTimeout(
+          supabase.from('dispatch_campaigns').insert(insertCampPayload),
+          5000,
+          { error: { message: 'timeout' } } as any
+        );
         campErr = res.error;
         if (!campErr) break;
         const missingCol = extractMissingColumnName(campErr.message);
@@ -1116,7 +1173,11 @@ export async function launchDispatchCampaign(params: {
 
           let notifErr: any = null;
           for (let attempt = 0; attempt < 24; attempt++) {
-            const res = await supabase.from('dispatch_notifications').insert(notifRows);
+            const res = await withTimeout(
+              supabase.from('dispatch_notifications').insert(notifRows),
+              5000,
+              { error: { message: 'timeout' } } as any
+            );
             notifErr = res.error;
             if (!notifErr) break;
             const missingCol = extractMissingColumnName(notifErr.message);
@@ -1227,7 +1288,11 @@ export async function launchDispatchCampaign(params: {
         let adaptiveGenericRows: Record<string, any>[] = genericRows;
         let genErr: any = null;
         for (let attempt = 0; attempt < 6; attempt++) {
-          const res = await supabase.from('notifications').insert(adaptiveGenericRows);
+          const res = await withTimeout(
+            supabase.from('notifications').insert(adaptiveGenericRows),
+            4000,
+            { error: { message: 'timeout' } } as any
+          );
           genErr = res.error;
           if (!genErr) break;
           const missingCol = extractMissingColumnName(genErr.message);
@@ -1253,24 +1318,28 @@ export async function launchDispatchCampaign(params: {
     }
   }
 
-  // Channel 3: Guaranteed Supabase Realtime conversations + messages (carries site coords for deal acceptance)
-  if (isSupabaseConfigured && preparedNotifs.length > 0) {
-    const results = await Promise.all(
-      preparedNotifs.map((n) =>
-        sendFallbackDispatchMessage({
-          contractorId: effectiveContractorId,
-          ownerId: n.owner_id,
-          machineId: n.machine_id,
-          notification: n,
-        })
-      )
+  // Channel 3: Conversations fallback (for equipment rental campaigns only; suppliers initiate chat manually via "ابدأ محادثة")
+  if (isSupabaseConfigured && preparedNotifs.length > 0 && !isSpare && !isPurchase) {
+    const results = await withTimeout(
+      Promise.all(
+        preparedNotifs.map((n) =>
+          sendFallbackDispatchMessage({
+            contractorId: effectiveContractorId,
+            ownerId: n.owner_id,
+            machineId: n.machine_id,
+            notification: n,
+          })
+        )
+      ),
+      4500,
+      [] as boolean[]
     );
     chatFallbackSent = results.some(Boolean);
   }
 
-  // Channel 4: Express Server SQLite /api/notifications
+  // Channel 4: Express Server SQLite /api/notifications (non-blocking)
   if (preparedNotifs.length > 0) {
-    await Promise.allSettled(
+    void Promise.allSettled(
       preparedNotifs.map((n) =>
         serverApi.createNotification({
           user_id: n.owner_id,
@@ -1336,7 +1405,7 @@ export async function launchDispatchCampaign(params: {
     );
   }
 
-  // Channel 5: Background OS Web Push VAPID (wakes closed/backgrounded phones in notification shade)
+  // Channel 5: Background OS Web Push VAPID (non-blocking)
   if (preparedNotifs.length > 0) {
     sendWebPushForDispatch({
       ownerIds: Array.from(new Set(preparedNotifs.map((n) => n.owner_id))),
